@@ -15,3 +15,4 @@ Thumbs.db
 output*.json
 temp*.json
 .pipeline/
+.drive-checkpoint/
