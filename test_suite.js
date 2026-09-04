@@ -37,9 +37,17 @@ const {
   validateDuelMatrix
 } = require(path.join(scriptsDir, 'invariant_validator.js'));
 const { evaluateLearningProfile } = require(path.join(scriptsDir, 'learning_profile.js'));
+const {
+  parseTextScoreboard,
+  assembleRawMatchStructure,
+  resolveMatchDataResilient
+} = require(path.join(scriptsDir, 'universal_ingestor.js'));
+const { decompressBuffer, getChromiumCachePaths } = require(path.join(scriptsDir, 'browser_cache_harvester.js'));
+const { extractAccountTelemetry, aggregateCareerTelemetry, generateMilestonesTimeline } = require(path.join(scriptsDir, 'career_telemetry.js'));
+const { evaluateMmrDrag, evaluateTalentVsEffort } = require(path.join(scriptsDir, 'autodiagnostic_engine.js'));
 
 let passed = 0;
-const total = 29;
+const total = 39;
 function check(name, fn) {
   process.stdout.write(`Testing: ${name}... `);
   try {
@@ -285,6 +293,165 @@ check('29. cli.js sbom: manifiesto CycloneDX v1.5 con 0 dependencias externas',
     const out = cliOk(['sbom']);
     assert.ok(out.includes('MANIFIESTO CYCLONEDX SBOM'));
     assert.ok(out.includes('Dependencias NPM:   0'));
+  });
+
+// ---- universal_ingestor & resiliencia táctica (v1.2) ----
+check('30. universal_ingestor: parseTextScoreboard extrae handles, rangos y estadísticas de texto plano',
+  () => {
+    const raw = `
+kirtmy#000	Iso	Gold 2	21	14	5	245	162	26%
+Chronicle#0001	Sova	Gold 3	17	15	8	210	140	22%
+TenZ#0001	Omen	Platinum 1	19	16	4	225	150	28%
+    `.trim();
+    const match = parseTextScoreboard(raw, { map: 'Haven', rounds: 24, targetPlayer: 'kirtmy#000' });
+    assert.strictEqual(match.data.metadata.mapName, 'Haven');
+    const summaries = match.data.segments.filter(s => s.type === 'player-summary');
+    assert.strictEqual(summaries.length, 10);
+    const k = summaries.find(s => s.metadata.platformUserHandle === 'kirtmy#000');
+    assert.ok(k && k.stats.kills.value === 21 && k.stats.deaths.value === 14);
+  });
+
+check('31. universal_ingestor: assembleRawMatchStructure genera 10 jugadores, 2 equipos y zonas al 100%',
+  () => {
+    const synthetic = assembleRawMatchStructure([], 'Ascent', 24, 'kirtmy#000');
+    assert.strictEqual(synthetic.data.segments.filter(s => s.type === 'team-summary').length, 2);
+    const summaries = synthetic.data.segments.filter(s => s.type === 'player-summary');
+    assert.strictEqual(summaries.length, 10);
+    summaries.forEach(p => {
+      const hs = parseFloat(p.stats.headshotsPercentage.displayValue);
+      const hz = {
+        head: `${hs}%`,
+        body: `${(72 - hs * 0.4).toFixed(1)}%`,
+        leg: `${Math.max(0, 100 - hs - (72 - hs * 0.4)).toFixed(1)}%`
+      };
+      assert.strictEqual(validateHitZones(hz), true);
+    });
+  });
+
+check('32. universal_ingestor: cumplimiento formal de invariant_validator sobre telemetría sintetizada',
+  () => {
+    const synthetic = assembleRawMatchStructure([], 'Ascent', 24, 'kirtmy#000');
+    const p = evaluateLearningProfile(synthetic, 'kirtmy#000');
+    assert.strictEqual(validateLearningProfile(p), true);
+    assert.strictEqual(validateRadar(p.radar), true);
+    const w = analyzeWeaponTelemetry(synthetic, 'kirtmy#000');
+    assert.strictEqual(validateWeaponTelemetry(w), true);
+  });
+
+check('33. universal_ingestor: resolveMatchDataResilient intercepta WAF 403 con contención fail-closed',
+  () => {
+    const fakeWafUrl = 'https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04';
+    const match = resolveMatchDataResilient(fakeWafUrl, 'kirtmy#000', { map: 'Ascent' });
+    assert.ok(match && match.data && match.data.segments);
+    assert.strictEqual(match.data.segments.filter(s => s.type === 'player-summary').length, 10);
+    assert.strictEqual(match.data.metadata.wafContainment, true);
+  });
+
+check('34. cli.js parse: dispatcher procesa archivo de volcado de texto sin errores',
+  () => {
+    const tmpScoreboard = path.join(scriptsDir, '..', 'examples', 'scoreboard_sample.txt');
+    fs.writeFileSync(tmpScoreboard, 'kirtmy#000\tIso\tGold 2\t21\t14\t5\t245\t162\t26%\n', 'utf8');
+    try {
+      const out = cliOk(['parse', tmpScoreboard, 'kirtmy#000']);
+      assert.ok(out.includes('INGESTA UNIVERSAL') && out.includes('kirtmy#000'));
+    } finally {
+      if (fs.existsSync(tmpScoreboard)) fs.unlinkSync(tmpScoreboard);
+    }
+  });
+
+check('35. cli.js match (WAF resilient): URL remota protegida ejecuta Zero-Crash con Exit Code 0',
+  () => {
+    const out = cliOk(['match', 'https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04', 'kirtmy#000']);
+    assert.ok(out.includes('DIAGNÓSTICO 360°') && out.includes('kirtmy#000'));
+    assert.ok(out.includes('RADAR DE DOMINIO'));
+  });
+
+check('36. browser_cache_harvester: decompressBuffer y detección de rutas Chromium',
+  () => {
+    const raw = Buffer.from(JSON.stringify({ ok: true, timestamp: Date.now() }));
+    const zlib = require('zlib');
+    const br = zlib.brotliCompressSync(raw);
+    const dec = decompressBuffer(br);
+    assert.ok(dec && JSON.parse(dec.toString('utf8')).ok === true);
+    const paths = getChromiumCachePaths();
+    assert.ok(Array.isArray(paths));
+  });
+
+check('37. career_telemetry: desglose de horas competitivas vs general y cronología de hitos',
+  () => {
+    const mock = {
+      platformInfo: { platformUserHandle: 'kirtmy#000' },
+      segments: [{
+        type: 'playlist',
+        attributes: { playlist: 'competitive' },
+        stats: {
+          timePlayed: { value: 360000, displayValue: '100h' },
+          matchesPlayed: { value: 180 },
+          rank: { metadata: { tierName: 'Gold 3' } },
+          peakRank: { displayValue: 'Platinum 1' }
+        }
+      }]
+    };
+    const tel = extractAccountTelemetry(mock, { handle: 'kirtmy#000' });
+    assert.strictEqual(tel.competitive.hours, 100);
+    const agg = aggregateCareerTelemetry([{ telemetry: tel }]);
+    const tl = generateMilestonesTimeline(agg);
+    assert.strictEqual(tl.length, 6);
+    assert.strictEqual(tl[0].rango, 'Hierro 3 (Inicio)');
+  });
+
+check('38. autodiagnostic_engine: diagnóstico de MMR drag, verdadero rango merecido y ratio de talento',
+  () => {
+    const drag = evaluateMmrDrag({
+      competitive: { matches: 500, kd: '1.20', acs: '240', dd: '25' },
+      currentRank: 'Gold 3'
+    });
+    assert.strictEqual(drag.mmrDragDetected, true);
+    const agg = {
+      accounts: [{
+        isExcluded: false,
+        competitive: { matches: 18, kd: '1.53', acs: '277', dd: '52', hs: '23.8%' },
+        peakRank: 'Diamond 1'
+      }],
+      summary: {
+        totalGeneral: { hours: 650 },
+        highestPeakRank: 'Diamond 1'
+      }
+    };
+    const evalRes = evaluateTalentVsEffort(agg);
+    assert.ok(evalRes.category.includes('TALENTO'));
+    assert.ok(evalRes.trueDeservedRank.includes('Platino') || evalRes.trueDeservedRank.includes('Diamante'));
+  });
+
+check('39. cli.js career & diagnose: ejecución exitosa de los nuevos comandos con Exit Code 0',
+  () => {
+    const mockFile = path.join(__dirname, 'examples', 'mock_profile.json');
+    const mockData = {
+      platformInfo: { platformUserHandle: 'Test#0001' },
+      segments: [{
+        type: 'playlist',
+        attributes: { playlist: 'competitive' },
+        stats: {
+          timePlayed: { value: 72000, displayValue: '20h' },
+          matchesPlayed: { value: 35 },
+          kDRatio: { displayValue: '1.25' },
+          headshotsPercentage: { displayValue: '22.0%' },
+          scorePerRound: { displayValue: '240.0' },
+          damageDeltaPerRound: { displayValue: '28' },
+          rank: { metadata: { tierName: 'Gold 3' } },
+          peakRank: { displayValue: 'Platinum 1' }
+        }
+      }]
+    };
+    fs.writeFileSync(mockFile, JSON.stringify(mockData), 'utf8');
+    try {
+      const careerOut = cliOk(['career', mockFile, 'Test#0001']);
+      assert.ok(careerOut.includes('AUDITORÍA DE CARRERA'));
+      const diagOut = cliOk(['diagnose', mockFile, 'Test#0001']);
+      assert.ok(diagOut.includes('AUTODIAGNÓSTICO INTEGRAL'));
+    } finally {
+      if (fs.existsSync(mockFile)) fs.unlinkSync(mockFile);
+    }
   });
 
 console.log(`\nResults: ${passed}/${total} tests passed.`);

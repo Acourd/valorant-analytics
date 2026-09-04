@@ -75,7 +75,8 @@ function runPreflight(command, args = []) {
   const allowedCommands = [
     'match', 'diagnostic', 'weapons', 'armas', 'duo', 'synergy', 'aim', 'kovaaks',
     'duels', 'matrix', 'profile', 'calibrate', 'mock', 'invariants', 'verify-math',
-    'attest', 'merkle', 'guardian', 'drift', 'consensus', 'synthesize', 'sbom'
+    'attest', 'merkle', 'guardian', 'drift', 'consensus', 'synthesize', 'sbom',
+    'parse', 'ingest', 'harvest', 'cosecha', 'career', 'carrera', 'diagnose', 'autodiagnostico'
   ];
 
   if (command && !allowedCommands.includes(command) && !fs.existsSync(command)) {

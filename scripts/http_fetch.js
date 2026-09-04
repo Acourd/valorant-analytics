@@ -23,9 +23,9 @@ const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 const CHILD_SCRIPT = [
   "const https=require('https');",
   "const {URL}=require('url');",
-  'const url=process.argv[2];',
-  "const ua=process.argv[3]||'';",
-  'const timeout=parseInt(process.argv[4]||\'12000\',10);',
+  'const url=process.argv[1];',
+  "const ua=process.argv[2]||'';",
+  'const timeout=parseInt(process.argv[3]||\'12000\',10);',
   "let u; try{ u=new URL(url); }catch(e){ console.error('URL invalida'); process.exit(2); }",
   "const req=https.get(u,{headers:{'User-Agent':ua,'Accept':'application/json'}},res=>{",
   "  const chunks=[];",

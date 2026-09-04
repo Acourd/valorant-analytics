@@ -1,15 +1,15 @@
-# 🎯 Motor de Telemetría Táctica y Coaching para Valorant (v3.0)
+# 🎯 Motor de Telemetría Táctica y Coaching para Valorant (v4.0)
 
 [![Valorant](https://img.shields.io/badge/Valorant-Telemetr%C3%ADa_Competitiva-FF4655?logo=valorant&logoColor=white)](https://playvalorant.com/)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B_Nativo-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Dependencias](https://img.shields.io/badge/Dependencias-0_paquetes_npm-blue)](package.json)
 [![Licencia: MIT](https://img.shields.io/badge/Licencia-MIT-green.svg)](LICENSE)
 [![Puntuación Auditoría](https://img.shields.io/badge/Auditor%C3%ADa-100%2F100_SOBERANA-brightgreen)](opencode_tester.js)
-[![Suite de Pruebas](https://img.shields.io/badge/Tests-29%2F29_PASS_Exit_0-success)](test_suite.js)
-[![Madurez Asintótica](https://img.shields.io/badge/Madurez_AMR-70.0%2F100_SOBERANA-blue)](test_suite.js)
+[![Suite de Pruebas](https://img.shields.io/badge/Tests-39%2F39_PASS_Exit_0-success)](test_suite.js)
+[![Madurez Asintótica](https://img.shields.io/badge/Madurez_AMR-75.0%2F100_SOBERANA-blue)](test_suite.js)
 [![Idioma](https://img.shields.io/badge/Idioma-English_%7C_Espa%C3%B1ol-orange)](README.md)
 
-> **Motor de telemetría competitiva de alta precisión, radar autodiagnóstico de 5 pilares, atestaciones criptográficas DSSE in-toto, árbol de eventos Merkle y generador adaptativo de rutinas de Kovaaks de 15 minutos. Cero dependencias externas.**
+> **Motor de telemetría competitiva de alta precisión, radar autodiagnóstico de 5 pilares, cosechador de caché de navegadores (anti-WAF Cloudflare), auditor de horas de carrera y tiempo en partida, atestaciones criptográficas DSSE in-toto, árbol de eventos Merkle y generador adaptativo de rutinas de Kovaaks de 15 minutos. Cero dependencias externas.**
 
 Leer en otros idiomas: **[English (README.md)](README.md)**.
 
@@ -28,6 +28,9 @@ La mayoría de páginas de estadísticas solo muestran números crudos: K/D, por
 6. **Radar de Fatiga y Tilt (Session Guardian):** Monitorea la caída del ADR y primeras muertes sin tradeo para emitir pausas obligatorias antes de rachas de derrotas.
 7. **Consenso Bizantino Multi-Lente:** Concilia perspectivas de Duelista, Centinela y Anchor mediante quórum tolerante a fallos bizantinos (BFT).
 8. **Privacidad y Cero Dependencia de la Nube:** Ejecución 100% local sin servidores intermedios ni librerías npm pesadas. Permite calibrar perfiles privados de forma instantánea sin conexión (`cli.js calibrate`).
+9. **Cosechador de Caché de Navegadores Chromium (`cli.js harvest`):** Escanea automáticamente la caché local de Vivaldi, Brave, Chrome, Edge y Opera descompimiendo Brotli y Gzip para eludir el 403 de Cloudflare Turnstile de Tracker.gg y OP.GG.
+10. **Auditor de Horas de Carrera y Tiempo en Partida (`cli.js career`):** Reconcilia el tiempo de juego efectivo en partida frente a la inflación de puntos de cuenta (AP), desglosando competitivo vs casual y mapeando hitos por rango.
+11. **Motor de Autodiagnóstico y Detección de MMR Drag (`cli.js diagnose`):** Deriva el verdadero Rango Merecido, detecta anclaje de certeza algorítmica en cuentas antiguas y clasifica la tasa de aprendizaje (Talento vs Esfuerzo) para perfiles sin antecedentes en FPS.
 
 ---
 

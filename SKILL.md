@@ -50,6 +50,15 @@ node cli.js profile "Handle#Tag"
 
 # 7. Zero-Cloud Instant Offline Calibration Mode:
 node cli.js calibrate [player_handle] [target_rank] [role]
+
+# 8. Cosecha Determinista de Caché Local (Anti-WAF Cloudflare 403):
+node cli.js harvest [player_handle]
+
+# 9. Auditoría de Carrera y Horas Exactas en Partida:
+node cli.js career <profile.json|handle>
+
+# 10. Autodiagnóstico Integral de Rango Real y Talento vs Esfuerzo:
+node cli.js diagnose <profile.json|handle>
 ```
 
 ---

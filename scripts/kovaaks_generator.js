@@ -34,6 +34,7 @@ function generateKovaaksRoutine(matchData, targetHandle) {
   if (hsPct < 30 && losesOpenings) {
     playlist.push({
       scenario: 'Valorant Microshot Speed / 1w4ts reload',
+      aimLab: 'Sixshot (Aim Lab)',
       duration: '5 mins (5 sets)',
       category: 'Dynamic Clicking & Opening Duel Speed',
       instruction: 'Estás perdiendo duelos de apertura (FD>FK): prioriza la transición entre objetivos a la altura de la cabeza y el 1-tap confirmado antes de desplazarte.'
@@ -41,6 +42,7 @@ function generateKovaaksRoutine(matchData, targetHandle) {
   } else if (hsPct < 30) {
     playlist.push({
       scenario: 'Pasu Small Reload / 1wall6targets extra small',
+      aimLab: 'Microshot (Aim Lab)',
       duration: '5 mins (5 sets)',
       category: 'Dynamic Clicking & Micro-correction',
       instruction: 'Enfócate en mover el codo suavemente para el desplazamiento inicial y frena con los dedos. Cero disparos precipitados.'
@@ -48,6 +50,7 @@ function generateKovaaksRoutine(matchData, targetHandle) {
   } else {
     playlist.push({
       scenario: 'Valorant Microshot Speed / 1w4ts reload',
+      aimLab: 'Sixshot (Aim Lab)',
       duration: '5 mins (5 sets)',
       category: 'Static Speed & Crosshair Snapping',
       instruction: 'Acelera la transición entre objetivos estáticos a la altura de la cabeza. Confirma el 1-tap antes de mover la mira.'
@@ -58,6 +61,7 @@ function generateKovaaksRoutine(matchData, targetHandle) {
   if (isVerticalMap) {
     playlist.push({
       scenario: 'Vertical Smoothness Training / Popcorn Small',
+      aimLab: 'Smoothsphere (Aim Lab)',
       duration: '5 mins (5 sets)',
       category: 'Vertical Control & Forearm Gliding',
       instruction: `Ajuste para ${mapName}: alivia la presión del antebrazo sobre la alfombrilla para permitir micro-ajustes verticales hacia arriba y abajo sin atascos.`
@@ -65,6 +69,7 @@ function generateKovaaksRoutine(matchData, targetHandle) {
   } else {
     playlist.push({
       scenario: 'Close Fast Strafes Easy / Thin Aiming Long',
+      aimLab: 'Strafetrack (Aim Lab)',
       duration: '5 mins (5 sets)',
       category: 'Smooth Horizontal Tracking & Counter-Strafe Reading',
       instruction: 'Sigue objetivos en movimiento horizontal manteniendo el pulso constante sin temblor en 1600 DPI.'
@@ -74,6 +79,7 @@ function generateKovaaksRoutine(matchData, targetHandle) {
   // Phase 3: High-Reactivity Target Switching & Iso Entry Flow (5 mins)
   playlist.push({
     scenario: 'KinTargetSwitch / PatTargetSwitch 360',
+    aimLab: 'Gridshot (Aim Lab)',
     duration: '5 mins (5 sets)',
     category: 'Target Switching & Multi-Kill Flow',
     instruction: 'Simula los dobles contactos de Iso tras abrir con escudo. Elimina el primer objetivo y transfórmalo de inmediato al segundo con un barrido limpio.'
@@ -85,6 +91,7 @@ function generateKovaaksRoutine(matchData, targetHandle) {
     hsPct: `${hsPct}%`,
     firstDuels: { firstKills: fk, firstDeaths: fd, entryRating: Math.round((fk / Math.max(1, fk + fd)) * 100) },
     sensitivityRecommendation: hsPct >= 35 ? 'Mantener 0.110 (176 eDPI) para máxima precisión de primer disparo.' : 'Probar 0.114 - 0.115 (182-184 eDPI) si notas que el brazo se fatiga en Kovaaks.',
+    platforms: ['Kovaaks', 'Aim Lab'],
     routine: playlist
   };
 }
@@ -107,12 +114,12 @@ if (require.main === module) {
   const handle = args[1];
   const res = generateKovaaksRoutine(matchData, handle);
 
-  console.log(`\n=== ADAPTIVE 15-MIN KOVAAKS AIM ROUTINE: ${res.player} ===`);
+  console.log(`\n=== ADAPTIVE 15-MIN KOVAAKS AIM ROUTINE (AIM LAB): ${res.player} ===`);
   console.log(`Map Reference: ${res.map} | Match HS%: ${res.hsPct}`);
   console.log(`Hardware/Sens Advice: ${res.sensitivityRecommendation}`);
   console.log(`\n--- 15-MINUTE WORKOUT PLAN ---`);
   res.routine.forEach((r, idx) => {
-    console.log(`\n[Bloque ${idx + 1}] 🎯 ${r.scenario} (${r.duration})`);
+    console.log(`\n[Bloque ${idx + 1}] 🎯 ${r.scenario} | ${r.aimLab} (${r.duration})`);
     console.log(`  Enfoque: ${r.category}`);
     console.log(`  Técnica: ${r.instruction}`);
   });

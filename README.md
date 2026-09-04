@@ -1,15 +1,15 @@
-# 🎯 Valorant Analytics & Tactical Coaching Engine (v3.0)
+# 🎯 Valorant Analytics & Tactical Coaching Engine (v4.0)
 
 [![Valorant](https://img.shields.io/badge/Valorant-Competitive_Telemetry-FF4655?logo=valorant&logoColor=white)](https://playvalorant.com/)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B_Native-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/Dependencies-0_npm_packages-blue)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Audit Score](https://img.shields.io/badge/Audit_Score-100%2F100_SOVEREIGN-brightgreen)](opencode_tester.js)
-[![Test Suite](https://img.shields.io/badge/Tests-29%2F29_PASS_Exit_0-success)](test_suite.js)
-[![Maturity](https://img.shields.io/badge/AMR_Maturity-70.0%2F100_SOVEREIGN-blue)](test_suite.js)
+[![Test Suite](https://img.shields.io/badge/Tests-39%2F39_PASS_Exit_0-success)](test_suite.js)
+[![Maturity](https://img.shields.io/badge/AMR_Maturity-75.0%2F100_SOVEREIGN-blue)](test_suite.js)
 [![Language](https://img.shields.io/badge/Language-English_%7C_Espa%C3%B1ol-orange)](README.es.md)
 
-> **Zero-dependency, high-precision competitive FPS telemetry engine, 360° player autodiagnostic radar, cryptographic DSSE in-toto attestations, Merkle event ledgers, and adaptive 15-minute Kovaaks aim routine generator for Valorant.**
+> **Zero-dependency, high-precision competitive FPS telemetry engine, 360° player autodiagnostic radar, browser cache harvester (Cloudflare bypass), career playtime auditor, cryptographic DSSE in-toto attestations, Merkle event ledgers, and adaptive 15-minute Kovaaks aim routine generator for Valorant.**
 
 Read this in other languages: **[Español (README.es.md)](README.es.md)**.
 
@@ -28,6 +28,9 @@ Most stat trackers show raw numbers: K/D, Headshot %, and Win Rate. They fail to
 6. **Fatigue & Tilt Radar (Session Guardian):** Monitors rolling ADR degradation and un-traded first deaths to enforce rest intervals.
 7. **Byzantine Multi-Lens Consensus:** Synthesizes Duelist, Sentinel, and Anchor perspectives into cohesive, non-contradictory advice.
 8. **Zero Cloud Lock-In:** Runs 100% locally with zero NPM dependencies. Private profiles can be benchmarked instantly via offline calibration mode (`cli.js calibrate`).
+9. **Chromium Browser Cache Harvester (`cli.js harvest`):** Automatically scans local Chromium caches (Vivaldi, Brave, Chrome, Edge, Opera) to extract Tracker.gg & OP.GG payloads with native Brotli/Gzip decompression, permanently bypassing Cloudflare Turnstile 403 blocks.
+10. **Career Telemetry & Playtime Auditor (`cli.js career`):** Reconciles exact active in-match hours against theoretical AP inflation, breaks down competitive vs casual time, and maps rank milestones across personal and smurf accounts.
+11. **Autodiagnostic Engine & MMR Drag (`cli.js diagnose`):** Computes True Deserved Rank, detects algorithmic certainty drag on aged accounts, and classifies player learning velocity (Talent vs Effort) for zero-FPS background trajectories.
 
 ---
 
@@ -40,6 +43,57 @@ Designed for every player, regardless of programming experience or AI subscripti
 | **Everyday Player** | **Zero-Tool Text Mode** | ❌ No | ❌ Free | Copy [`standalone_prompt.md`](standalone_prompt.md) into ChatGPT or DeepSeek. |
 | **Developer / Competitor** | **Master CLI (Native Node)** | ✅ Yes | ❌ Free | Clone this repo and run `node cli.js match <file>`. |
 | **AI Agent Power User** | **Agentic Skill (`SKILL.md`)** | ✅ Yes | Depends on agent | Load into Google Antigravity, Open Code, or Claude Code. |
+
+---
+
+## 🆓 Acceso Gratuito y Sin IA (Zero-Subscription)
+
+Toda la inteligencia de coaching es **algorítmica y local**: no requiere ningún modelo de IA para producir el diagnóstico. Tres caminos según tus recursos:
+
+1. **Sin terminal y sin IA de pago:** Copia [`standalone_prompt.md`](standalone_prompt.md) en cualquier LLM web gratuito (ChatGPT, Gemini, DeepSeek, Claude.ai) y pega los datos de tu partida.
+2. **Con terminal, sin ninguna IA:** `node cli.js match examples/sample_match.json "Tu#Tag"` produce el radar 360°, las fugas de ELO y la rutina de aim **sin llamar a ningún modelo** — todo es matemática local.
+3. **Con IA agéntica:** Carga la skill en Antigravity / Open Code / Claude Code y ejecuta el ciclo completo con certificación.
+
+> **Sin suscripción agéntica:** los modos 1 y 2 no usan agentes autónomos; el usuario pega datos o corre un comando y recibe el análisis directo.
+
+---
+
+## 🔍 Fuentes de Datos y Transparencia
+
+| Fuente | Uso | Disponibilidad | Límite conocido |
+| :--- | :--- | :--- | :--- |
+| **Tracker.gg API** (pública) | Perfil y partidas por Riot ID (`fetch_profile.js`, `fetch_match.js`) | Requiere red; perfil público | Rate limit (HTTP 429) y bloqueos Cloudflare → reintento con backoff exponencial (`http_fetch.js`) |
+| **OP.GG Valorant** | Perfil por nombre-tag (`cli.js profile`) | URL de referencia (sin scraping) | — |
+| **VLR.gg** | Búsqueda de jugador (`cli.js profile`) | URL de referencia | — |
+| **JSON local** (`examples/sample_match.json`) | Modo offline 100% (`cli.js match/duo/aim/...`) | Sin red, sin cuenta | Privacidad total: tus datos jamás salen de tu máquina |
+
+**Caveats honestos:** un perfil privado en Riot/Tracker devuelve error instructivo (cómo hacerlo público) — no se inventan datos. La fuente primaria del análisis es el JSON de partida; las URLs de perfil son de referencia y no se scrapean.
+
+---
+
+## 🖥️ Compatibilidad de Plataformas
+
+| Entorno | Soporte | Notas |
+| :--- | :---: | :--- |
+| Node.js v18+ / v24 (CommonJS) | ✅ | Único requisito runtime; cero dependencias NPM |
+| Windows 11 + PowerShell | ✅ | Rutas, encoding y comandos verificados en win32 |
+| macOS / Linux (bash/zsh) | ✅ | Node nativo; sin comandos Unix privativos |
+| Local / On-Premise | ✅ | 100% offline, sin telemetría de salida |
+| Cloud (con Node) | ✅ | Cualquier contenedor/VPS con Node instalado |
+| Agentes: Open Code, Antigravity, Claude Code | ✅ | `SKILL.md` + dispatcher `cli.js` |
+
+**Invariancias portables:** sin `npm install`, sin binarios externos (el HTTP usa `https` nativo, no `curl`), rutas normalizadas a forward-slash en reportes, y codificación UTF-8 con stripping de BOM en entradas.
+
+---
+
+## 🎓 Filosofía de Aprendizaje y Directrices
+
+El objetivo no es "mostrar estadísticas", es que **el jugador aprenda de sus errores y sepa QUÉ estrategia corregir**:
+
+1. **Autopsia, no exhibición:** cada fuga de ELO señala la ronda y el comportamiento exacto (sobre-asomo, eco roto, apertura perdida) con la solución táctica.
+2. **Prescripción, no diagnóstico pasivo:** el radar de 5 pilares (mecánica, macro, aperturas, economía, clutch) se traduce en una rutina de 15 minutos en **Kovaaks O Aim Lab** derivada de la telemetría real (HS%, FK/FD, geometría del mapa).
+3. **Estándares públicos:** todas las métricas se comparan contra benchmarks de élite (ADR 180-240+, KAST 78%+, FK/FD 2.0+) para que el jugador sepa si su "buena partida" es real o relativa a un lobby bajo.
+4. **Directrices de juego limpio:** los ajustes prescritos (sensibilidad, ergonomía, bloques de 3 partidas para evitar tilt) son recomendaciones verificables, nunca mods ni trucos — cero inyección, cero lectura de memoria, indetectable e ilegal-nada.
 
 ---
 

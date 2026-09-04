@@ -46,20 +46,19 @@ const { DriftDetector } = require('./drift_detector');
 const { ConsensusArbiter } = require('./consensus_arbiter');
 const { RoutineSynthesizer } = require('./routine_synthesizer');
 const { generateSbom } = require('./sbom_manifest');
+const { resolveMatchDataResilient, parseTextScoreboard } = require('./universal_ingestor');
+const { harvestProfiles, harvestMatch } = require('./browser_cache_harvester');
+const { extractAccountTelemetry, aggregateCareerTelemetry, generateMilestonesTimeline } = require('./career_telemetry');
+const { evaluateMmrDrag, evaluateTalentVsEffort } = require('./autodiagnostic_engine');
 
 function printBanner() {
   console.log(`\n========================================================================`);
-  console.log(`⚡ VALORANT ANALYTICS: UNIVERSAL SOVEREIGN ENGINE (V3.0)`);
+  console.log(`⚡ VALORANT ANALYTICS: UNIVERSAL SOVEREIGN ENGINE (V4.0)`);
   console.log(`========================================================================`);
 }
 
-function resolveMatchData(source) {
-  if (fs.existsSync(source)) {
-    return JSON.parse(fs.readFileSync(source, 'utf8'));
-  }
-  const matchId = extractMatchId(source);
-  if (!matchId) throw new Error(`No se pudo extraer un match ID de: "${source}"`);
-  return fetchMatch(matchId);
+function resolveMatchData(source, playerHandle) {
+  return resolveMatchDataResilient(source, playerHandle);
 }
 
 function handleProfile(handle) {
@@ -196,7 +195,7 @@ try {
     console.log(`Sens: ${res.sensitivityRecommendation}`);
     console.log(`------------------------------------------------------------------------`);
     res.routine.forEach(sc => {
-      console.log(`  • [${sc.duration}] ${sc.scenario}`);
+      console.log(`  • [${sc.duration}] ${sc.scenario}${sc.aimLab ? ` | ${sc.aimLab}` : ''}`);
       console.log(`       ${sc.category}: ${sc.instruction}`);
     });
     console.log(`========================================================================\n`);
@@ -423,10 +422,127 @@ try {
     }
     handleProfile(handle);
 
+  } else if (command === 'parse' || command === 'ingest') {
+    const rawInput = args.slice(1).join(' ');
+    const player = args[args.length - 1]?.includes('#') ? args[args.length - 1] : undefined;
+    const matchData = resolveMatchData(rawInput || 'examples/sample_match.json', player);
+    const res = evaluateLearningProfile(matchData, player);
+    validateLearningProfile(res);
+    printBanner();
+    console.log(`📋 INGESTA UNIVERSAL RESILIENTE: ${res.player} (${res.agent} - ${res.rank}) | Mapa: ${res.map}`);
+    console.log(`------------------------------------------------------------------------`);
+    console.log(`📊 RADAR DE RENDIMIENTO COMPETITIVO:`);
+    console.log(`  • Precisión Mecánica:        ${res.radar.precisionMecanica}`);
+    console.log(`  • Macrogame y Espacio:       ${res.radar.macrogamePosicionamiento}`);
+    console.log(`  • Duelos de Apertura:        ${res.radar.duelosDeApertura}`);
+    console.log(`  • Disciplina Económica:      ${res.radar.disciplinaEconomica}`);
+    console.log(`  • Compostura en Clutch:      ${res.radar.composturaClutch}`);
+    console.log(`\n🚨 TOP FUGAS DE ELO (CAUSAS DE DERROTA):`);
+    (res.eloLeaks || []).forEach((l, i) => {
+      console.log(`  [#${i + 1}] ${l.issue}`);
+      console.log(`       Detalle:  ${l.detail}`);
+      console.log(`       Solución: ${l.solution}`);
+    });
+    console.log(`\n💡 REGLA MENTAL: ${res.prescripcionInmediata.reglaMental}`);
+    console.log(`🎯 RUTINA KOVAAKS: ${res.prescripcionInmediata.sesionKovaaks}`);
+    console.log(`========================================================================\n`);
+
+  } else if (command === 'harvest') {
+    const query = args[1];
+    printBanner();
+    console.log(`🌾 COSECHA DETERMINISTA DE TELEMETRÍA (CACHE HARVESTER)`);
+    console.log(`------------------------------------------------------------------------`);
+    const hits = harvestProfiles(query);
+    console.log(`Entradas encontradas en caché local: ${hits.length}`);
+    hits.forEach((h, i) => {
+      console.log(`  [#${i + 1}] ${h.url.slice(0, 85)}...`);
+    });
+    console.log(`========================================================================\n`);
+
+  } else if (command === 'career') {
+    const inputPath = args[1];
+    let profileData = null;
+    let handleName = args[2] || 'Jugador';
+
+    if (inputPath && fs.existsSync(inputPath)) {
+      profileData = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
+    } else {
+      const hits = harvestProfiles(inputPath);
+      if (hits.length > 0) {
+        profileData = hits[0].json;
+        handleName = inputPath || 'Detectado en Caché';
+      }
+    }
+
+    if (!profileData) {
+      console.error('Error: No se encontró archivo o caché para evaluar carrera. Proporciona un archivo JSON o handle.');
+      process.exit(1);
+    }
+
+    const tel = extractAccountTelemetry(profileData, { handle: handleName });
+    const agg = aggregateCareerTelemetry([{ telemetry: tel }]);
+    const timeline = generateMilestonesTimeline(agg);
+
+    printBanner();
+    console.log(`⏱️ AUDITORÍA DE CARRERA Y TIEMPO REAL: ${tel.handle}`);
+    console.log(`------------------------------------------------------------------------`);
+    console.log(`  • Horas en Competitivo (Tracker):  ${tel.competitive.formatted} (${tel.competitive.hours}h)`);
+    console.log(`  • Horas en Otros Modos (Casual):   ${tel.casual.formatted} (${tel.casual.hours}h)`);
+    console.log(`  • Horas Totales Efectivas:         ${tel.general.formatted} (${tel.general.hours}h)`);
+    console.log(`  • Rango Actual: ${tel.currentRank} | Pico: ${tel.peakRank}`);
+    console.log(`  • Partidas: ${tel.competitive.matches} (Victorias: ${tel.competitive.wins}) | K/D: ${tel.competitive.kd} | HS: ${tel.competitive.hs}`);
+    console.log(`\n📅 CRONOLOGÍA DE HITOS Y HORAS ACUMULADAS:`);
+    console.table(timeline.map(t => ({
+      'Rango': t.rango,
+      'Horas Tramo': `${t.tramoHoras} h`,
+      'Horas Acumuladas': `${t.acumuladoHoras} h`,
+      'Contexto': t.contexto
+    })));
+    console.log(`========================================================================\n`);
+
+  } else if (command === 'diagnose') {
+    const inputPath = args[1];
+    let profileData = null;
+    let handleName = args[2] || 'Jugador';
+
+    if (inputPath && fs.existsSync(inputPath)) {
+      profileData = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
+    } else {
+      const hits = harvestProfiles(inputPath);
+      if (hits.length > 0) {
+        profileData = hits[0].json;
+        handleName = inputPath || 'Detectado en Caché';
+      }
+    }
+
+    if (!profileData) {
+      console.error('Error: Proporciona un JSON de perfil o handle rastreable en caché.');
+      process.exit(1);
+    }
+
+    const tel = extractAccountTelemetry(profileData, { handle: handleName });
+    const agg = aggregateCareerTelemetry([{ telemetry: tel }]);
+    const mmrDiag = evaluateMmrDrag(tel);
+    const talentDiag = evaluateTalentVsEffort(agg);
+
+    printBanner();
+    console.log(`🧠 AUTODIAGNÓSTICO INTEGRAL DE RANGO Y TALENTO: ${tel.handle}`);
+    console.log(`------------------------------------------------------------------------`);
+    console.log(`🏷️ CATEGORIZACIÓN: ${talentDiag.category}`);
+    console.log(`⚖️ RATIO OBJETIVO:  ${talentDiag.talentRatio}`);
+    console.log(`🎯 RANGO REAL MERECIDO: ${talentDiag.trueDeservedRank} (Rango Visual Actual: ${tel.currentRank})`);
+    console.log(`\n🛡️ DIAGNÓSTICO DE MMR DRAG (CERTEZA ALGORÍTMICA):`);
+    console.log(`  • Estado:  ${mmrDiag.mmrDragDetected ? 'DETECTADO (ANCLADO)' : 'NORMAL'}`);
+    console.log(`  • Detalle: ${mmrDiag.diagnosis}`);
+    console.log(`\n💡 CUELLO DE BOTELLA Y OPTIMIZACIÓN:`);
+    console.log(`  • Factor: ${talentDiag.bottleneckOptimization.metric} (Actual: ${talentDiag.bottleneckOptimization.currentValue} ➔ Objetivo: ${talentDiag.bottleneckOptimization.targetValue})`);
+    console.log(`  • Consejo: ${talentDiag.bottleneckOptimization.tacticalAdvice}`);
+    console.log(`========================================================================\n`);
+
   } else {
     // Fallback frictionless: archivo, URL de partida o texto largo → diagnóstico directo
     if (fs.existsSync(command) || command.includes('tracker.gg') || command.includes('op.gg') || command.length > 20) {
-      const matchData = resolveMatchData(command);
+      const matchData = resolveMatchData(command, args[1]);
       const res = evaluateLearningProfile(matchData, args[1]);
       printBanner();
       console.log(`🎯 DIAGNÓSTICO DIRECTO: ${res.player} (${res.agent} - ${res.rank}) | Mapa: ${res.map}`);
