@@ -6,7 +6,7 @@
 [![Licencia: MIT](https://img.shields.io/badge/Licencia-MIT-green.svg)](LICENSE)
 [![Puntuación Auditoría](https://img.shields.io/badge/Auditor%C3%ADa-100%2F100_SOBERANA-brightgreen)](opencode_tester.js)
 [![Suite de Pruebas](https://img.shields.io/badge/Tests-29%2F29_PASS_Exit_0-success)](test_suite.js)
-[![Madurez Asintótica](https://img.shields.io/badge/Madurez_AMR-37.1%2F100_SOBERANA-blue)](test_suite.js)
+[![Madurez Asintótica](https://img.shields.io/badge/Madurez_AMR-40.4%2F100_SOBERANA-blue)](test_suite.js)
 [![Idioma](https://img.shields.io/badge/Idioma-English_%7C_Espa%C3%B1ol-orange)](README.md)
 
 > **Motor de telemetría competitiva de alta precisión, radar autodiagnóstico de 5 pilares, atestaciones criptográficas DSSE in-toto, árbol de eventos Merkle y generador adaptativo de rutinas de Kovaaks de 15 minutos. Cero dependencias externas.**
@@ -182,13 +182,15 @@ El código está construido bajo aserciones deterministas estrictas. Cero tests 
 # Ejecutar la suite determinista de 29 aserciones
 node test_suite.js
 
-# Ejecutar las 6 suites modulares en tests/
+# Ejecutar las 8 suites modulares en tests/
 node tests/test_cli.js
 node tests/test_invariants.js
 node tests/test_preflight.js
 node tests/test_dsse_merkle.js
 node tests/test_guardian_drift.js
 node tests/test_consensus_synthesizer.js
+node tests/test_economy_weapons.js
+node tests/test_duel_coaching.js
 
 # Ejecutar el arnés de auditoría autónomo Open Code / DeepSeek
 node opencode_tester.js

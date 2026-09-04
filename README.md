@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Audit Score](https://img.shields.io/badge/Audit_Score-100%2F100_SOVEREIGN-brightgreen)](opencode_tester.js)
 [![Test Suite](https://img.shields.io/badge/Tests-29%2F29_PASS_Exit_0-success)](test_suite.js)
-[![Maturity](https://img.shields.io/badge/AMR_Maturity-37.1%2F100_SOVEREIGN-blue)](test_suite.js)
+[![Maturity](https://img.shields.io/badge/AMR_Maturity-40.4%2F100_SOVEREIGN-blue)](test_suite.js)
 [![Language](https://img.shields.io/badge/Language-English_%7C_Espa%C3%B1ol-orange)](README.es.md)
 
 > **Zero-dependency, high-precision competitive FPS telemetry engine, 360° player autodiagnostic radar, cryptographic DSSE in-toto attestations, Merkle event ledgers, and adaptive 15-minute Kovaaks aim routine generator for Valorant.**
@@ -181,13 +181,15 @@ The codebase is engineered with strict deterministic assertions. Zero placebo te
 # Run the 29-assertion deterministic test suite
 node test_suite.js
 
-# Run the 6 modular tests in tests/
+# Run the 8 modular tests in tests/
 node tests/test_cli.js
 node tests/test_invariants.js
 node tests/test_preflight.js
 node tests/test_dsse_merkle.js
 node tests/test_guardian_drift.js
 node tests/test_consensus_synthesizer.js
+node tests/test_economy_weapons.js
+node tests/test_duel_coaching.js
 
 # Run the autonomous Open Code / DeepSeek audit harness
 node opencode_tester.js
