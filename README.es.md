@@ -6,7 +6,7 @@
 [![Licencia: MIT](https://img.shields.io/badge/Licencia-MIT-green.svg)](LICENSE)
 [![Puntuación Auditoría](https://img.shields.io/badge/Auditor%C3%ADa-100%2F100_SOBERANA-brightgreen)](opencode_tester.js)
 [![Suite de Pruebas](https://img.shields.io/badge/Tests-29%2F29_PASS_Exit_0-success)](test_suite.js)
-[![Madurez Asintótica](https://img.shields.io/badge/Madurez_AMR-40.4%2F100_SOBERANA-blue)](test_suite.js)
+[![Madurez Asintótica](https://img.shields.io/badge/Madurez_AMR-55.4%2F100_SOBERANA-blue)](test_suite.js)
 [![Idioma](https://img.shields.io/badge/Idioma-English_%7C_Espa%C3%B1ol-orange)](README.md)
 
 > **Motor de telemetría competitiva de alta precisión, radar autodiagnóstico de 5 pilares, atestaciones criptográficas DSSE in-toto, árbol de eventos Merkle y generador adaptativo de rutinas de Kovaaks de 15 minutos. Cero dependencias externas.**
