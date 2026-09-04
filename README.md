@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Audit Score](https://img.shields.io/badge/Audit_Score-100%2F100_SOVEREIGN-brightgreen)](opencode_tester.js)
 [![Test Suite](https://img.shields.io/badge/Tests-29%2F29_PASS_Exit_0-success)](test_suite.js)
-[![Maturity](https://img.shields.io/badge/AMR_Maturity-65.3%2F100_SOVEREIGN-blue)](test_suite.js)
+[![Maturity](https://img.shields.io/badge/AMR_Maturity-70.0%2F100_SOVEREIGN-blue)](test_suite.js)
 [![Language](https://img.shields.io/badge/Language-English_%7C_Espa%C3%B1ol-orange)](README.es.md)
 
 > **Zero-dependency, high-precision competitive FPS telemetry engine, 360° player autodiagnostic radar, cryptographic DSSE in-toto attestations, Merkle event ledgers, and adaptive 15-minute Kovaaks aim routine generator for Valorant.**
