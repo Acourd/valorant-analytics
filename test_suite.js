@@ -39,7 +39,7 @@ const {
 const { evaluateLearningProfile } = require(path.join(scriptsDir, 'learning_profile.js'));
 
 let passed = 0;
-const total = 22;
+const total = 29;
 function check(name, fn) {
   process.stdout.write(`Testing: ${name}... `);
   try {
@@ -236,6 +236,55 @@ check('22. cli.js invariants: verificación formal de invariantes matemáticos e
     const out = cliOk(['invariants', sampleFile, 'TenZ#0001']);
     assert.ok(out.includes('VERIFICACIÓN FORMAL DE INVARIANTES MATEMÁTICOS'));
     assert.ok(out.includes('TODOS LOS INVARIANTES MATEMÁTICOS VERIFICADOS'));
+  });
+
+check('23. cli.js attest: sobre DSSE in-toto firmado con Ed25519 y verificado',
+  () => {
+    const out = cliOk(['attest', sampleFile, 'TenZ#0001']);
+    assert.ok(out.includes('ATESTACIÓN CRIPTOGRÁFICA DSSE'));
+    assert.ok(out.includes('VERIFICADO (Ed25519 OK)'));
+  });
+
+check('24. cli.js merkle: árbol Merkle de eventos discretos y prueba de inclusión',
+  () => {
+    const out = cliOk(['merkle', sampleFile]);
+    assert.ok(out.includes('ÁRBOL DE AUDITORÍA MERKLE'));
+    assert.ok(out.includes('VÁLIDA (Exit 0)'));
+  });
+
+check('25. cli.js guardian: monitor de fatiga neuromuscular y tilt cognitivo',
+  () => {
+    const out = cliOk(['guardian', sampleFile, 'TenZ#0001']);
+    assert.ok(out.includes('SESSION GUARDIAN'));
+    assert.ok(out.includes('Apto para competir'));
+  });
+
+check('26. cli.js drift: cálculo de deriva táctica y entropía de Shanon',
+  () => {
+    const out = cliOk(['drift', sampleFile, 'TenZ#0001']);
+    assert.ok(out.includes('RADAR DE DERIVA TÁCTICA'));
+    assert.ok(out.includes('Entropía de Quarters'));
+  });
+
+check('27. cli.js consensus: arbitraje bizantino multi-lente con quórum BFT',
+  () => {
+    const out = cliOk(['consensus', sampleFile, 'TenZ#0001']);
+    assert.ok(out.includes('SÍNTESIS DE CONSENSO BIZANTINO'));
+    assert.ok(out.includes('Lentes Participantes:  3'));
+  });
+
+check('28. cli.js synthesize: rutina evolutiva adaptativa según debilidades de match',
+  () => {
+    const out = cliOk(['synthesize', sampleFile, 'TenZ#0001']);
+    assert.ok(out.includes('RUTINA EVOLUTIVA ADAPTATIVA'));
+    assert.ok(out.includes('EJERCICIOS SINTETIZADOS'));
+  });
+
+check('29. cli.js sbom: manifiesto CycloneDX v1.5 con 0 dependencias externas',
+  () => {
+    const out = cliOk(['sbom']);
+    assert.ok(out.includes('MANIFIESTO CYCLONEDX SBOM'));
+    assert.ok(out.includes('Dependencias NPM:   0'));
   });
 
 console.log(`\nResults: ${passed}/${total} tests passed.`);

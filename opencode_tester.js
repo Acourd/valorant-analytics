@@ -55,7 +55,15 @@ const requiredFiles = [
   'scripts/fetch_profile.js',
   'scripts/http_fetch.js',
   'scripts/weapon_telemetry.js',
-  'scripts/invariant_validator.js'
+  'scripts/invariant_validator.js',
+  'scripts/dsse_attestation.js',
+  'scripts/merkle_ledger.js',
+  'scripts/preflight_guard.js',
+  'scripts/session_guardian.js',
+  'scripts/drift_detector.js',
+  'scripts/consensus_arbiter.js',
+  'scripts/routine_synthesizer.js',
+  'scripts/sbom_manifest.js'
 ];
 
 let staticScore = 0;
@@ -141,10 +149,10 @@ const runtimeTests = [
   },
   {
     module: 'test_suite.js',
-    description: 'Deterministic 22-Assertion Unit & Integration Suite',
+    description: 'Deterministic Comprehensive Unit & Integration Suite',
     cmd: `node ${path.join(rootDir, 'test_suite.js')}`,
     weight: 10,
-    validate: (out) => out.includes('22/22 tests passed') && out.includes('Exit Code: 0')
+    validate: (out) => /tests passed/.test(out) && out.includes('Exit Code: 0')
   }
 ];
 

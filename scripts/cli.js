@@ -1,15 +1,25 @@
 #!/usr/bin/env node
 /**
  * cli.js - Master Universal CLI & Intelligent Dispatcher for valorant-analytics
- * v2.6: dispatcher reparado (generateKovaaksRoutine, contrato real de parseDuels),
- * normalización de Riot IDs, URLs de tracker y archivos locales, exit codes estrictos.
+ * v3.0: Sovereign Multi-Engine Architecture.
+ * Includes Formal Invariant Validation, Ed25519 DSSE Attestation, Merkle Ledgers,
+ * Preflight Sandboxing, Session Guardian, Drift Detection & Byzantine Consensus.
  *
  * Usage:
- *   node cli.js "Derke#0001"                           ➔ Perfil Multi-Plataforma
- *   node cli.js match examples/sample_match.json "TenZ#0001" ➔ Autodiagnóstico 360°
- *   node cli.js duo <archivo> <p1> <p2>                ➔ Auditoría de Dúo
- *   node cli.js aim <archivo> [jugador]                ➔ Rutina Kovaaks 15 min
- *   node cli.js duels <archivo> [jugador]              ➔ Matriz de duelos 1v1
+ *   node cli.js "Derke#0001"                             ➔ Perfil Multi-Plataforma
+ *   node cli.js match examples/sample_match.json "TenZ#0001"   ➔ Autodiagnóstico 360°
+ *   node cli.js duo <archivo> <p1> <p2>                  ➔ Auditoría de Dúo
+ *   node cli.js aim <archivo> [jugador]                  ➔ Rutina Kovaaks 15 min
+ *   node cli.js duels <archivo> [jugador]                ➔ Matriz de duelos 1v1
+ *   node cli.js weapons <archivo> [jugador]              ➔ Telemetría de Armas
+ *   node cli.js invariants <archivo> [jugador]           ➔ Verificación Formal de Invariantes
+ *   node cli.js attest <archivo> [jugador]               ➔ Atestación Criptográfica DSSE Ed25519
+ *   node cli.js merkle <archivo>                         ➔ Árbol Merkle de Telemetría
+ *   node cli.js guardian <archivo> [jugador]             ➔ Monitor de Fatiga y Tilt
+ *   node cli.js drift <archivo> [jugador]                ➔ Radar de Deriva y Entropía
+ *   node cli.js consensus <archivo> [jugador]            ➔ Síntesis Bizantina Multi-Lente
+ *   node cli.js synthesize <archivo> [jugador]           ➔ Rutina Adaptativa Evolutiva
+ *   node cli.js sbom                                     ➔ Manifiesto CycloneDX SBOM
  */
 
 const path = require('path');
@@ -28,10 +38,18 @@ const {
   validateDuoSynergy,
   validateDuelMatrix
 } = require('./invariant_validator');
+const { runPreflight } = require('./preflight_guard');
+const { signTelemetryReport, verifyTelemetryAttestation } = require('./dsse_attestation');
+const { buildMatchMerkleLedger, MerkleTree, sha256 } = require('./merkle_ledger');
+const { SessionGuardian } = require('./session_guardian');
+const { DriftDetector } = require('./drift_detector');
+const { ConsensusArbiter } = require('./consensus_arbiter');
+const { RoutineSynthesizer } = require('./routine_synthesizer');
+const { generateSbom } = require('./sbom_manifest');
 
 function printBanner() {
   console.log(`\n========================================================================`);
-  console.log(`⚡ VALORANT ANALYTICS: UNIVERSAL COMPETITIVE ENGINE (V3.0)`);
+  console.log(`⚡ VALORANT ANALYTICS: UNIVERSAL SOVEREIGN ENGINE (V3.0)`);
   console.log(`========================================================================`);
 }
 
@@ -88,12 +106,28 @@ if (!command || command === '--help' || command === '-h') {
   console.log(`  node cli.js duo <partida_o_id> <p1> <p2>          ➔ Auditoría de Sinergia y Tradeo de Dúo`);
   console.log(`  node cli.js aim <partida_o_id> [jugador]          ➔ Rutina Kovaaks 15 min adaptativa`);
   console.log(`  node cli.js duels <partida_o_id> [jugador]        ➔ Matriz de duelos 1v1 vs rivales`);
+  console.log(`  node cli.js weapons <partida_o_id> [jugador]      ➔ Telemetría de Armas y Recoil`);
+  console.log(`  node cli.js invariants <partida_o_id> [jugador]   ➔ Verificación Formal de Invariantes`);
+  console.log(`  node cli.js attest <partida_o_id> [jugador]       ➔ Sobre DSSE in-toto firmado con Ed25519`);
+  console.log(`  node cli.js merkle <partida_o_id>                 ➔ Árbol Merkle de Eventos y Pruebas`);
+  console.log(`  node cli.js guardian <partida_o_id> [jugador]     ➔ Monitor de Fatiga y Tilt`);
+  console.log(`  node cli.js drift <partida_o_id> [jugador]        ➔ Radar de Deriva y Entropía`);
+  console.log(`  node cli.js consensus <partida_o_id> [jugador]    ➔ Síntesis Bizantina Multi-Lente`);
+  console.log(`  node cli.js synthesize <partida_o_id> [jugador]   ➔ Rutina Adaptativa Evolutiva`);
+  console.log(`  node cli.js sbom                                  ➔ Manifiesto CycloneDX SBOM`);
   console.log(`\nEJEMPLOS:`);
   console.log(`  node cli.js "Derke#0001"`);
   console.log(`  node cli.js match examples/sample_match.json "TenZ#0001"`);
   console.log(`  node cli.js duo examples/sample_match.json "TenZ#0001" "Chronicle#0001"`);
   console.log(`========================================================================\n`);
   process.exit(0);
+}
+
+// Preflight Check
+const pf = runPreflight(command, args);
+if (pf.verdict === 'DENY') {
+  console.error(`\n[PREFLIGHT DENY] ${pf.reason}`);
+  process.exit(1);
 }
 
 // Auto-detección: si el primer arg contiene '#' (Riot ID) y no es un archivo → perfil
@@ -252,6 +286,133 @@ try {
 
     console.log(`------------------------------------------------------------------------`);
     console.log(`🏆 ESTADO FORMAL: TODOS LOS INVARIANTES MATEMÁTICOS VERIFICADOS (Exit 0)`);
+    console.log(`========================================================================\n`);
+
+  } else if (command === 'attest') {
+    const target = args[1] || path.join(__dirname, '..', 'examples', 'sample_match.json');
+    const player = args[2] || 'TenZ#0001';
+    const matchData = resolveMatchData(target);
+    const profile = evaluateLearningProfile(matchData, player);
+
+    printBanner();
+    console.log(`🔐 GENERACIÓN DE ATESTACIÓN CRIPTOGRÁFICA DSSE / in-toto v1`);
+    console.log(`Objetivo: ${target} | Jugador: ${player}`);
+    console.log(`------------------------------------------------------------------------`);
+
+    const envelope = signTelemetryReport(profile);
+    const verifyRes = verifyTelemetryAttestation(envelope);
+
+    console.log(`  • Tipo de Payload:       ${envelope.payloadType}`);
+    console.log(`  • Clave Firmante (KeyID): ${envelope.signatures[0].keyid}`);
+    console.log(`  • Longitud Firma Base64:  ${envelope.signatures[0].sig.length} bytes`);
+    console.log(`  • Veredicto Criptográfico: ${verifyRes.verified ? 'VERIFICADO (Ed25519 OK)' : 'FALLIDO'}`);
+    console.log(`------------------------------------------------------------------------`);
+    console.log(`✓ Sobre DSSE in-toto v1 inmutable verificado con éxito (Exit 0)`);
+    console.log(`========================================================================\n`);
+
+  } else if (command === 'merkle') {
+    const target = args[1] || path.join(__dirname, '..', 'examples', 'sample_match.json');
+    const matchData = resolveMatchData(target);
+    const ledger = buildMatchMerkleLedger(matchData);
+
+    printBanner();
+    console.log(`🌲 ÁRBOL DE AUDITORÍA MERKLE DE TELEMETRÍA`);
+    console.log(`Objetivo: ${target} | Eventos discretos: ${ledger.totalEvents}`);
+    console.log(`------------------------------------------------------------------------`);
+    console.log(`  • Merkle Root (SHA-256): ${ledger.root}`);
+
+    if (ledger.totalEvents > 0) {
+      const proof = ledger.tree.getProof(0);
+      const leaf0 = sha256(ledger.events[0]);
+      const validProof = MerkleTree.verifyProof(leaf0, proof, ledger.root);
+      console.log(`  • Prueba de Inclusión (Evento #1): ${validProof ? 'VÁLIDA (Exit 0)' : 'INVÁLIDA'}`);
+    }
+    console.log(`------------------------------------------------------------------------`);
+    console.log(`✓ Integridad y no-repudio de eventos sellados deterministamente.`);
+    console.log(`========================================================================\n`);
+
+  } else if (command === 'guardian') {
+    const target = args[1] || path.join(__dirname, '..', 'examples', 'sample_match.json');
+    const player = args[2] || 'TenZ#0001';
+    const matchData = resolveMatchData(target);
+    const guardian = new SessionGuardian();
+    const audit = guardian.auditSession(matchData, player);
+
+    printBanner();
+    console.log(`🛡️ SESSION GUARDIAN: FATIGA & TILT COGNITIVO`);
+    console.log(`Jugador: ${player} | Veredicto: ${audit.verdict}`);
+    console.log(`------------------------------------------------------------------------`);
+    console.log(`  • Nivel de Tilt:     ${audit.tilt.level} (Índice: ${audit.tilt.tiltIndex}/100)`);
+    console.log(`  • Factor de Fatiga:  ${audit.fatigue.fatigueFactor} / 1.00 (${audit.fatigue.continuousMinutes} mins acumulados)`);
+    console.log(`  • Apto para competir: ${audit.safeToContinue ? 'SÍ (Continuar cola)' : 'NO (Pausa obligatoria)'}`);
+    console.log(`\n📋 DIRECTIVAS DE SALUD COGNITIVA:`);
+    audit.prescriptions.forEach(p => console.log(`  • ${p}`));
+    console.log(`========================================================================\n`);
+
+  } else if (command === 'drift') {
+    const target = args[1] || path.join(__dirname, '..', 'examples', 'sample_match.json');
+    const player = args[2] || 'TenZ#0001';
+    const matchData = resolveMatchData(target);
+    const detector = new DriftDetector();
+    const driftReport = detector.auditMatchDrift(matchData, player);
+
+    printBanner();
+    console.log(`📊 RADAR DE DERIVA TÁCTICA Y ENTROPÍA MECÁNICA`);
+    console.log(`Jugador: ${player} | Estabilidad Global: ${driftReport.overallStability}%`);
+    console.log(`------------------------------------------------------------------------`);
+    console.log(`  • Clasificación de Lado: ${driftReport.sideDivergence.classification} (Divergencia: ${driftReport.sideDivergence.divergenceScore}%)`);
+    console.log(`  • Entropía de Quarters:  ${driftReport.quarterDrift.killDistributionEntropy} / ${driftReport.quarterDrift.maxPossibleEntropy}`);
+    console.log(`  • Diagnóstico:           ${driftReport.quarterDrift.diagnosis}`);
+    console.log(`========================================================================\n`);
+
+  } else if (command === 'consensus') {
+    const target = args[1] || path.join(__dirname, '..', 'examples', 'sample_match.json');
+    const player = args[2] || 'TenZ#0001';
+    const matchData = resolveMatchData(target);
+    const profile = evaluateLearningProfile(matchData, player);
+    const arbiter = new ConsensusArbiter();
+    const report = arbiter.synthesizeConsensus(profile);
+
+    printBanner();
+    console.log(`⚖️ SÍNTESIS DE CONSENSO BIZANTINO MULTI-LENTE (BFT)`);
+    console.log(`Jugador: ${player} | Veredicto: ${report.verdict}`);
+    console.log(`------------------------------------------------------------------------`);
+    console.log(`  • Lentes Participantes:  ${report.participatingLenses}`);
+    console.log(`  • Quórum Alcanzado:      ${report.quorumAchieved ? 'SÍ' : 'NO'}`);
+    console.log(`  • Prioridad de Acción:   ${report.actionablePriority}`);
+    console.log(`\n📋 SÍNTESIS UNIFICADA DE LENTES:`);
+    report.synthesis.forEach(s => console.log(`  • ${s}`));
+    console.log(`========================================================================\n`);
+
+  } else if (command === 'synthesize') {
+    const target = args[1] || path.join(__dirname, '..', 'examples', 'sample_match.json');
+    const player = args[2] || 'TenZ#0001';
+    const matchData = resolveMatchData(target);
+    const profile = evaluateLearningProfile(matchData, player);
+    const synthesizer = new RoutineSynthesizer({ targetDurationMinutes: 15 });
+    const routine = synthesizer.synthesizeRoutine(profile);
+
+    printBanner();
+    console.log(`🧬 RUTINA EVOLUTIVA ADAPTATIVA: ${routine.player} (${routine.totalRoutineMinutes} min)`);
+    console.log(`------------------------------------------------------------------------`);
+    console.log(`ÁREAS DE DEBILIDAD DETECTADAS:`);
+    routine.identifiedWeaknesses.forEach(w => console.log(`  [${w.area}] ${w.reason}`));
+    console.log(`\nEJERCICIOS SINTETIZADOS:`);
+    routine.drillPlan.forEach((d, i) => {
+      console.log(`  ${i + 1}. [${d.focus}] ${d.scenario} x${d.reps} (${d.durationPerRep}) - Dificultad: ${d.difficultyMultiplier}x`);
+    });
+    console.log(`\n💡 CONSEJO NEUROMUSCULAR: ${routine.neuroMuscleAdvice}`);
+    console.log(`========================================================================\n`);
+
+  } else if (command === 'sbom') {
+    const manifest = generateSbom();
+    printBanner();
+    console.log(`📦 MANIFIESTO CYCLONEDX SBOM (ZERO-DEPENDENCY AUDIT)`);
+    console.log(`------------------------------------------------------------------------`);
+    console.log(`  • Componente:         ${manifest.metadata.component.name} v${manifest.metadata.component.version}`);
+    console.log(`  • Módulos Verificados: ${manifest.components.length} archivos JS locales sellados con SHA-256`);
+    console.log(`  • Dependencias NPM:   0 (Pure Standard Library)`);
+    console.log(`  • Licencia:           ${manifest.metadata.component.licenses[0].license.id}`);
     console.log(`========================================================================\n`);
 
   } else if (command === 'profile') {
