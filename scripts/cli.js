@@ -22,6 +22,12 @@ const { generateKovaaksRoutine } = require('./kovaaks_generator');
 const { extractMatchId, fetchMatch } = require('./fetch_match');
 const { normalizeHandle } = require('./fetch_profile');
 const { analyzeWeaponTelemetry } = require('./weapon_telemetry');
+const {
+  validateLearningProfile,
+  validateWeaponTelemetry,
+  validateDuoSynergy,
+  validateDuelMatrix
+} = require('./invariant_validator');
 
 function printBanner() {
   console.log(`\n========================================================================`);
@@ -102,6 +108,7 @@ try {
     const player = args[2];
     const matchData = resolveMatchData(target);
     const res = evaluateLearningProfile(matchData, player);
+    validateLearningProfile(res);
 
     printBanner();
     console.log(`🎯 DIAGNÓSTICO 360°: ${res.player} (${res.agent} - ${res.rank}) | Mapa: ${res.map}`);
@@ -128,6 +135,7 @@ try {
     const p2 = args[3] || 'Chronicle#0001';
     const matchData = resolveMatchData(target);
     const res = auditDuoSynergy(matchData, p1, p2);
+    validateDuoSynergy(res);
 
     printBanner();
     console.log(`🤝 AUDITORÍA DE DÚO: ${res.p1.handle} + ${res.p2.handle} | Sinergia: ${res.synergy.score}`);
@@ -183,6 +191,7 @@ try {
     const player = args[2];
     const matchData = resolveMatchData(target);
     const result = analyzeWeaponTelemetry(matchData, player);
+    validateWeaponTelemetry(result);
 
     printBanner();
     console.log(`🎯 TELEMETRÍA DE ARMAS Y BANDAS DE IMPACTO: ${result.player} (${result.agent})`);
@@ -217,6 +226,32 @@ try {
     console.log(`------------------------------------------------------------------------`);
     console.log(`💡 REGLA DE COGNICIÓN: No abras duelos en defensa sin soporte de utilidad de tu iniciador.`);
     console.log(`🎯 RUTINA KOVAAKS SUGERIDA: 1wall6targets small (5 min) + Pasu Voltaic (5 min) + PatTargetSwitch (5 min).`);
+    console.log(`========================================================================\n`);
+
+  } else if (command === 'invariants' || command === 'verify-math') {
+    const target = args[1] || path.join(__dirname, '..', 'examples', 'sample_match.json');
+    const player = args[2] || 'TenZ#0001';
+    const matchData = resolveMatchData(target);
+
+    printBanner();
+    console.log(`🛡️ VERIFICACIÓN FORMAL DE INVARIANTES MATEMÁTICOS`);
+    console.log(`Objetivo: ${target} | Jugador: ${player}`);
+    console.log(`------------------------------------------------------------------------`);
+
+    const p = evaluateLearningProfile(matchData, player);
+    validateLearningProfile(p);
+    console.log(`  ✓ Invariantes de Radar y Fugas de ELO: Aprobados (Bounds [0, 100], sin NaN)`);
+
+    const w = analyzeWeaponTelemetry(matchData, player);
+    validateWeaponTelemetry(w);
+    console.log(`  ✓ Invariantes de Zonas y Distancia: Aprobados (Head+Body+Leg == 100%, 3 Bandas)`);
+
+    const m = parseDuels(matchData, player);
+    validateDuelMatrix(m);
+    console.log(`  ✓ Invariantes de Duelos 1v1: Aprobados (Consistencia de Kills/Deaths)`);
+
+    console.log(`------------------------------------------------------------------------`);
+    console.log(`🏆 ESTADO FORMAL: TODOS LOS INVARIANTES MATEMÁTICOS VERIFICADOS (Exit 0)`);
     console.log(`========================================================================\n`);
 
   } else if (command === 'profile') {

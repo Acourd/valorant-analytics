@@ -5,7 +5,7 @@
 [![Dependencies](https://img.shields.io/badge/Dependencies-0_npm_packages-blue)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Audit Score](https://img.shields.io/badge/Audit_Score-100%2F100_SOVEREIGN-brightgreen)](opencode_tester.js)
-[![Test Suite](https://img.shields.io/badge/Tests-18%2F18_PASS_Exit_0-success)](test_suite.js)
+[![Test Suite](https://img.shields.io/badge/Tests-22%2F22_PASS_Exit_0-success)](test_suite.js)
 [![Language](https://img.shields.io/badge/Language-English_%7C_Espa%C3%B1ol-orange)](README.es.md)
 
 > **Zero-dependency, high-precision competitive FPS telemetry engine, 360° player autodiagnostic radar, engagement distance analyzer (0–50m), and adaptive 15-minute Kovaaks aim routine generator for Valorant.**
@@ -64,6 +64,9 @@ node cli.js profile "Derke#0001"
 
 # 7. Instant Zero-Cloud Offline Mode (Private profiles / No network)
 node cli.js calibrate "TenZ#0001" "Radiant" "Duelist"
+
+# 8. Formal Mathematical Invariants Verification (Zero-NaN, bounds [0,100], sum convergence)
+node cli.js invariants examples/sample_match.json "TenZ#0001"
 ```
 
 ---

@@ -54,7 +54,8 @@ const requiredFiles = [
   'scripts/fetch_match.js',
   'scripts/fetch_profile.js',
   'scripts/http_fetch.js',
-  'scripts/weapon_telemetry.js'
+  'scripts/weapon_telemetry.js',
+  'scripts/invariant_validator.js'
 ];
 
 let staticScore = 0;
@@ -132,11 +133,18 @@ const runtimeTests = [
     validate: (out) => out.includes('CALIBRACIÓN INSTANTÁNEA ZERO-CLOUD')
   },
   {
+    module: 'cli.js (invariants)',
+    description: 'Master CLI Formal State Invariants Verification',
+    cmd: `node ${path.join(scriptsDir, 'cli.js')} invariants "${sampleFile}" "TenZ#0001"`,
+    weight: 5,
+    validate: (out) => out.includes('VERIFICACIÓN FORMAL DE INVARIANTES') && out.includes('TODOS LOS INVARIANTES')
+  },
+  {
     module: 'test_suite.js',
-    description: 'Deterministic 18-Assertion Unit & Integration Suite',
+    description: 'Deterministic 22-Assertion Unit & Integration Suite',
     cmd: `node ${path.join(rootDir, 'test_suite.js')}`,
-    weight: 15,
-    validate: (out) => out.includes('18/18 tests passed') && out.includes('Exit Code: 0')
+    weight: 10,
+    validate: (out) => out.includes('22/22 tests passed') && out.includes('Exit Code: 0')
   }
 ];
 

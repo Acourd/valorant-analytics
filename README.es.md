@@ -5,7 +5,7 @@
 [![Dependencias](https://img.shields.io/badge/Dependencias-0_paquetes_npm-blue)](package.json)
 [![Licencia: MIT](https://img.shields.io/badge/Licencia-MIT-green.svg)](LICENSE)
 [![Puntuación Auditoría](https://img.shields.io/badge/Auditor%C3%ADa-100%2F100_SOBERANA-brightgreen)](opencode_tester.js)
-[![Suite de Pruebas](https://img.shields.io/badge/Tests-18%2F18_PASS_Exit_0-success)](test_suite.js)
+[![Suite de Pruebas](https://img.shields.io/badge/Tests-22%2F22_PASS_Exit_0-success)](test_suite.js)
 [![Idioma](https://img.shields.io/badge/Idioma-English_%7C_Espa%C3%B1ol-orange)](README.md)
 
 > **Motor de telemetría competitiva de alta precisión, radar autodiagnóstico de 5 pilares, analizador de bandas de distancia (0–50m) y generador adaptativo de rutinas de Kovaaks de 15 minutos. Cero dependencias externas.**
@@ -64,6 +64,9 @@ node cli.js profile "Derke#0001"
 
 # 7. Calibración Instantánea Zero-Cloud (Para perfiles privados o modo offline)
 node cli.js calibrate "TenZ#0001" "Radiant" "Duelist"
+
+# 8. Verificación Formal de Invariantes Matemáticos (Cero-NaN, límites [0,100], convergencia)
+node cli.js invariants examples/sample_match.json "TenZ#0001"
 ```
 
 ---
