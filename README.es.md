@@ -1,243 +1,132 @@
-# 🎯 Motor de Telemetría Táctica y Coaching para Valorant (v4.0)
+# Valorant Analytics
 
-[![Valorant](https://img.shields.io/badge/Valorant-Telemetr%C3%ADa_Competitiva-FF4655?logo=valorant&logoColor=white)](https://playvalorant.com/)
-[![Node.js](https://img.shields.io/badge/Node.js-18%2B_Nativo-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Dependencias](https://img.shields.io/badge/Dependencias-0_paquetes_npm-blue)](package.json)
-[![Licencia: MIT](https://img.shields.io/badge/Licencia-MIT-green.svg)](LICENSE)
-[![Puntuación Auditoría](https://img.shields.io/badge/Auditor%C3%ADa-100%2F100_SOBERANA-brightgreen)](opencode_tester.js)
-[![Suite de Pruebas](https://img.shields.io/badge/Tests-39%2F39_PASS_Exit_0-success)](test_suite.js)
-[![Madurez Asintótica](https://img.shields.io/badge/Madurez_AMR-75.0%2F100_SOBERANA-blue)](test_suite.js)
-[![Idioma](https://img.shields.io/badge/Idioma-English_%7C_Espa%C3%B1ol-orange)](README.md)
+[![Versión](https://img.shields.io/badge/versión-4.0-black.svg?style=flat-square)](https://github.com/Acourd/valorant-analytics)
+[![Runtime](https://img.shields.io/badge/runtime-Node.js_nativo-black.svg?style=flat-square)](https://nodejs.org/)
+[![Dependencias](https://img.shields.io/badge/dependencias-0_npm-black.svg?style=flat-square)](package.json)
+[![Licencia](https://img.shields.io/badge/licencia-MIT-black.svg?style=flat-square)](LICENSE)
+[![Pruebas](https://img.shields.io/badge/pruebas-46%2F46_aprobadas-black.svg?style=flat-square)](test_suite.js)
 
-> **Motor de telemetría competitiva de alta precisión, radar autodiagnóstico de 5 pilares, cosechador de caché de navegadores (anti-WAF Cloudflare), auditor de horas de carrera y tiempo en partida, atestaciones criptográficas DSSE in-toto, árbol de eventos Merkle y generador adaptativo de rutinas de Kovaaks de 15 minutos. Cero dependencias externas.**
+Análisis táctico y diagnóstico de partidas para jugadores competitivos de Valorant. Diseñado para identificar fugas de rondas, corregir hábitos mecánicos y medir tu progreso real sin depender de estadísticas superficiales.
 
-Leer en otros idiomas: **[English (README.md)](README.md)**.
+Disponible también en: [English (README.en.md)](README.en.md) | [Documentación Técnica (SKILL.md)](SKILL.md)
 
 ---
 
-## 🧭 ¿Por qué Valorant Analytics?
+## El problema con las estadísticas tradicionales
 
-La mayoría de páginas de estadísticas solo muestran números crudos: K/D, porcentaje de headshots y tasa de victoria. No te dicen **por qué** se perdieron las rondas ni **dónde** se fugan los puntos de rango (ELO).
+La mayoría de plataformas muestran cifras aisladas: bajas, muertes, porcentaje de tiros a la cabeza y tasa de victoria. Aunque estos datos describen el resultado final, no explican la causa.
 
-**Valorant Analytics** reconstruye la partida a nivel de rondas y micro-duelos para ofrecer coaching táctico accionable:
-1. **Impacto Real vs Bajas Basura:** Mide el daño medio por ronda (ADR) y la apertura de duelos ($FK/FD$), eliminando el espejismo de bajas conseguidas cuando la ronda ya está perdida.
-2. **Telemetría de Distancia:** Desglosa los enfrentamientos a corta distancia ($0-15\text{m}$), media ($15-30\text{m}$) y larga ($30-50\text{m}$) para detectar caídas de precisión de armas.
-3. **Disciplina de Ráfaga vs Disparo Único ($SE/TP$):** Identifica el abuso del spray en situaciones desfavorables ($SE/TP > 1.8$) y prescribe rutinas de Kovaaks adaptadas.
-4. **Sinergia Táctica de Dúo:** Audita la sincronía con tu compañero, el tiempo de tradeo y el balance de carga de bajas.
-5. **Integridad Criptográfica (DSSE & Merkle):** Genera declaraciones in-toto firmadas con Ed25519 y un árbol Merkle de eventos discretos para verificación inmutable sin repudio.
-6. **Radar de Fatiga y Tilt (Session Guardian):** Monitorea la caída del ADR y primeras muertes sin tradeo para emitir pausas obligatorias antes de rachas de derrotas.
-7. **Consenso Bizantino Multi-Lente:** Concilia perspectivas de Duelista, Centinela y Anchor mediante quórum tolerante a fallos bizantinos (BFT).
-8. **Privacidad y Cero Dependencia de la Nube:** Ejecución 100% local sin servidores intermedios ni librerías npm pesadas. Permite calibrar perfiles privados de forma instantánea sin conexión (`cli.js calibrate`).
-9. **Cosechador de Caché de Navegadores Chromium (`cli.js harvest`):** Escanea automáticamente la caché local de Vivaldi, Brave, Chrome, Edge y Opera descompimiendo Brotli y Gzip para eludir el 403 de Cloudflare Turnstile de Tracker.gg y OP.GG.
-10. **Auditor de Horas de Carrera y Tiempo en Partida (`cli.js career`):** Reconcilia el tiempo de juego efectivo en partida frente a la inflación de puntos de cuenta (AP), desglosando competitivo vs casual y mapeando hitos por rango.
-11. **Motor de Autodiagnóstico y Detección de MMR Drag (`cli.js diagnose`):** Deriva el verdadero Rango Merecido, detecta anclaje de certeza algorítmica en cuentas antiguas y clasifica la tasa de aprendizaje (Talento vs Esfuerzo) para perfiles sin antecedentes en FPS.
+- No aclaran si tus bajas cambiaron el destino de la ronda o si ocurrieron cuando el punto ya estaba perdido.
+- No identifican si pierdes enfrentamientos por abusar del retroceso del arma o por mala anticipación de ángulos.
+- No distinguen entre un mal momento individual y una cuenta cuyo emparejamiento interno (MMR) quedó anclado tras cientos de partidas.
+
+Valorant Analytics examina lo que sucede en cada ronda para darte respuestas claras y soluciones prácticas que puedes aplicar en tu siguiente partida.
 
 ---
 
-## 🚀 Modos de Uso (Matriz de Accesibilidad)
+## Qué obtienes con la herramienta
 
-Diseñado para cualquier jugador o desarrollador:
+### Diagnóstico 360° de la partida
+Un desglose conciso que evalúa tus cinco áreas clave: puntería inicial, control de mapa, duelos de apertura, economía de equipo y compostura en situaciones límite. Detecta con precisión las tres jugadas exactas donde se perdieron ventajas decisivas.
 
-| Perfil de Usuario | Modo de Operación | ¿Requiere Terminal? | ¿IA de Pago? | Cómo Empezar |
-| :--- | :--- | :---: | :---: | :--- |
-| **Jugador Convencional** | **Modo Texto (Zero-Tool)** | ❌ No | ❌ Gratis | Copia [`standalone_prompt.md`](standalone_prompt.md) y pégalo en ChatGPT o DeepSeek. |
-| **Desarrollador / Competidor** | **Master CLI (Node.js Nativo)** | ✅ Sí | ❌ Gratis | Clona este repositorio y corre `node cli.js match <archivo>`. |
-| **Usuario Avanzado de IA** | **Skill Agéntica (`SKILL.md`)** | ✅ Sí | Según agente | Cárgalo en Google Antigravity, Open Code o Claude Code. |
+### Rutina de puntería personalizada en 15 minutos
+En lugar de practicar ejercicios genéricos, el sistema genera una rutina adaptada a las debilidades de tu última sesión para KovaaK's, Aim Lab o la galería de tiro en Valorant. Si fallaste disparos a larga distancia, la rutina prioriza micro-ajustes estáticos; si abusaste de ráfagas largas, entrena disparos únicos con movimiento lateral.
 
----
+### Sinergia y coordinación en dúo
+Si juegas en pareja, analiza si ambos sincronizan bien los intercambios de bajas (re-frags), cómo se distribuye la carga ofensiva y si sus selecciones de agentes se complementan de manera eficiente.
 
-## ⚡ Master CLI: Despachador Universal
+### Auditoría de horas reales y rango merecido
+Separa tus horas de juego efectivo en competitivo de los modos casuales y descarta la inflación artificial de puntos de cuenta. Evalúa la dificultad real de las salas donde compites para indicarte qué rango mereces y si tu cuenta experimenta arrastre de emparejamiento.
 
-No necesitas memorizar nombres de scripts individuales. El despachador maestro `cli.js` orquesta todas las funciones:
-
-```bash
-# 1. Autodiagnóstico 360° y Detección de Fugas de ELO
-node cli.js match examples/sample_match.json "TenZ#0001"
-
-# 2. Telemetría de Armas, Zonas de Impacto y Bandas de Distancia (0-15m, 15-30m, 30-50m)
-node cli.js weapons examples/sample_match.json "TenZ#0001"
-
-# 3. Auditoría de Sinergia de Dúo y Tradeos (Balance de carga y roles)
-node cli.js duo examples/sample_match.json "TenZ#0001" "Chronicle#0001"
-
-# 4. Rutina Adaptativa de 15 Minutos en Kovaaks (Alineada a tus fallos de la partida)
-node cli.js aim examples/sample_match.json "TenZ#0001"
-
-# 5. Matriz de Duelos Directos 1v1 contra cada agente enemigo
-node cli.js duels examples/sample_match.json "TenZ#0001"
-
-# 6. Enlaces Normalizados Multi-Plataforma (Tracker / OP.GG / VLR)
-node cli.js profile "Derke#0001"
-
-# 7. Calibración Instantánea Zero-Cloud (Para perfiles privados o modo offline)
-node cli.js calibrate "TenZ#0001" "Radiant" "Duelist"
-
-# 8. Verificación Formal de Invariantes Matemáticos (Cero-NaN, límites [0,100], convergencia)
-node cli.js invariants examples/sample_match.json "TenZ#0001"
-
-# 9. Declaración in-toto v1 y Atestación Criptográfica DSSE firmada con Ed25519
-node cli.js attest examples/sample_match.json "TenZ#0001"
-
-# 10. Árbol de Auditoría Merkle de Eventos y Verificación de Prueba de Inclusión
-node cli.js merkle examples/sample_match.json
-
-# 11. Session Guardian: Índice de Tilt Cognitivo y Factor de Fatiga Neuromuscular
-node cli.js guardian examples/sample_match.json "TenZ#0001"
-
-# 12. Radar de Deriva Táctica y Entropía Mecánica (Divergencia Attack/Defense y Shanon)
-node cli.js drift examples/sample_match.json "TenZ#0001"
-
-# 13. Síntesis de Consenso Bizantino Multi-Lente (Quórum BFT)
-node cli.js consensus examples/sample_match.json "TenZ#0001"
-
-# 14. Generador Evolutivo de Rutinas Adaptativas de Puntería
-node cli.js synthesize examples/sample_match.json "TenZ#0001"
-
-# 15. Manifiesto CycloneDX v1.5 SBOM de Cadena de Suministro Zero-Dependency
-node cli.js sbom
-```
+### Extracción local sin bloqueos
+Recupera los datos de tus partidas directamente desde la memoria temporal de tu navegador habitual (Chrome, Brave, Edge, Opera o Vivaldi). Esto evita tiempos de espera caídos y bloqueos por sistemas antibot en páginas públicas.
 
 ---
 
-## 📊 Ejemplo de Salida: Telemetría 360° y Coaching
+## Tres formas sencillas de usarlo
+
+Elige la modalidad que mejor se adapte a tu flujo de trabajo:
+
+| Modalidad | Para quién es | Requisitos | Cómo se utiliza |
+| :--- | :--- | :---: | :--- |
+| **Modo Texto (Sin consola)** | Jugadores que buscan una lectura rápida | Ninguno | Copia la plantilla de `standalone_prompt.md` y pégala junto con los datos de tu partida en cualquier asistente web. |
+| **Línea de Comandos (Local)** | Quienes prefieren procesar datos en su equipo | Node.js instalado | Clona el repositorio y ejecuta `node cli.js match <archivo> "<Jugador#Tag>"`. |
+| **Asistente de Código / Agente** | Usuarios de entornos avanzados | Entorno compatible | Integra la carpeta en Claude Code, Google Antigravity u OpenCode mediante su archivo `SKILL.md`. |
+
+---
+
+## Ejemplo de diagnóstico
+
+Así se presenta un reporte tras procesar una partida competitiva:
 
 ```text
 ========================================================================
-⚡ VALORANT ANALYTICS: UNIVERSAL SOVEREIGN ENGINE (V3.0)
+VALORANT ANALYTICS — REPORTE DE RENDIMIENTO
+Partida: Lotus | Jugador: Iso | Rango de sala: Platino 2 / Diamante 1
 ========================================================================
-🎯 DIAGNÓSTICO 360°: TenZ#0001 (Iso - Radiant) | Mapa: Lotus
-------------------------------------------------------------------------
-📊 RADAR DE RENDIMIENTO COMPETITIVO:
-  • Precisión Mecánica (HS% / First-Bullet): 92 / 100 [HS: 38.2%]
-  • Macrogame & Control de Espacio (KAST):   84 / 100 [KAST: 78.3%]
-  • Duelos de Apertura (First Blood / Entry): 88 / 100 [FK/FD: 2.33]
-  • Disciplina Económica (Loadout Ratio):    90 / 100 [Win en Full-Buy: 68%]
-  • Compostura en Clutch (1v1 / 1v2):        82 / 100 [Conversión: 33%]
-------------------------------------------------------------------------
-🚨 TOP FUGAS DE ELO IDENTIFICADAS:
-  [#1] Sobre-asomo sin cobertura en rondas 5v3 (Ronda 7, 14)
-       Detalle:  Apertura de ángulos agresivos tras plantar la spike.
-       Solución: Jugar el tiempo tras plantar; no buscar bajas si la spike está controlada.
-  [#2] Micro-spray innecesario a más de 30 metros
-       Detalle:  SE/TP spray ratio elevado en duelos de larga distancia.
-       Solución: Ráfagas controladas de 2 balas con micro-strafe activo.
 
-💡 REGLA DE COGNICIÓN INMEDIATA:
-  "Juega el tiempo tras plantar; no busques la última baja si la spike está controlada."
-🎯 RUTINA KOVAAKS: 1wall6targets small (5 min) + Pasu Voltaic (5 min) + PatTargetSwitch (5 min).
+EVALUACIÓN GENERAL: 88 / 100
+  • Puntería y primer impacto:     86 / 100  (28.5% tiros a la cabeza)
+  • Participación útil (KAST):      82 / 100  (74.0% de rondas con impacto)
+  • Apertura de duelos:             89 / 100  (54.0% de duelos iniciales ganados)
+  • Disciplina económica:           90 / 100  (Buen aprovechamiento en compra completa)
+  • Resolución en desventaja:       80 / 100  (1 conversión de 3 intentos en 1v2)
+
+FUGAS PRINCIPALES DE RONDAS:
+  1. Sobre-exposición en post-plant (Rondas 7 y 14):
+     Búsqueda innecesaria de la última baja con ventaja numérica (5v3).
+     Ajuste: Mantener posiciones cruzadas y consumir el tiempo del rival.
+
+  2. Ráfagas prolongadas a más de 30 metros:
+     Compromiso excesivo con el retroceso del arma frente a coberturas lejanas.
+     Ajuste: Disparar ráfagas de 2 balas combinadas con desplazamiento corto.
+
+RUTINA DE PUNTERÍA SUGERIDA (15 MINUTOS):
+  • Microshot / Click-timing: 5 minutos (precisión de parada inicial).
+  • Dynamic Horizontal Click: 5 minutos (control de ángulos y esquinas).
+  • Smooth Tracking:          5 minutos (seguimiento de desplazamientos rápidos).
 ========================================================================
 ```
 
 ---
 
-## 🏗️ Arquitectura y Motores
+## Comandos principales
 
-```mermaid
-graph TD
-    Input([Match JSON / Tracker URL / Riot ID]) --> Preflight[preflight_guard.js\nSanitización y Guardián de Rutas]
-    Preflight --> MasterCLI[cli.js Master Dispatcher]
-
-    MasterCLI --> M1[learning_profile.js\nRadar de Habilidades y Fugas de ELO]
-    MasterCLI --> M2[weapon_telemetry.js\nBandas de Distancia y Ratio SE/TP]
-    MasterCLI --> M3[duo_synergy.js\nVentanas de Tradeo y Balance de Carga]
-    MasterCLI --> M4[kovaaks_generator.js\nRutina Adaptativa de 15 Minutos]
-    MasterCLI --> M5[duel_matrix.js\nMatriz de Duelos Directos 1v1]
-    MasterCLI --> M6[economy_analyzer.js\nConversión Económica y Rondas Eco]
-    MasterCLI --> M7[invariant_validator.js\nVerificación Formal Matemática]
-    MasterCLI --> M8[dsse_attestation.js\nAtestación in-toto v1 Ed25519]
-    MasterCLI --> M9[merkle_ledger.js\nÁrbol Merkle de Eventos Criptográficos]
-    MasterCLI --> M10[session_guardian.js\nMonitor de Fatiga y Tilt]
-    MasterCLI --> M11[drift_detector.js\nDivergencia de Lados y Entropía]
-    MasterCLI --> M12[consensus_arbiter.js\nQuórum Bizantino Multi-Lente]
-    MasterCLI --> M13[routine_synthesizer.js\nRutina Adaptativa Evolutiva]
-    MasterCLI --> M14[sbom_manifest.js\nManifiesto CycloneDX SBOM]
-
-    M1 & M2 & M3 & M4 & M5 & M6 & M7 & M8 & M9 & M10 & M11 & M12 & M13 & M14 --> Report[📊 Auditoría Soberana Táctica y Criptográfica]
-```
-
-### Desglose de Motores
-
-| Módulo | Responsabilidad Principal | Valor Concreto para el Jugador |
-| :--- | :--- | :--- |
-| **`learning_profile.js`** | Radar de 5 pilares (Puntería, Macro, Aperturas, Economía, Clutch). | Señala con precisión las rondas donde se tiró la ventaja numérica. |
-| **`weapon_telemetry.js`** | Zonas de impacto (Cabeza/Cuerpo/Pierna) + 3 bandas ($0-15\text{m}$, $15-30\text{m}$, $30-50\text{m}$). | Detecta pánico en el spray ($SE/TP$) y prescribe micro-ajustes. |
-| **`duo_synergy.js`** | Ventanas de tradeo, solapamiento de roles y balance de carga. | Resuelve disputas de premade midiendo objetivamente la eficacia del tradeo. |
-| **`kovaaks_generator.js`** | Rutina de 15 min en Kovaaks/AimLab basada en fallos reales. | Corrige fallos mecánicos específicos (micro-corrección vs tracking). |
-| **`duel_matrix.js`** | Balance neto 1v1 contra cada agente rival. | Comprueba el MMR oculto evaluando el rendimiento contra rangos superiores. |
-| **`economy_analyzer.js`** | Tasa de victoria en pistolas, ecos, semi-compras y compras completas. | Erradica compras aisladas que rompen la economía de equipo. |
-| **`invariant_validator.js`** | Aserciones formales de estado (límites $[0,100]$, suma de zonas $= 100\%$). | Erradica nulos, NaN y anomalías estadísticas en tiempo de ejecución. |
-| **`dsse_attestation.js`** | Sobre DSSE in-toto firmado asimétricamente con Ed25519. | Garantiza no-repudio e integridad criptográfica en auditorías de partida. |
-| **`merkle_ledger.js`** | Árbol Merkle sobre rondas, bajas y plantas de spike. | Emite pruebas criptográficas de inclusión para jugadas individuales. |
-| **`session_guardian.js`** | Detección de fatiga neuromuscular y acumulación de tilt. | Impone pausas tácticas antes de encadenar pérdidas de rango. |
-| **`drift_detector.js`** | Divergencia ataque/defensa y entropía de Shannon. | Diagnostica el colapso del rendimiento por tramos de partida. |
-| **`consensus_arbiter.js`** | 3 lentes tácticas (Entrada, Economía, Anchor) con quórum BFT. | Elimina contradicciones entre estilos de juego agresivo y pasivo. |
-| **`routine_synthesizer.js`**| Generador evolutivo de ejercicios con dificultad dinámica ($1.0-1.5x$). | Actualiza continuamente el calentamiento según las debilidades activas. |
-| **`sbom_manifest.js`** | Generador de lista de materiales CycloneDX v1.5. | Atestigua de forma verificable la ausencia total de dependencias npm. |
-| **`preflight_guard.js`** | Sanitización fail-closed y bloqueo de path traversal. | Impide inyecciones de comandos y lecturas de rutas no autorizadas. |
-
----
-
-## 🔬 Verificación Determinista y Suites de Pruebas
-
-El código está construido bajo aserciones deterministas estrictas. Cero tests placebo, cero suposiciones no demostradas:
+Para quienes utilicen la terminal, el despachador unificado reúne las funciones clave:
 
 ```bash
-# Ejecutar la suite determinista de 29 aserciones
-node test_suite.js
+# Diagnóstico completo de partida y detección de fallos
+node cli.js match examples/sample_match.json "TuNombre#TAG"
 
-# Ejecutar las 8 suites modulares en tests/
-node tests/test_cli.js
-node tests/test_invariants.js
-node tests/test_preflight.js
-node tests/test_dsse_merkle.js
-node tests/test_guardian_drift.js
-node tests/test_consensus_synthesizer.js
-node tests/test_economy_weapons.js
-node tests/test_duel_coaching.js
+# Generación de rutina de puntería de 15 minutos
+node cli.js aim examples/sample_match.json "TuNombre#TAG"
 
-# Ejecutar el arnés de auditoría autónomo Open Code / DeepSeek
-node opencode_tester.js
-```
+# Telemetría de armas y distancias de enfrentamiento
+node cli.js weapons examples/sample_match.json "TuNombre#TAG"
 
-### Resultados de la Auditoría
+# Auditoría de coordinación con tu compañero de dúo
+node cli.js duo examples/sample_match.json "Jugador1#TAG" "Jugador2#TAG"
 
-```text
-========================================================================
-🤖 OPEN CODE / DEEPSEEK TESTER & AUDIT HARNESS
-Puntuación Global: 100 / 100 | Estado: ✅ EXCELENCIA VERIFICADA
-========================================================================
-📁 1. AUDITORÍA ESTÁTICA DE ARCHIVOS (30 / 30 pts):
-  ✓ [PASS] Todos los 26 archivos y scripts verificados con SHA-256
+# Extracción de datos desde la caché del navegador (sin bloqueos de red)
+node cli.js harvest
 
-⚡ 2. AUDITORÍA DE EJECUCIÓN EN TIEMPO REAL (70 / 70 pts):
-  ✅ Todos los módulos y comandos del CLI pasan con Exit Code 0 [29/29 PASS]
-========================================================================
+# Auditoría de horas de carrera y tiempo efectivo de juego
+node cli.js career
+
+# Evaluación de rango merecido y detección de estancamiento
+node cli.js diagnose
 ```
 
 ---
 
-## 📈 Tabla de Referencia Élite (Estándares Immortal / Radiant)
+## Privacidad y arquitectura ligera
 
-| Métrica | Media Competitiva (Silver/Gold) | Estándar Élite (Immortal / Radiant) | Interpretación Táctica |
-| :--- | :---: | :---: | :--- |
-| **ADR** | 125 – 140 | **180 – 240+** | Daño infligido por ronda sin depender de quién se lleva la baja final. |
-| **ACS** | 190 – 210 | **280 – 380+** | Valor global por ronda, apertura de mapa y bajas múltiples de impacto. |
-| **HS %** | 16% – 22% | **35% – 50%+** | Colocación de mira a la altura de la cabeza y disciplina de primer tiro. |
-| **FK / FD** | 0.9 – 1.1 | **2.0+ Ratio** | Eficacia en el primer duelo de la ronda; mide la entrada efectiva a sitio. |
-| **KAST %** | 65% – 70% | **78% – 88%+** | Porcentaje de rondas donde consigues baja, asistencia, sobrevives o eres tradeado. |
-| **SE / TP Ratio** | > 2.2 (Mucho spray) | **< 1.0 (Tap/Burst)** | Eficiencia de disparo. Ratios altos indican pánico de spray prolongado. |
+- **Procesamiento estrictamente local:** Tus partidas e historiales se analizan en tu propio ordenador. Ninguna información se envía a servidores remotos ni se comparte con terceros.
+- **Cero dependencias externas:** El código opera únicamente con módulos incluidos de fábrica en Node.js. No requiere descargas pesadas ni instalaciones adicionales con npm.
+- **Multiplataforma:** Probado y funcional en Windows 11, macOS y distribuciones comunes de Linux.
 
 ---
 
-## 🔒 Privacidad y Soberanía Ante Todo
+## Licencia
 
-* **Cero Almacenamiento en la Nube:** Las partidas se procesan estrictamente en la memoria RAM de tu equipo local.
-* **Sin Telemetría Recopilada:** No existen llamadas ocultas a analíticas, tokens de seguimiento ni registros remotos.
-* **Fixtures Anonimizados:** Todos los ejemplos emplean identidades canónicas de jugadores de VCT (`TenZ#0001`, `Chronicle#0001`, `Derke#0001`, `aspas#0001`).
-* **Listo para Offline:** Cero dependencias externas de npm. Corre de forma nativa sobre Node.js estándar (v18+).
-
----
-
-## 📄 Licencia
-
-MIT © [Acourd](https://github.com/Acourd). Abierto para jugadores competitivos, analistas y desarrolladores.
+Distribuido bajo licencia MIT. Consulta el archivo `LICENSE` para más información.

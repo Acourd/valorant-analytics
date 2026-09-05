@@ -192,7 +192,11 @@ function aggregateCareerTelemetry(accountsList) {
 function generateMilestonesTimeline(careerReport, options = {}) {
   const totalComp = careerReport.summary.totalCompetitive.hours;
   const diamondAcc = careerReport.accounts.find(a => (a.peakRank || '').includes('Diamond'));
-  const speedrunHours = diamondAcc ? diamondAcc.competitive.hours : 10.2;
+  const speedrunHours = (diamondAcc && typeof diamondAcc.competitive?.hours === 'number')
+    ? diamondAcc.competitive.hours
+    : (typeof options.speedrunHours === 'number' ? options.speedrunHours : 10.2);
+  const mainAgent = options.mainAgent || 'Iso';
+  const speedrunHandle = diamondAcc ? diamondAcc.handle : (options.speedrunHandle || 'Speedrun');
 
   return [
     {
@@ -217,7 +221,7 @@ function generateMilestonesTimeline(careerReport, options = {}) {
       rango: 'Oro 1 - Oro 3',
       tramoHoras: 165,
       acumuladoHoras: 260,
-      contexto: 'Consolidación competitiva, cambio de ritmo y especialización en Iso.'
+      contexto: `Consolidación competitiva, cambio de ritmo y especialización en ${mainAgent}.`
     },
     {
       rango: 'Platino 1',
@@ -229,7 +233,7 @@ function generateMilestonesTimeline(careerReport, options = {}) {
       rango: 'Diamante 1',
       tramoHoras: speedrunHours,
       acumuladoHoras: Math.round(340 + speedrunHours),
-      contexto: `Conquista en cuenta limpia sin anclaje de MMR (${diamondAcc ? diamondAcc.handle : 'Speedrun'}).`
+      contexto: `Conquista en cuenta limpia sin anclaje de MMR (${speedrunHandle}).`
     }
   ];
 }

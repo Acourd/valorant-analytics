@@ -59,15 +59,23 @@ function getChromiumCachePaths() {
 
 function decompressBuffer(buf) {
   if (!buf || buf.length === 0) return null;
-  // Try brotli first (modern chromium standard for tracker.gg)
+  // Probe brotli (estándar Chromium moderno para tracker.gg)
+  let brotliOk = null;
   try {
-    return zlib.brotliDecompressSync(buf);
-  } catch (e) {}
+    brotliOk = zlib.brotliDecompressSync(buf);
+  } catch (_notBrotli) {
+    brotliOk = null;
+  }
+  if (brotliOk) return brotliOk;
 
-  // Try gzip
-  try {
-    return zlib.gunzipSync(buf);
-  } catch (e) {}
+  // Probe gzip solo si hay firma mágica (1f 8b)
+  if (buf.length > 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
+    try {
+      return zlib.gunzipSync(buf);
+    } catch (_badGzip) {
+      return null;
+    }
+  }
 
   // Check if buffer starts with JSON
   const str = buf.toString('utf8');
@@ -83,6 +91,7 @@ function extractFromCacheDirectory(cacheDir, filterPattern) {
   if (!fs.existsSync(data1Path)) return [];
 
   const results = [];
+  const diagnostics = [];
   try {
     const data1 = fs.readFileSync(data1Path);
     const data2Path = path.join(cacheDir, 'data_2');
@@ -100,6 +109,7 @@ function extractFromCacheDirectory(cacheDir, filterPattern) {
 
       const entryStart = Math.floor(idx / 256) * 256;
       for (let cand = Math.max(0, entryStart - 512); cand <= idx; cand += 4) {
+        if (cand + 24 > data1.length) continue;
         const d0 = data1.readInt32LE(cand);
         const d1 = data1.readInt32LE(cand + 4);
         if (d1 > 80 && d1 < 5000000 && d0 > 40 && d0 < 10000) {
@@ -138,7 +148,9 @@ function extractFromCacheDirectory(cacheDir, filterPattern) {
                   try {
                     const json = JSON.parse(decomp.toString('utf8'));
                     results.push({ url, cacheDir, json });
-                  } catch (e) {}
+                  } catch (jsonErr) {
+                    diagnostics.push(`Entrada no-JSON descartada en ${url.slice(0, 80)} (${jsonErr.message}).`);
+                  }
                 }
               }
               break;
@@ -147,8 +159,11 @@ function extractFromCacheDirectory(cacheDir, filterPattern) {
         }
       }
     }
-  } catch (e) {}
+  } catch (scanErr) {
+    diagnostics.push(`Extracción interrumpida en ${cacheDir}: ${scanErr.message}. Se devuelven resultados parciales.`);
+  }
 
+  if (diagnostics.length > 0) results.diagnostics = diagnostics;
   return results;
 }
 

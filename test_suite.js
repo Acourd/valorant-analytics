@@ -9,6 +9,7 @@
 const assert = require('assert');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { execFileSync } = require('child_process');
 
 const scriptsDir = path.join(__dirname, 'scripts');
@@ -42,12 +43,12 @@ const {
   assembleRawMatchStructure,
   resolveMatchDataResilient
 } = require(path.join(scriptsDir, 'universal_ingestor.js'));
-const { decompressBuffer, getChromiumCachePaths } = require(path.join(scriptsDir, 'browser_cache_harvester.js'));
+const { decompressBuffer, getChromiumCachePaths, extractFromCacheDirectory } = require(path.join(scriptsDir, 'browser_cache_harvester.js'));
 const { extractAccountTelemetry, aggregateCareerTelemetry, generateMilestonesTimeline } = require(path.join(scriptsDir, 'career_telemetry.js'));
 const { evaluateMmrDrag, evaluateTalentVsEffort } = require(path.join(scriptsDir, 'autodiagnostic_engine.js'));
 
 let passed = 0;
-const total = 39;
+const total = 46;
 function check(name, fn) {
   process.stdout.write(`Testing: ${name}... `);
   try {
@@ -452,6 +453,86 @@ check('39. cli.js career & diagnose: ejecución exitosa de los nuevos comandos c
     } finally {
       if (fs.existsSync(mockFile)) fs.unlinkSync(mockFile);
     }
+  });
+
+// ---- Blindaje adversarial v4.1: casos límite y edge cases ----
+
+check('40. harvester: cacheDir inexistente y data_1 truncado no lanzan (retornan [])',
+  () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'harv-edge-'));
+    try {
+      assert.deepStrictEqual(extractFromCacheDirectory(path.join(tmp, 'no-existe'), null), []);
+      const truncDir = path.join(tmp, 'trunc');
+      fs.mkdirSync(truncDir);
+      fs.writeFileSync(path.join(truncDir, 'data_1'), Buffer.alloc(100));
+      const res = extractFromCacheDirectory(truncDir, null);
+      assert.ok(Array.isArray(res), 'debe retornar array aunque el blockfile esté truncado');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+check('41. ingestor: options.matchId determinista y sin random en contrato',
+  () => {
+    const r = assembleRawMatchStructure([], 'Ascent', 24, 'Test#0001', { matchId: 'resilient-test-001' });
+    assert.strictEqual(r.data.metadata.matchId, 'resilient-test-001');
+    assert.strictEqual(r.data.segments.filter(s => s.type === 'player-summary').length, 10);
+    assert.strictEqual(r.data.metadata.rounds, 24);
+  });
+
+check('42. ingestor: archivo JSON corrupto lanza Error descriptivo (fail-closed, sin sintético)',
+  () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ing-edge-'));
+    try {
+      const bad = path.join(tmp, 'corrupto.json');
+      fs.writeFileSync(bad, '{"data": {"segments": [INVALIDO');
+      assert.throws(() => resolveMatchDataResilient(bad, 'Test#0001'), /JSON corrupto/);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+check('43. ingestor: parseTextScoreboard rechaza cadena vacía con mensaje descriptivo',
+  () => {
+    assert.throws(() => parseTextScoreboard(''), /no vacía/);
+    assert.throws(() => parseTextScoreboard(null), /no vacía/);
+  });
+
+check('44. autodiagnostic: null/malformado lanza Error descriptivo, no TypeError',
+  () => {
+    assert.throws(() => evaluateMmrDrag(null), /requiere telemetría de cuenta/);
+    assert.throws(() => evaluateMmrDrag('cadena'), /requiere telemetría de cuenta/);
+    assert.throws(() => evaluateTalentVsEffort(null), /careerReport/);
+    assert.throws(() => evaluateTalentVsEffort({ accounts: [] }), /summary/);
+    assert.throws(() => evaluateTalentVsEffort({ accounts: [{ competitive: {} }], summary: {} }), /totalGeneral/);
+  });
+
+check('45. career milestones: opciones personalizadas (mainAgent/speedrunHours) sin hardcode',
+  () => {
+    const career = {
+      summary: {
+        totalCompetitive: { hours: 300 },
+        totalGeneral: { hours: 400 },
+        highestPeakRank: 'Diamond 1'
+      },
+      accounts: [{ peakRank: 'Diamond 1', competitive: { hours: 12.5 }, handle: 'X#1', isExcluded: false }]
+    };
+    const t1 = generateMilestonesTimeline(career, { mainAgent: 'Jett', speedrunHours: 12.5 });
+    assert.ok(t1.some(m => m.contexto.includes('Jett')), 'mainAgent no aplicado');
+    assert.ok(t1.some(m => m.tramoHoras === 12.5), 'speedrunHours no aplicado');
+    const t2 = generateMilestonesTimeline(career);
+    assert.ok(t2.some(m => m.contexto.includes('Iso')), 'default Iso no preservado');
+  });
+
+check('46. autodiagnostic: cuenta malformada parcial no truena en agregados',
+  () => {
+    const career = {
+      summary: { totalGeneral: { hours: 200 }, highestPeakRank: 'Gold 3' },
+      accounts: [{ handle: 'A#1', isExcluded: false }, { handle: 'B#1', isExcluded: false, competitive: { matches: 10, kd: '1.2', acs: '230', dd: '18', hs: '25' }, peakRank: 'Gold 2' }]
+    };
+    const r = evaluateTalentVsEffort(career);
+    assert.ok(r.telemetrySummary.totalCompetitiveMatches >= 10, 'matches no agregados');
+    assert.ok(r.category.length > 0 && r.talentRatio.includes('/'), 'categoría incompleta');
   });
 
 console.log(`\nResults: ${passed}/${total} tests passed.`);

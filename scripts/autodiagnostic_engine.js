@@ -13,6 +13,9 @@
  */
 
 function evaluateMmrDrag(accountTelemetry) {
+  if (!accountTelemetry || typeof accountTelemetry !== 'object') {
+    throw new Error('evaluateMmrDrag requiere telemetría de cuenta (objeto con competitive/currentRank). Entrada recibida: ' + String(accountTelemetry));
+  }
   const matches = accountTelemetry.competitive?.matches || 0;
   const kd = parseFloat(accountTelemetry.competitive?.kd || '1.0');
   const acs = parseFloat(accountTelemetry.competitive?.acs || '200');
@@ -37,6 +40,12 @@ function evaluateMmrDrag(accountTelemetry) {
 }
 
 function evaluateTalentVsEffort(careerReport, options = {}) {
+  if (!careerReport || !Array.isArray(careerReport.accounts)) {
+    throw new Error('evaluateTalentVsEffort requiere careerReport con accounts[]. Entrada inválida recibida.');
+  }
+  if (!careerReport.summary || !careerReport.summary.totalGeneral) {
+    throw new Error('evaluateTalentVsEffort requiere careerReport.summary.totalGeneral. Resumen ausente.');
+  }
   const zeroFpsBackground = options.zeroFpsBackground !== false; // default true based on user profile
   const personal = careerReport.accounts.filter(a => !a.isExcluded);
   
@@ -48,12 +57,13 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
   let weightedHs = 0;
 
   personal.forEach(a => {
-    const m = a.competitive.matches || 1;
+    const comp = a.competitive || {};
+    const m = comp.matches || 1;
     totalCompMatches += m;
-    weightedKd += parseFloat(a.competitive.kd || '1.0') * m;
-    weightedAcs += parseFloat(a.competitive.acs || '200') * m;
-    weightedDd += parseFloat(a.competitive.dd || '10') * m;
-    weightedHs += parseFloat(a.competitive.hs || '20') * m;
+    weightedKd += parseFloat(comp.kd || '1.0') * m;
+    weightedAcs += parseFloat(comp.acs || '200') * m;
+    weightedDd += parseFloat(comp.dd || '10') * m;
+    weightedHs += parseFloat(comp.hs || '20') * m;
   });
 
   const avgKd = totalCompMatches > 0 ? Number((weightedKd / totalCompMatches).toFixed(2)) : 1.15;
@@ -65,7 +75,7 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
   const peakRank = careerReport.summary.highestPeakRank;
 
   // Check fresh account spike (WubbaLubbaDub effect)
-  const freshAccount = personal.find(a => a.competitive.matches > 0 && a.competitive.matches <= 30 && a.peakRank.includes('Diamond'));
+  const freshAccount = personal.find(a => (a.competitive?.matches || 0) > 0 && (a.competitive?.matches || 0) <= 30 && (a.peakRank || '').includes('Diamond'));
   const hasSmurfBreakout = Boolean(freshAccount);
 
   let category = 'Talento Táctico Adaptativo (High Learning Velocity)';

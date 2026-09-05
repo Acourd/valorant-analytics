@@ -117,8 +117,8 @@ function detectMap(text) {
   return null;
 }
 
-function assembleRawMatchStructure(extractedPlayers, mapName, roundsPlayed = 24, targetHandle = 'kirtmy#000') {
-  const matchId = `resilient-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 8)}`;
+function assembleRawMatchStructure(extractedPlayers, mapName, roundsPlayed = 24, targetHandle = 'kirtmy#000', options = {}) {
+  const matchId = options.matchId || `resilient-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 8)}`;
   const defaultRoster = [
     { handle: targetHandle, agent: 'Iso', rank: 'Gold 2', kills: 18, deaths: 15, assists: 4, acs: 238, adr: 156.4, hs: 24.2, fk: 3, fd: 2 },
     { handle: 'Chronicle#0001', agent: 'Sova', rank: 'Gold 3', kills: 16, deaths: 14, assists: 9, acs: 215, adr: 142.1, hs: 22.0, fk: 2, fd: 1 },
@@ -320,15 +320,19 @@ function assembleRawMatchStructure(extractedPlayers, mapName, roundsPlayed = 24,
 }
 
 function resolveMatchDataResilient(source, playerHandle = 'kirtmy#000', options = {}) {
+  const diagnostics = [];
+
   // 1. Archivo local existente
   if (typeof source === 'string' && fs.existsSync(source)) {
-    try {
-      const content = fs.readFileSync(source, 'utf8');
-      if (content.trim().startsWith('{')) {
+    const content = fs.readFileSync(source, 'utf8');
+    if (content.trim().startsWith('{')) {
+      try {
         return JSON.parse(content);
+      } catch (jsonErr) {
+        throw new Error(`Archivo JSON corrupto "${source}": ${jsonErr.message}. No se generó telemetría sintética para evitar análisis falsos.`);
       }
-      return parseTextScoreboard(content, { targetPlayer: playerHandle, ...options });
-    } catch (e) {}
+    }
+    return parseTextScoreboard(content, { targetPlayer: playerHandle, ...options });
   }
 
   // 2. Si source es una cadena con formato de scoreboard
@@ -346,7 +350,9 @@ function resolveMatchDataResilient(source, playerHandle = 'kirtmy#000', options 
     if (fs.existsSync(cacheFile)) {
       try {
         return JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
-      } catch (_) {}
+      } catch (cacheErr) {
+        diagnostics.push(`Caché corrupta en ${cacheFile} (${cacheErr.message}); intentando red.`);
+      }
     }
 
     try {
@@ -354,7 +360,14 @@ function resolveMatchDataResilient(source, playerHandle = 'kirtmy#000', options 
       try {
         fs.mkdirSync(cacheDir, { recursive: true });
         fs.writeFileSync(cacheFile, JSON.stringify(remoteData, null, 2));
-      } catch (_) {}
+      } catch (persistErr) {
+        diagnostics.push(`No se pudo persistir caché (${persistErr.message}); se responde en memoria.`);
+      }
+      if (diagnostics.length > 0) {
+        remoteData.data = remoteData.data || {};
+        remoteData.data.metadata = remoteData.data.metadata || {};
+        remoteData.data.metadata.ingestionDiagnostics = diagnostics;
+      }
       return remoteData;
     } catch (netErr) {
       console.log(`\n🛡️ [MOTOR DE RESILIENCIA TÁCTICA ACTIVADO]`);
@@ -365,6 +378,7 @@ function resolveMatchDataResilient(source, playerHandle = 'kirtmy#000', options 
       const synthetic = assembleRawMatchStructure([], options.map || 'Ascent', 24, playerHandle);
       synthetic.data.metadata.matchId = matchId;
       synthetic.data.metadata.wafContainment = true;
+      synthetic.data.metadata.ingestionDiagnostics = [...diagnostics, 'Fallback sintético por fallo de red: NO es telemetría real.'];
       return synthetic;
     }
   }
