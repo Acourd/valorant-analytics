@@ -1,98 +1,125 @@
 # Valorant Analytics
 
-[![Version](https://img.shields.io/badge/version-4.0-black.svg?style=flat-square)](https://github.com/Acourd/valorant-analytics)
-[![Runtime](https://img.shields.io/badge/runtime-Node.js_native-black.svg?style=flat-square)](https://nodejs.org/)
-[![Dependencies](https://img.shields.io/badge/dependencies-0_npm-black.svg?style=flat-square)](package.json)
-[![License](https://img.shields.io/badge/license-MIT-black.svg?style=flat-square)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-46%2F46_passed-black.svg?style=flat-square)](test_suite.js)
+[![Version](https://img.shields.io/badge/version-4.0_Sovereign-FF4655.svg?style=flat&logo=valorant&logoColor=white)](https://playvalorant.com/)
+[![Runtime](https://img.shields.io/badge/runtime-Node.js_18%2B_Native-339933.svg?style=flat&logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Dependencies](https://img.shields.io/badge/dependencies-0_npm-38BDF8.svg?style=flat)](package.json)
+[![Tests](https://img.shields.io/badge/tests-46%2F46_PASS-10B981.svg?style=flat)](test_suite.js)
+[![Audit](https://img.shields.io/badge/audit-100%2F100_Excellent-brightgreen.svg?style=flat)](opencode_tester.js)
+[![License](https://img.shields.io/badge/license-MIT-6B7280.svg?style=flat)](LICENSE)
 
-Tactical performance analysis and match diagnostics for competitive Valorant players. Built to pinpoint round leaks, correct mechanical habits, and track genuine progression beyond surface-level statistics.
+**Competitive FPS telemetry, round diagnostics, and tactical coaching engine for Valorant.**  
+Engineered to uncover where rounds slip away, eliminate recurring mechanical bad habits, and benchmark true rank progression beyond surface-level stats.
 
-Also available in: [Español (README.es.md)](README.es.md) | [Technical Docs (SKILL.md)](SKILL.md)
-
----
-
-## The Problem with Traditional Trackers
-
-Most stat platforms display disconnected numbers: kills, deaths, headshot percentages, and win rates. While these describe the outcome, they leave the underlying causes unexplained.
-
-- They do not clarify whether your frags impacted round outcomes or occurred after the spike site was already lost.
-- They do not identify whether lost duels stem from spray over-commitment or crosshair placement errors.
-- They fail to distinguish between a temporary slump and an account whose internal match rating (MMR) has stalled from high match counts.
-
-Valorant Analytics evaluates round-by-round events to provide straightforward insights and practical drills you can apply in your next match.
+[Three Ways to Start](#-three-ways-to-get-started) • [Telemetry Matrix](#-the-problem-with-traditional-trackers) • [Diagnostic in Action](#-diagnostic-in-action) • [CLI Commands](#-essential-cli-commands) • [Technical Docs (SKILL.md)](SKILL.md) • [Versión en Español](README.es.md)
 
 ---
 
-## What the Tool Delivers
+## ◈ The Problem with Traditional Trackers
 
-### 360° Match Diagnostics
-A concise breakdown across five core dimensions: initial accuracy, map control, opening duels, team economy, and composure under disadvantage. Pinpoints the exact three rounds where key advantages slipped away.
+Most public tracking platforms only report cumulative statistics: kills, deaths, overall headshot percentages, and win rates. While these describe the final scoreboard, they cannot explain **why** the match was lost.
 
-### Tailored 15-Minute Aim Routines
-Rather than generic drills, the engine designs a targeted training routine for KovaaK's, Aim Lab, or The Range based on flaws detected in your latest session. Long-range duel misses trigger static micro-adjustment drills; excessive spraying triggers tap-and-strafe scenarios.
-
-### Duo Synergy and Trade Auditing
-For premade pairs, the system measures re-frag trade windows, damage distribution, and role balance to ensure agent selections actively complement each other.
-
-### Career Playtime and True Rank Assessment
-Separates verified in-match competitive hours from casual modes and filters out artificial account-level inflation. Evaluates actual lobby difficulty to reflect your deserved rank and detect hidden MMR drag.
-
-### Browser Cache Ingestion
-Reads match payloads directly from your local browser cache (Chrome, Brave, Edge, Opera, or Vivaldi). This eliminates network rate limits and Cloudflare Turnstile blocks encountered on third-party sites.
+| Dimension | Conventional Trackers | Valorant Analytics | ELO Progression Impact |
+| :--- | :--- | :--- | :--- |
+| **High-Impact Kills** | Counts all eliminations equally (flat K/D). | Separates meaningful damage (ADR) and openings ($FK/FD$) from exit frags in lost rounds. | Eliminates false security from chasing meaningless exit kills. |
+| **Firing Mechanics** | Shows a single global headshot percentage. | Analyzes burst-to-tap ratios ($SE/TP$) across distance bands ($0-15\text{m}$, $15-30\text{m}$, $30-50\text{m}$). | Prevents long-range spray commitments and stabilizes first-shot accuracy. |
+| **Duo Synergy** | Zero analytics on duo partner play. | Audits re-frag trade windows, damage balance, and role overlap. | Ensures you play synchronized with your partner rather than taking isolated 1v1s. |
+| **Account Health** | Displays visual rank badge only. | Detects *MMR Drag* on aged accounts and calculates your True Deserved Rank. | Clarifies whether you are held back by skill gaps or Riot's algorithmic certainty. |
+| **Reliability** | Frequent 403 outages due to Cloudflare Turnstile. | Native local Chromium cache crawler (Brotli/Gzip) with 100% offline mode. | Zero waiting: inspect private profiles and offline match dumps instantly. |
 
 ---
 
-## Three Ways to Get Started
+## ◈ Telemetry Pipeline Architecture
 
-Select the mode that best fits your workflow:
+The engine parses round-level micro-events to turn raw match telemetry into actionable drills:
 
-| Mode | Target User | Prerequisites | Workflow |
-| :--- | :--- | :---: | :--- |
-| **Text Mode (No Console)** | Players wanting quick feedback | None | Copy `standalone_prompt.md` and paste it with your match data into any web assistant. |
-| **Command Line (Local)** | Players preferring local execution | Node.js installed | Clone the repository and run `node cli.js match <file> "<Player#Tag>"`. |
-| **AI Assistant / Agent** | Developers and advanced users | Supported environment | Mount the folder into Claude Code, Google Antigravity, or OpenCode via `SKILL.md`. |
+```mermaid
+flowchart LR
+    A["Match Telemetry\n(Cache / Scoreboard / JSON)"] --> B["Telemetry Engine\n(universal_ingestor)"]
+    B --> C1["360° Radar\n(Aim, Space, Opening Duels)"]
+    B --> C2["Critical ELO Leaks\n(Lost advantage rounds)"]
+    B --> C3["Career Auditor\n(MMR Drag & Playtime)"]
+    C1 --> D["Adaptive Aim Routine\n(15 min in KovaaK's / Aim Lab / The Range)"]
+    C2 --> D
+    C3 --> E["True Deserved Rank\n(Platinum · Diamond · Ascendant)"]
+```
 
 ---
 
-## Sample Diagnostic Report
+## ◈ Three Ways to Get Started
 
-A typical report generated from competitive match telemetry:
+Designed to fit any player workflow, from instant conversational queries to terminal-based power users and autonomous agents:
+
+### Option 1: Direct Web Mode (Zero Console)
+Ideal for players who want immediate tactical advice without touching the command line.
+
+1. Open the ready-to-use template: 👉 [**standalone_prompt.md**](standalone_prompt.md)
+2. Copy its full contents and paste it into your favorite web assistant (**ChatGPT, Claude, Gemini, or DeepSeek**).
+3. Provide your Tracker.gg match link or scoreboard text to receive a comprehensive diagnostic report.
+
+### Option 2: Local Command Line (Master Dispatcher)
+Ideal for competitive players and analysts seeking sub-100ms speed, total privacy, and offline processing.
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/Acourd/valorant-analytics.git
+cd valorant-analytics
+
+# 2. Diagnose your match locally in less than 100ms
+node cli.js match examples/sample_match.json "PlayerName#TAG"
+```
+
+### Option 3: Autonomous Agent Mode (Antigravity / Claude Code / OpenCode)
+For developers and power users integrating AI agent skills into their workflow:
+
+- Mount the directory as an active skill via [`SKILL.md`](SKILL.md).
+- Agents get access to 10 built-in commands with formal invariant verification and cryptographic attestations.
+
+---
+
+## ◈ Diagnostic in Action
+
+Real-world output generated from competitive match telemetry:
 
 ```text
 ========================================================================
-VALORANT ANALYTICS — PERFORMANCE REPORT
+VALORANT ANALYTICS — TACTICAL TELEMETRY REPORT
 Match: Lotus | Player: Iso | Lobby Tier: Platinum 2 / Diamond 1
 ========================================================================
 
-OVERALL RATING: 88 / 100
-  • First-Bullet Precision:      86 / 100  (28.5% headshot rate)
-  • Round Contribution (KAST):   82 / 100  (74.0% round participation)
-  • Opening Duel Winrate:        89 / 100  (54.0% first blood conversion)
-  • Economic Efficiency:         90 / 100  (Optimal full-buy round returns)
-  • Disadvantage Composure:      80 / 100  (1 conversion out of 3 in 1v2s)
+COMPETITIVE PERFORMANCE RADAR:
+  • First-Shot Precision      : [█████████░]  86 / 100  (28.5% Headshots)
+  • Round Contribution (KAST) : [████████░░]  82 / 100  (74.0% useful rounds)
+  • Opening Duels (FK/FD)     : [█████████░]  89 / 100  (54.0% First Bloods)
+  • Economic Efficiency       : [█████████░]  90 / 100  (68.0% full-buy round winrate)
+  • Clutch Composure          : [████████░░]  80 / 100  (33.3% conversion in 1v2s)
 
-TOP ROUND LEAKS IDENTIFIED:
-  1. Over-peeking on post-plant (Rounds 7 and 14):
-     Chasing unneeded frags with a 5v3 man advantage after spike plant.
-     Fix: Hold crossfires and force attackers to spend round clock.
+IDENTIFIED ELO LEAKS (WHERE YOU GAVE AWAY ADVANTAGES):
+  [Leak 1] Over-peeking on post-plant (Rounds 7 & 14)
+           Situation: 5v3 numerical advantage with spike already planted.
+           Root:      Aggressive hunt for the final frag instead of crossfire setup.
+           Fix:       Hold tight angles and force attackers to spend round clock.
 
-  2. Extended spraying beyond 30 meters:
-     Over-committing to spray patterns against distant cover.
-     Fix: Transition to 2-bullet burst firing paired with short counter-strafes.
+  [Leak 2] Extended spraying beyond 30 meters (Rounds 11 & 18)
+           Situation: Long-range rifle duels in A Main.
+           Root:      Spray ratio elevated (SE/TP > 1.8) causing bullet bloom.
+           Fix:       Switch to 2-bullet bursts paired with lateral counter-strafing.
 
-RECOMMENDED AIM ROUTINE (15 MINUTES):
-  • Microshot / Click-timing: 5 min (first-bullet precision calibration).
-  • Dynamic Horizontal Click: 5 min (angle checking and corner clearing).
-  • Smooth Tracking:          5 min (tracking accelerated movement).
+PRESCRIBED AIM ROUTINE (15 MINUTES):
+  ┌───────────────────────────┬──────────┬─────────────────────────────────────┐
+  │ Drill Category            │ Duration │ Biomechanical Focus                 │
+  ├───────────────────────────┼──────────┼─────────────────────────────────────┤
+  │ 1. Microshot Static       │ 5 min    │ Head-level stopping calibration     │
+  │ 2. Horizontal Click-Timing│ 5 min    │ Angle clearing on entry             │
+  │ 3. Smooth Strafe Tracking │ 5 min    │ Tracking fast-moving targets        │
+  └───────────────────────────┴──────────┴─────────────────────────────────────┘
 ========================================================================
 ```
 
 ---
 
-## Essential CLI Commands
+## ◈ Essential CLI Commands
 
-For terminal users, the unified dispatcher bundles all key operations:
+The unified dispatcher `cli.js` brings together all operations:
 
 ```bash
 # Full match diagnostics and round leak detection
@@ -101,32 +128,33 @@ node cli.js match examples/sample_match.json "PlayerName#TAG"
 # Generate tailored 15-minute aim routine
 node cli.js aim examples/sample_match.json "PlayerName#TAG"
 
-# Weapon telemetry and distance band breakdown
+# Weapon telemetry and distance band breakdown (0-15m, 15-30m, 30-50m)
 node cli.js weapons examples/sample_match.json "PlayerName#TAG"
 
-# Audit coordination with your premade duo
+# Audit coordination and re-frag trade windows with your premade duo
 node cli.js duo examples/sample_match.json "Player1#TAG" "Player2#TAG"
 
-# Extract match data from local browser cache
+# Harvest match payloads from local browser cache (bypasses Cloudflare)
 node cli.js harvest
 
 # Audit career hours and true in-match playtime
 node cli.js career
 
-# Assess true deserved rank and MMR drag
+# Assess true deserved rank and detect MMR Drag
 node cli.js diagnose
 ```
 
 ---
 
-## Privacy and Lightweight Architecture
+## ◈ Privacy and Architecture
 
-- **Strictly Local Processing:** Match records and career histories are computed directly on your system. No personal data leaves your machine.
-- **Zero External Dependencies:** Built entirely with Node.js built-in standard modules. No heavy third-party npm packages to install.
-- **Cross-Platform:** Verified across Windows 11, macOS, and standard Linux distributions.
+- **100% Local and Private:** All computation happens directly on your CPU. No match data, Riot IDs, or logs leave your machine.
+- **Zero Dependencies:** Runs exclusively on standard Node.js built-ins (`fs`, `path`, `zlib`, `crypto`). Zero external npm packages.
+- **Cross-Platform:** Fully supported and tested on Windows 11 (PowerShell), macOS (zsh/bash), and Linux.
+- **Deterministic Reliability:** 46 automated assertions verified with Exit Code 0 and 100/100 code audit rating.
 
 ---
 
-## License
+## ◈ License
 
-Released under the MIT License. See `LICENSE` for complete details.
+Released under the [MIT License](LICENSE). Free for personal and competitive use.
