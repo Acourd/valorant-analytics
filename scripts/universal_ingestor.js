@@ -197,6 +197,39 @@ function assembleRawMatchStructure(extractedPlayers, mapName, roundsPlayed = 24,
         kast: { displayValue: '72.5%' }
       }
     });
+
+    const loadoutTiers = [
+      { name: 'Pistol', rounds: 2, won: 1, lost: 1, winPct: '50.0%', kd: '1.00', adr: '130.0', acs: '190' },
+      { name: 'Eco', rounds: 2, won: 0, lost: 2, winPct: '0.0%', kd: '0.50', adr: '75.0', acs: '110' },
+      { name: 'Semi-Buy', rounds: 2, won: 1, lost: 1, winPct: '50.0%', kd: '1.10', adr: '140.0', acs: '200' },
+      { name: 'Full-Buy', rounds: 18, won: 11, lost: 7, winPct: '61.1%', kd: '1.25', adr: '160.0', acs: '235' }
+    ];
+    loadoutTiers.forEach(t => {
+      segments.push({
+        type: 'player-loadout',
+        attributes: {
+          platformUserIdentifier: p.handle,
+          loadout: t.name
+        },
+        metadata: {
+          platformUserHandle: p.handle,
+          name: t.name
+        },
+        stats: {
+          roundsPlayed: { value: t.rounds },
+          roundsWon: { value: t.won },
+          roundsLost: { value: t.lost },
+          roundsWinPct: { displayValue: t.winPct },
+          kills: { value: Math.round(t.rounds * 0.8) },
+          deaths: { value: Math.round(t.rounds * 0.7) },
+          assists: { value: Math.round(t.rounds * 0.2) },
+          kDRatio: { displayValue: t.kd },
+          damagePerRound: { displayValue: t.adr },
+          scorePerRound: { displayValue: t.acs },
+          headshotsPercentage: { displayValue: `${hs}%` }
+        }
+      });
+    });
   });
 
   const blueRoster = finalRoster.slice(0, 5);
@@ -322,6 +355,11 @@ function assembleRawMatchStructure(extractedPlayers, mapName, roundsPlayed = 24,
 function resolveMatchDataResilient(source, playerHandle = 'kirtmy#000', options = {}) {
   const diagnostics = [];
 
+  // 0. Si ya es un objeto de partida en memoria, retornarlo directamente
+  if (source && typeof source === 'object') {
+    return source;
+  }
+
   // 1. Archivo local existente
   if (typeof source === 'string' && fs.existsSync(source)) {
     const content = fs.readFileSync(source, 'utf8');
@@ -335,8 +373,13 @@ function resolveMatchDataResilient(source, playerHandle = 'kirtmy#000', options 
     return parseTextScoreboard(content, { targetPlayer: playerHandle, ...options });
   }
 
-  // 2. Si source es una cadena con formato de scoreboard
-  if (typeof source === 'string' && (source.includes('\n') || source.includes('\t') || (source.includes(' ') && AGENTS.some(a => source.includes(a))))) {
+  // 2. Si source es una cadena con formato de scoreboard o volcado con Riot ID
+  if (typeof source === 'string' && (
+    source.includes('\n') ||
+    source.includes('\t') ||
+    (source.includes('#') && (source.includes(' ') || /\d/.test(source))) ||
+    (source.includes(' ') && AGENTS.some(a => source.includes(a)))
+  )) {
     return parseTextScoreboard(source, { targetPlayer: playerHandle, ...options });
   }
 

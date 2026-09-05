@@ -48,8 +48,9 @@ const { extractAccountTelemetry, aggregateCareerTelemetry, generateMilestonesTim
 const { evaluateMmrDrag, evaluateTalentVsEffort } = require(path.join(scriptsDir, 'autodiagnostic_engine.js'));
 
 let passed = 0;
-const total = 46;
+let total = 0;
 function check(name, fn) {
+  total++;
   process.stdout.write(`Testing: ${name}... `);
   try {
     fn();
@@ -533,6 +534,83 @@ check('46. autodiagnostic: cuenta malformada parcial no truena en agregados',
     const r = evaluateTalentVsEffort(career);
     assert.ok(r.telemetrySummary.totalCompetitiveMatches >= 10, 'matches no agregados');
     assert.ok(r.category.length > 0 && r.talentRatio.includes('/'), 'categoría incompleta');
+  });
+
+check('47. learning_profile: match sin jugadores válidos lanza Error descriptivo (fail-closed)',
+  () => {
+    assert.throws(
+      () => evaluateLearningProfile({ data: { segments: [] } }, 'TenZ#0001'),
+      /No se encontraron jugadores válidos/
+    );
+  });
+
+check('48. duo_synergy: handles vacíos/ausentes lanzan Error descriptivo en vez de TypeError',
+  () => {
+    assert.throws(
+      () => auditDuoSynergy(sample, null, 'Chronicle#0001'),
+      /auditDuoSynergy requiere dos Riot IDs/
+    );
+    assert.throws(
+      () => auditDuoSynergy(sample, 'TenZ#0001', undefined),
+      /auditDuoSynergy requiere dos Riot IDs/
+    );
+  });
+
+check('49. economy_analyzer: sintetiza tiers a partir de player-round si faltan player-loadout',
+  () => {
+    const matchWithoutLoadouts = {
+      data: {
+        segments: [
+          { type: 'player-summary', attributes: { platformUserIdentifier: 'User#123' }, metadata: { platformUserHandle: 'User#123', agentName: 'Iso' } },
+          { type: 'player-round', attributes: { platformUserIdentifier: 'User#123', round: 1 }, stats: { loadoutValue: { value: 800 }, kills: { value: 1 }, deaths: { value: 0 }, damage: { value: 150 }, score: { value: 200 } }, metadata: { hasWon: true } },
+          { type: 'player-round', attributes: { platformUserIdentifier: 'User#123', round: 2 }, stats: { loadoutValue: { value: 4200 }, kills: { value: 2 }, deaths: { value: 1 }, damage: { value: 280 }, score: { value: 350 } }, metadata: { hasWon: false } }
+        ]
+      }
+    };
+    const eco = analyzeEconomy(matchWithoutLoadouts, 'User#123');
+    assert.strictEqual(eco.player, 'User#123');
+    assert.ok(eco.tiers.length > 0, 'Debe sintetizar tiers desde player-round');
+    assert.ok(eco.tiers.some(t => t.tier === 'Pistol'));
+    assert.ok(eco.tiers.some(t => t.tier === 'Full-Buy'));
+  });
+
+check('50. cli.js duels: dispatcher sin jugador resuelve target automáticamente con Exit Code 0',
+  () => {
+    const out = execFileSync(process.execPath, [cliPath, 'duels', sampleFile], { encoding: 'utf8' });
+    assert.ok(out.includes('MATRIZ DE DUELOS 1v1 DIRECTOS'), 'Encabezado ausente');
+    assert.ok(!out.includes('undefined'), 'No debe mostrar jugador undefined');
+    assert.ok(out.includes('Duelos: 5'), 'Debe listar los 5 duelos contra rivales');
+  });
+
+check('51. cli.js duo: dispatcher sin jugadores resuelve compañeros dinámicamente con Exit Code 0',
+  () => {
+    const out = execFileSync(process.execPath, [cliPath, 'duo', sampleFile], { encoding: 'utf8' });
+    assert.ok(out.includes('AUDITORÍA DE DÚO'), 'Encabezado ausente');
+    assert.ok(out.includes('Sinergia:'), 'Puntuación de sinergia ausente');
+    assert.ok(!out.includes('None and None'), 'No debe fallar por jugadores no encontrados');
+  });
+
+check('52. cli.js economy: dispatcher ejecuta desglose de buy-tiers con Exit Code 0',
+  () => {
+    const out = execFileSync(process.execPath, [cliPath, 'economy', sampleFile, 'TenZ#0001'], { encoding: 'utf8' });
+    assert.ok(out.includes('DESGLOSE DE ECONOMÍA Y BUY TIERS'), 'Encabezado ausente');
+    assert.ok(out.includes('TenZ#0001'), 'Jugador ausente');
+    assert.ok(out.includes('Pistol'), 'Tier Pistol ausente');
+  });
+
+check('53. cli.js coaching: dispatcher ejecuta reporte introspectivo con Exit Code 0',
+  () => {
+    const out = execFileSync(process.execPath, [cliPath, 'coaching', sampleFile, 'TenZ#0001'], { encoding: 'utf8' });
+    assert.ok(out.includes('REPORTE INTROSPECTIVO DE COACHING TÁCTICO'), 'Encabezado ausente');
+    assert.ok(out.includes('MÓDULOS Y GUÍAS DE APRENDIZAJE'), 'Módulos ausentes');
+    assert.ok(out.includes('youtube.com'), 'Enlaces ausentes');
+  });
+
+check('54. cli.js match: shorthand de jugador resuelve sobre sample_match sin WAF sintético',
+  () => {
+    const out = execFileSync(process.execPath, [cliPath, 'match', 'TenZ#0001'], { encoding: 'utf8' });
+    assert.ok(out.includes('DIAGNÓSTICO 360°: TenZ#0001'), 'Debe diagnosticar a TenZ#0001');
+    assert.ok(!out.includes('kirtmy#000'), 'No debe desbordar a kirtmy sintético');
   });
 
 console.log(`\nResults: ${passed}/${total} tests passed.`);

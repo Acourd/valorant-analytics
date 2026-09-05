@@ -55,20 +55,24 @@ const CURATED_RESOURCES = {
 };
 
 function generateCoachingReport(matchData, targetHandle) {
+  if (!matchData || typeof matchData !== 'object') {
+    throw new Error('generateCoachingReport requiere un objeto de telemetría válido.');
+  }
   const { playerMap, duelMatrix, target } = parseDuels(matchData, targetHandle);
+  const effectiveTarget = target || (targetHandle ? Object.keys(playerMap).find(h => h.toLowerCase().includes(targetHandle.toLowerCase())) : Object.keys(playerMap)[0]);
   
-  if (!target || !playerMap[target]) {
-    return { error: `Player ${targetHandle} not found in match.` };
+  if (!effectiveTarget || !playerMap[effectiveTarget]) {
+    return { error: `Player ${targetHandle || 'desconocido'} not found in match.` };
   }
 
-  const p = playerMap[target];
+  const p = playerMap[effectiveTarget];
   const opponents = Object.values(playerMap).filter(o => o.team !== p.team);
-  const killsOnOpponents = duelMatrix[target] || {};
+  const killsOnOpponents = duelMatrix[effectiveTarget] || {};
 
   const hardOpponents = [];
   opponents.forEach(opp => {
     const kills = killsOnOpponents[opp.handle] || 0;
-    const deaths = (duelMatrix[opp.handle] || {})[target] || 0;
+    const deaths = (duelMatrix[opp.handle] || {})[effectiveTarget] || 0;
     if (deaths > kills) {
       hardOpponents.push({ opp, kills, deaths, diff: deaths - kills });
     }
@@ -96,8 +100,12 @@ if (require.main === module) {
     matchData = fetchMatch(matchId);
   }
 
-  const handle = args[1] || 'TenZ#0001';
+  const handle = args[1];
   const report = generateCoachingReport(matchData, handle);
+  if (report.error) {
+    console.error(`Error: ${report.error}`);
+    process.exit(1);
+  }
 
   console.log(`\n=== INTROSPECTIVE COACHING & LEARNING REPORT ===`);
   console.log(`Player: ${report.player.handle} (${report.player.agent} - ${report.player.rank})`);

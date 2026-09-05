@@ -13,6 +13,9 @@ const { parseDuels } = require('./duel_matrix');
 const { analyzeEconomy } = require('./economy_analyzer');
 
 function evaluateLearningProfile(matchData, targetHandle) {
+  if (!matchData || typeof matchData !== 'object') {
+    throw new Error('evaluateLearningProfile requiere un objeto de telemetría válido.');
+  }
   const meta = matchData.data?.metadata || {};
   const segments = matchData.data?.segments || [];
   const playerSummaries = segments.filter(s => s.type === 'player-summary');
@@ -31,9 +34,12 @@ function evaluateLearningProfile(matchData, targetHandle) {
 
   let target = targetHandle ? Object.keys(playerMap).find(h => h.toLowerCase().includes(targetHandle.toLowerCase())) : Object.keys(playerMap)[0];
   if (!target) target = Object.keys(playerMap)[0];
+  if (!target || !playerMap[target]) {
+    throw new Error('No se encontraron jugadores válidos en la telemetría de la partida.');
+  }
 
   const p = playerMap[target];
-  const st = p.stats;
+  const st = p.stats || {};
   const totalRounds = meta.rounds || 20;
 
   // Extract key metrics

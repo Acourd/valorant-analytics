@@ -11,6 +11,15 @@ const fs = require('fs');
 const { extractMatchId, fetchMatch } = require('./fetch_match');
 
 function auditDuoSynergy(matchData, handle1, handle2) {
+  if (!matchData || typeof matchData !== 'object') {
+    throw new Error('auditDuoSynergy requiere un objeto de telemetría válido.');
+  }
+  if (!handle1 || !handle2 || typeof handle1 !== 'string' || typeof handle2 !== 'string') {
+    throw new Error('auditDuoSynergy requiere dos Riot IDs ("handle1" y "handle2").');
+  }
+  if (handle1.trim().toLowerCase() === handle2.trim().toLowerCase()) {
+    throw new Error('auditDuoSynergy requiere dos jugadores distintos (no se puede auditar a un jugador consigo mismo).');
+  }
   const meta = matchData.data?.metadata || {};
   const segments = matchData.data?.segments || [];
   const playerSummaries = segments.filter(s => s.type === 'player-summary');

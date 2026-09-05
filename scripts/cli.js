@@ -50,6 +50,8 @@ const { resolveMatchDataResilient, parseTextScoreboard } = require('./universal_
 const { harvestProfiles, harvestMatch } = require('./browser_cache_harvester');
 const { extractAccountTelemetry, aggregateCareerTelemetry, generateMilestonesTimeline } = require('./career_telemetry');
 const { evaluateMmrDrag, evaluateTalentVsEffort } = require('./autodiagnostic_engine');
+const { analyzeEconomy } = require('./economy_analyzer');
+const { generateCoachingReport } = require('./coaching_engine');
 
 function printBanner() {
   console.log(`\n========================================================================`);
@@ -59,6 +61,20 @@ function printBanner() {
 
 function resolveMatchData(source, playerHandle) {
   return resolveMatchDataResilient(source, playerHandle);
+}
+
+function resolveTargetAndPlayer(args) {
+  let target = args[1];
+  let player = args[2];
+
+  if (target && target.includes('#') && !fs.existsSync(target)) {
+    player = target;
+    target = path.join(__dirname, '..', 'examples', 'sample_match.json');
+  } else if (!target) {
+    target = path.join(__dirname, '..', 'examples', 'sample_match.json');
+  }
+
+  return { target, player };
 }
 
 function handleProfile(handle) {
@@ -81,17 +97,18 @@ function handleProfile(handle) {
 
 function buildDuelTable(matrixData, playerHandle) {
   const { playerMap, duelMatrix, target } = matrixData;
-  if (!target || !playerMap[target]) {
-    return { error: `Jugador "${playerHandle}" no encontrado en la partida.`, rows: [] };
+  const effectiveTarget = target || (playerHandle ? Object.keys(playerMap).find(h => h.toLowerCase().includes(playerHandle.toLowerCase())) : Object.keys(playerMap)[0]);
+  if (!effectiveTarget || !playerMap[effectiveTarget]) {
+    return { error: `Jugador "${playerHandle || 'desconocido'}" no encontrado en la partida.`, rows: [], target: null };
   }
-  const p = playerMap[target];
+  const p = playerMap[effectiveTarget];
   const opponents = Object.values(playerMap).filter(o => o.team !== p.team);
   const rows = opponents.map(opp => {
-    const kills = (duelMatrix[target] || {})[opp.handle] || 0;
-    const deaths = (duelMatrix[opp.handle] || {})[target] || 0;
+    const kills = (duelMatrix[effectiveTarget] || {})[opp.handle] || 0;
+    const deaths = (duelMatrix[opp.handle] || {})[effectiveTarget] || 0;
     return { opponent: opp.handle, opponentAgent: opp.agent, opponentRank: opp.rank, kills, deaths, net: kills - deaths };
   });
-  return { error: null, rows };
+  return { error: null, rows, target: effectiveTarget };
 }
 
 const args = process.argv.slice(2);
@@ -102,10 +119,17 @@ if (!command || command === '--help' || command === '-h') {
   console.log(`USO INTUITIVO (CLI RÁPIDO & AUTO-DISPATCHER):`);
   console.log(`  node cli.js "<riot_handle>"                       ➔ Detección automática de perfil`);
   console.log(`  node cli.js match <partida_o_id> [jugador]        ➔ Autodiagnóstico 360° y Fugas de ELO`);
-  console.log(`  node cli.js duo <partida_o_id> <p1> <p2>          ➔ Auditoría de Sinergia y Tradeo de Dúo`);
+  console.log(`  node cli.js duo <partida_o_id> [p1] [p2]          ➔ Auditoría de Sinergia y Tradeo de Dúo`);
   console.log(`  node cli.js aim <partida_o_id> [jugador]          ➔ Rutina Kovaaks 15 min adaptativa`);
   console.log(`  node cli.js duels <partida_o_id> [jugador]        ➔ Matriz de duelos 1v1 vs rivales`);
   console.log(`  node cli.js weapons <partida_o_id> [jugador]      ➔ Telemetría de Armas y Recoil`);
+  console.log(`  node cli.js economy <partida_o_id> [jugador]      ➔ Desglose de Economía y Buy-Tiers`);
+  console.log(`  node cli.js coaching <partida_o_id> [jugador]     ➔ Reporte Introspectivo y Recursos Tácticos`);
+  console.log(`  node cli.js calibrate [jugador] [rango] [rol]     ➔ Calibración Instantánea Zero-Cloud`);
+  console.log(`  node cli.js harvest [jugador]                     ➔ Cosecha de Partidas desde Caché Local`);
+  console.log(`  node cli.js career <perfil_json|handle>           ➔ Auditoría de Horas y Trayectoria`);
+  console.log(`  node cli.js diagnose <perfil_json|handle>         ➔ Diagnóstico de Rango Real y MMR Drag`);
+  console.log(`  node cli.js parse <texto_o_archivo> [jugador]     ➔ Ingesta Universal Resiliente (Anti-WAF)`);
   console.log(`  node cli.js invariants <partida_o_id> [jugador]   ➔ Verificación Formal de Invariantes`);
   console.log(`  node cli.js attest <partida_o_id> [jugador]       ➔ Sobre DSSE in-toto firmado con Ed25519`);
   console.log(`  node cli.js merkle <partida_o_id>                 ➔ Árbol Merkle de Eventos y Pruebas`);
@@ -118,6 +142,7 @@ if (!command || command === '--help' || command === '-h') {
   console.log(`  node cli.js "Derke#0001"`);
   console.log(`  node cli.js match examples/sample_match.json "TenZ#0001"`);
   console.log(`  node cli.js duo examples/sample_match.json "TenZ#0001" "Chronicle#0001"`);
+  console.log(`  node cli.js duels examples/sample_match.json`);
   console.log(`========================================================================\n`);
   process.exit(0);
 }
@@ -137,9 +162,8 @@ if (command.includes('#') && !fs.existsSync(command)) {
 
 try {
   if (command === 'match' || command === 'diagnostic') {
-    const target = args[1] || path.join(__dirname, '..', 'examples', 'sample_match.json');
-    const player = args[2];
-    const matchData = resolveMatchData(target);
+    const { target, player } = resolveTargetAndPlayer(args);
+    const matchData = resolveMatchData(target, player);
     const res = evaluateLearningProfile(matchData, player);
     validateLearningProfile(res);
 
@@ -163,10 +187,45 @@ try {
     console.log(`========================================================================\n`);
 
   } else if (command === 'duo' || command === 'synergy') {
-    const target = args[1] || path.join(__dirname, '..', 'examples', 'sample_match.json');
-    const p1 = args[2] || 'TenZ#0001';
-    const p2 = args[3] || 'Chronicle#0001';
+    let target = args[1];
+    let p1 = args[2];
+    let p2 = args[3];
+
+    if (target && target.includes('#') && !fs.existsSync(target)) {
+      p2 = p1;
+      p1 = target;
+      target = path.join(__dirname, '..', 'examples', 'sample_match.json');
+    } else if (!target) {
+      target = path.join(__dirname, '..', 'examples', 'sample_match.json');
+    }
+
     const matchData = resolveMatchData(target);
+    if (!p1 || !p2) {
+      const summaries = (matchData.data?.segments || []).filter(s => s.type === 'player-summary');
+      const uniqueHandles = [...new Set(summaries.map(s => s.metadata?.platformUserHandle || s.attributes?.platformUserIdentifier).filter(Boolean))];
+
+      if (uniqueHandles.length < 2) {
+        printBanner();
+        console.log(`⚠️ Telemetría insuficiente: la partida contiene menos de 2 jugadores para auditar sinergia de dúo.`);
+        console.log(`========================================================================\n`);
+        process.exit(0);
+      }
+
+      const teamMap = {};
+      summaries.forEach(s => {
+        const team = s.metadata?.teamId || 'Blue';
+        const h = s.metadata?.platformUserHandle || s.attributes?.platformUserIdentifier;
+        if (h) {
+          teamMap[team] = teamMap[team] || [];
+          if (!teamMap[team].includes(h)) teamMap[team].push(h);
+        }
+      });
+      const teamWithAtLeastTwo = Object.values(teamMap).find(t => t.length >= 2);
+      if (!p1 && teamWithAtLeastTwo) p1 = teamWithAtLeastTwo[0];
+      if (!p2 && teamWithAtLeastTwo) p2 = teamWithAtLeastTwo[1];
+      if (!p1) p1 = uniqueHandles[0];
+      if (!p2) p2 = uniqueHandles[1];
+    }
     const res = auditDuoSynergy(matchData, p1, p2);
     validateDuoSynergy(res);
 
@@ -184,9 +243,8 @@ try {
     console.log(`========================================================================\n`);
 
   } else if (command === 'aim' || command === 'kovaaks') {
-    const target = args[1] || path.join(__dirname, '..', 'examples', 'sample_match.json');
-    const player = args[2];
-    const matchData = resolveMatchData(target);
+    const { target, player } = resolveTargetAndPlayer(args);
+    const matchData = resolveMatchData(target, player);
     const res = generateKovaaksRoutine(matchData, player);
 
     printBanner();
@@ -201,18 +259,18 @@ try {
     console.log(`========================================================================\n`);
 
   } else if (command === 'duels' || command === 'matrix') {
-    const target = args[1] || path.join(__dirname, '..', 'examples', 'sample_match.json');
-    const player = args[2];
-    const matchData = resolveMatchData(target);
-    const { error, rows } = buildDuelTable(parseDuels(matchData, player), player);
+    const { target, player } = resolveTargetAndPlayer(args);
+    const matchData = resolveMatchData(target, player);
+    const duelInfo = buildDuelTable(parseDuels(matchData, player), player);
 
     printBanner();
-    if (error) {
-      console.log(`⚠️ ${error}`);
+    if (duelInfo.error) {
+      console.log(`⚠️ ${duelInfo.error}`);
     } else {
-      console.log(`⚔️ MATRIZ DE DUELOS 1v1 DIRECTOS vs ${player} | Duelos: ${rows.length}`);
+      const focusPlayer = duelInfo.target || player || 'Objetivo';
+      console.log(`⚔️ MATRIZ DE DUELOS 1v1 DIRECTOS vs ${focusPlayer} | Duelos: ${duelInfo.rows.length}`);
       console.log(`------------------------------------------------------------------------`);
-      rows.forEach(d => {
+      duelInfo.rows.forEach(d => {
         const icon = d.net > 0 ? '🟢' : d.net < 0 ? '🔴' : '⚪';
         console.log(`  ${icon} vs ${d.opponent.padEnd(20)} (${(d.opponentAgent || '?').padEnd(10)}): ${d.kills} K - ${d.deaths} D (Net: ${d.net > 0 ? '+' : ''}${d.net})`);
       });
@@ -220,9 +278,8 @@ try {
     console.log(`========================================================================\n`);
 
   } else if (command === 'weapons' || command === 'armas') {
-    const target = args[1] || path.join(__dirname, '..', 'examples', 'sample_match.json');
-    const player = args[2];
-    const matchData = resolveMatchData(target);
+    const { target, player } = resolveTargetAndPlayer(args);
+    const matchData = resolveMatchData(target, player);
     const result = analyzeWeaponTelemetry(matchData, player);
     validateWeaponTelemetry(result);
 
@@ -239,6 +296,56 @@ try {
     console.log(`------------------------------------------------------------------------`);
     console.log(`DIAGNÓSTICO TÁCTICO: ${result.recoilDiagnosis.analisisTactico}`);
     console.log(`RUTINA ASOCIADA: ${result.recoilDiagnosis.kovaaksPrescription}`);
+    console.log(`========================================================================\n`);
+
+  } else if (command === 'economy' || command === 'eco') {
+    const { target, player } = resolveTargetAndPlayer(args);
+    const matchData = resolveMatchData(target, player);
+    const eco = analyzeEconomy(matchData, player);
+
+    printBanner();
+    console.log(`💰 DESGLOSE DE ECONOMÍA Y BUY TIERS: ${eco.player} (${eco.agent || '?'} - ${eco.rank || 'Unranked'})`);
+    console.log(`------------------------------------------------------------------------`);
+    console.table(eco.tiers.map(t => ({
+      'Buy Tier': t.tier,
+      'Rounds': t.rounds,
+      'Record (W-L)': `${t.won}-${t.lost}`,
+      'Win %': t.winPct,
+      'KDA': t.kda,
+      'K/D': t.kd,
+      'ADR': t.adr,
+      'ACS': t.acs,
+      'HS%': t.hsPct
+    })));
+    console.log(`========================================================================\n`);
+
+  } else if (command === 'coaching' || command === 'coach') {
+    const { target, player } = resolveTargetAndPlayer(args);
+    const matchData = resolveMatchData(target, player);
+    const report = generateCoachingReport(matchData, player);
+
+    printBanner();
+    if (report.error) {
+      console.log(`⚠️ ${report.error}`);
+    } else {
+      console.log(`🧠 REPORTE INTROSPECTIVO DE COACHING TÁCTICO: ${report.player.handle} (${report.player.agent} - ${report.player.rank})`);
+      console.log(`------------------------------------------------------------------------`);
+      console.log(`⚔️ DUELOS CON MAYOR FRICCIÓN EN LA PARTIDA:`);
+      if (!report.hardOpponents || report.hardOpponents.length === 0) {
+        console.log(`  ✓ Dominio favorable en todos los enfrentamientos directos de la partida.`);
+      } else {
+        report.hardOpponents.forEach(h => {
+          console.log(`  • vs ${h.opp.handle.padEnd(20)} (${(h.opp.agent || '?').padEnd(10)}): ${h.kills} K - ${h.deaths} D (Déficit: -${h.diff})`);
+        });
+      }
+      console.log(`\n📚 MÓDULOS Y GUÍAS DE APRENDIZAJE RECOMENDADOS:`);
+      Object.values(report.resources).forEach(r => {
+        console.log(`  • ${r.title}`);
+        console.log(`    Conceptos: ${r.keyConcepts[0]}`);
+        console.log(`    Creadores: ${r.creators.join(', ')}`);
+        console.log(`    Enlace:    ${r.searchQuery}`);
+      });
+    }
     console.log(`========================================================================\n`);
 
   } else if (command === 'calibrate' || command === 'mock') {
@@ -262,24 +369,24 @@ try {
     console.log(`========================================================================\n`);
 
   } else if (command === 'invariants' || command === 'verify-math') {
-    const target = args[1] || path.join(__dirname, '..', 'examples', 'sample_match.json');
-    const player = args[2] || 'TenZ#0001';
-    const matchData = resolveMatchData(target);
+    const { target, player } = resolveTargetAndPlayer(args);
+    const effectivePlayer = player || 'TenZ#0001';
+    const matchData = resolveMatchData(target, effectivePlayer);
 
     printBanner();
     console.log(`🛡️ VERIFICACIÓN FORMAL DE INVARIANTES MATEMÁTICOS`);
-    console.log(`Objetivo: ${target} | Jugador: ${player}`);
+    console.log(`Objetivo: ${target} | Jugador: ${effectivePlayer}`);
     console.log(`------------------------------------------------------------------------`);
 
-    const p = evaluateLearningProfile(matchData, player);
+    const p = evaluateLearningProfile(matchData, effectivePlayer);
     validateLearningProfile(p);
     console.log(`  ✓ Invariantes de Radar y Fugas de ELO: Aprobados (Bounds [0, 100], sin NaN)`);
 
-    const w = analyzeWeaponTelemetry(matchData, player);
+    const w = analyzeWeaponTelemetry(matchData, effectivePlayer);
     validateWeaponTelemetry(w);
     console.log(`  ✓ Invariantes de Zonas y Distancia: Aprobados (Head+Body+Leg == 100%, 3 Bandas)`);
 
-    const m = parseDuels(matchData, player);
+    const m = parseDuels(matchData, effectivePlayer);
     validateDuelMatrix(m);
     console.log(`  ✓ Invariantes de Duelos 1v1: Aprobados (Consistencia de Kills/Deaths)`);
 
@@ -288,14 +395,14 @@ try {
     console.log(`========================================================================\n`);
 
   } else if (command === 'attest') {
-    const target = args[1] || path.join(__dirname, '..', 'examples', 'sample_match.json');
-    const player = args[2] || 'TenZ#0001';
-    const matchData = resolveMatchData(target);
-    const profile = evaluateLearningProfile(matchData, player);
+    const { target, player } = resolveTargetAndPlayer(args);
+    const effectivePlayer = player || 'TenZ#0001';
+    const matchData = resolveMatchData(target, effectivePlayer);
+    const profile = evaluateLearningProfile(matchData, effectivePlayer);
 
     printBanner();
     console.log(`🔐 GENERACIÓN DE ATESTACIÓN CRIPTOGRÁFICA DSSE / in-toto v1`);
-    console.log(`Objetivo: ${target} | Jugador: ${player}`);
+    console.log(`Objetivo: ${target} | Jugador: ${effectivePlayer}`);
     console.log(`------------------------------------------------------------------------`);
 
     const envelope = signTelemetryReport(profile);
@@ -331,15 +438,15 @@ try {
     console.log(`========================================================================\n`);
 
   } else if (command === 'guardian') {
-    const target = args[1] || path.join(__dirname, '..', 'examples', 'sample_match.json');
-    const player = args[2] || 'TenZ#0001';
-    const matchData = resolveMatchData(target);
+    const { target, player } = resolveTargetAndPlayer(args);
+    const effectivePlayer = player || 'TenZ#0001';
+    const matchData = resolveMatchData(target, effectivePlayer);
     const guardian = new SessionGuardian();
-    const audit = guardian.auditSession(matchData, player);
+    const audit = guardian.auditSession(matchData, effectivePlayer);
 
     printBanner();
     console.log(`🛡️ SESSION GUARDIAN: FATIGA & TILT COGNITIVO`);
-    console.log(`Jugador: ${player} | Veredicto: ${audit.verdict}`);
+    console.log(`Jugador: ${effectivePlayer} | Veredicto: ${audit.verdict}`);
     console.log(`------------------------------------------------------------------------`);
     console.log(`  • Nivel de Tilt:     ${audit.tilt.level} (Índice: ${audit.tilt.tiltIndex}/100)`);
     console.log(`  • Factor de Fatiga:  ${audit.fatigue.fatigueFactor} / 1.00 (${audit.fatigue.continuousMinutes} mins acumulados)`);
@@ -349,15 +456,15 @@ try {
     console.log(`========================================================================\n`);
 
   } else if (command === 'drift') {
-    const target = args[1] || path.join(__dirname, '..', 'examples', 'sample_match.json');
-    const player = args[2] || 'TenZ#0001';
-    const matchData = resolveMatchData(target);
+    const { target, player } = resolveTargetAndPlayer(args);
+    const effectivePlayer = player || 'TenZ#0001';
+    const matchData = resolveMatchData(target, effectivePlayer);
     const detector = new DriftDetector();
-    const driftReport = detector.auditMatchDrift(matchData, player);
+    const driftReport = detector.auditMatchDrift(matchData, effectivePlayer);
 
     printBanner();
     console.log(`📊 RADAR DE DERIVA TÁCTICA Y ENTROPÍA MECÁNICA`);
-    console.log(`Jugador: ${player} | Estabilidad Global: ${driftReport.overallStability}%`);
+    console.log(`Jugador: ${effectivePlayer} | Estabilidad Global: ${driftReport.overallStability}%`);
     console.log(`------------------------------------------------------------------------`);
     console.log(`  • Clasificación de Lado: ${driftReport.sideDivergence.classification} (Divergencia: ${driftReport.sideDivergence.divergenceScore}%)`);
     console.log(`  • Entropía de Quarters:  ${driftReport.quarterDrift.killDistributionEntropy} / ${driftReport.quarterDrift.maxPossibleEntropy}`);
@@ -365,16 +472,16 @@ try {
     console.log(`========================================================================\n`);
 
   } else if (command === 'consensus') {
-    const target = args[1] || path.join(__dirname, '..', 'examples', 'sample_match.json');
-    const player = args[2] || 'TenZ#0001';
-    const matchData = resolveMatchData(target);
-    const profile = evaluateLearningProfile(matchData, player);
+    const { target, player } = resolveTargetAndPlayer(args);
+    const effectivePlayer = player || 'TenZ#0001';
+    const matchData = resolveMatchData(target, effectivePlayer);
+    const profile = evaluateLearningProfile(matchData, effectivePlayer);
     const arbiter = new ConsensusArbiter();
     const report = arbiter.synthesizeConsensus(profile);
 
     printBanner();
     console.log(`⚖️ SÍNTESIS DE CONSENSO BIZANTINO MULTI-LENTE (BFT)`);
-    console.log(`Jugador: ${player} | Veredicto: ${report.verdict}`);
+    console.log(`Jugador: ${effectivePlayer} | Veredicto: ${report.verdict}`);
     console.log(`------------------------------------------------------------------------`);
     console.log(`  • Lentes Participantes:  ${report.participatingLenses}`);
     console.log(`  • Quórum Alcanzado:      ${report.quorumAchieved ? 'SÍ' : 'NO'}`);
@@ -384,10 +491,10 @@ try {
     console.log(`========================================================================\n`);
 
   } else if (command === 'synthesize') {
-    const target = args[1] || path.join(__dirname, '..', 'examples', 'sample_match.json');
-    const player = args[2] || 'TenZ#0001';
-    const matchData = resolveMatchData(target);
-    const profile = evaluateLearningProfile(matchData, player);
+    const { target, player } = resolveTargetAndPlayer(args);
+    const effectivePlayer = player || 'TenZ#0001';
+    const matchData = resolveMatchData(target, effectivePlayer);
+    const profile = evaluateLearningProfile(matchData, effectivePlayer);
     const synthesizer = new RoutineSynthesizer({ targetDurationMinutes: 15 });
     const routine = synthesizer.synthesizeRoutine(profile);
 

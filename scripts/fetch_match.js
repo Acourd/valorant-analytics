@@ -9,7 +9,7 @@ const fs = require('fs');
 const { httpsGetJson } = require('./http_fetch');
 
 function extractMatchId(input) {
-  if (!input) return null;
+  if (!input || typeof input !== 'string') return null;
   const match = input.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i);
   return match ? match[1] : input.trim();
 }

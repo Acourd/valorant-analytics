@@ -74,7 +74,8 @@ function sanitizeFilePath(targetPath, baseDir = process.cwd()) {
 function runPreflight(command, args = []) {
   const allowedCommands = [
     'match', 'diagnostic', 'weapons', 'armas', 'duo', 'synergy', 'aim', 'kovaaks',
-    'duels', 'matrix', 'profile', 'calibrate', 'mock', 'invariants', 'verify-math',
+    'duels', 'matrix', 'economy', 'eco', 'coaching', 'coach',
+    'profile', 'calibrate', 'mock', 'invariants', 'verify-math',
     'attest', 'merkle', 'guardian', 'drift', 'consensus', 'synthesize', 'sbom',
     'parse', 'ingest', 'harvest', 'cosecha', 'career', 'carrera', 'diagnose', 'autodiagnostico'
   ];
