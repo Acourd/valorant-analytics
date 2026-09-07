@@ -307,18 +307,35 @@ function assembleRawMatchStructure(extractedPlayers, mapName, roundsPlayed = 24,
       });
     });
 
-    // 3. Generar player-round-kills distribuidos (duelos 1v1 directos)
-    const winningTeam = isBlueWin ? blueRoster : redRoster;
-    const losingTeam = isBlueWin ? redRoster : blueRoster;
+  }
 
-    for (let k = 0; k < 4; k++) {
-      const killer = winningTeam[k % winningTeam.length];
-      const victim = losingTeam[(k + r) % losingTeam.length];
-
+  // 3. Generar player-round-kills distribuidos desde los resúmenes de jugadores.
+  // Reconciliación exacta por construcción: cada kill del resumen genera un segmento,
+  // así el total de duelos iguala el total de kills (validateDuelMatrix lo exige).
+  const roster10 = finalRoster.slice(0, 10);
+  const killLedger = new Map();
+  roster10.forEach((p, idx) => {
+    const teamId = idx < 5 ? 'Blue' : 'Red';
+    const enemies = teamId === 'Blue' ? redRoster : blueRoster;
+    if (!enemies || enemies.length === 0) return;
+    const killCount = Math.max(0, Math.floor(Number(p.kills) || 0));
+    for (let k = 0; k < killCount; k++) {
+      const victim = enemies[(k + idx) % enemies.length];
+      const key = `${p.handle}||${victim.handle}`;
+      killLedger.set(key, (killLedger.get(key) || 0) + 1);
+    }
+  });
+  let killSeq = 0;
+  for (const [key, count] of killLedger) {
+    const sep = key.lastIndexOf('||');
+    const killer = roster10.find(p => p.handle === key.slice(0, sep));
+    const victim = roster10.find(p => p.handle === key.slice(sep + 2));
+    for (let c = 0; c < count; c++) {
+      const round = 1 + ((killSeq * 7) % Math.max(1, roundsPlayed));
       segments.push({
         type: 'player-round-kills',
         attributes: {
-          round: r,
+          round,
           platformSlug: 'riot',
           platformUserIdentifier: killer.handle,
           opponentPlatformSlug: 'riot',
@@ -327,12 +344,13 @@ function assembleRawMatchStructure(extractedPlayers, mapName, roundsPlayed = 24,
         metadata: {
           platformUserHandle: killer.handle,
           opponentPlatformUserHandle: victim.handle,
-          weaponName: r <= 2 ? 'Ghost' : (k % 2 === 0 ? 'Vandal' : 'Phantom')
+          weaponName: round <= 2 ? 'Ghost' : (killSeq % 2 === 0 ? 'Vandal' : 'Phantom')
         },
         stats: {
           damage: { value: 150 }
         }
       });
+      killSeq++;
     }
   }
 

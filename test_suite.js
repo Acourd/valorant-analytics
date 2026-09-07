@@ -251,7 +251,7 @@ check('22. cli.js invariants: verificación formal de invariantes matemáticos e
 
 check('23. cli.js attest: sobre DSSE in-toto firmado con Ed25519 y verificado',
   () => {
-    const out = cliOk(['attest', sampleFile, 'TenZ#0001']);
+    const out = cliOk(['attest', sampleFile, 'TenZ#0001', '--trust-new-key']);
     assert.ok(out.includes('ATESTACIÓN CRIPTOGRÁFICA DSSE') || out.includes('ATESTACI'), 'cabecera attest ausente');
     assert.ok(out.includes('VERIFICADO contra keystore (Ed25519 OK)'), 'verificación contra keystore ausente');
     assert.ok(out.includes('Almacén confiable'), 'keystore no declarado en salida');
@@ -731,6 +731,69 @@ check('61. cli.js: archivo inexistente y parse inválido fallan con Exit 1',
     let code3 = 0;
     try { cliOk(['parse', sampleFile, 'jugador-sin-tag']); } catch (e) { code3 = e.status; }
     assert.strictEqual(code3, 1, 'parse con Riot ID inválido debe salir 1');
+  });
+
+check('62. attest: identidad persistente + --trust-new-key explícito (sin TOFU silencioso)',
+  () => {
+    const cacheDir = path.join(__dirname, '.cache');
+    const idFile = path.join(cacheDir, 'attest_identity.json');
+    const ksFile = path.join(cacheDir, 'dsse_keystore.json');
+    const backup = [];
+    for (const f of [idFile, ksFile]) {
+      if (fs.existsSync(f)) {
+        backup.push([f + '.verdictbak', fs.readFileSync(f)]);
+        fs.renameSync(f, f + '.verdictbak');
+      }
+    }
+    try {
+      let code1 = 0;
+      try { cliOk(['attest', sampleFile, 'TenZ#0001']); } catch (e) { code1 = e.status; }
+      assert.strictEqual(code1, 1, 'attest con firmante desconocido debe fallar (no TOFU)');
+      const out = cliOk(['attest', sampleFile, 'TenZ#0001', '--trust-new-key']);
+      assert.ok(out.includes('VERIFICADO contra keystore'), 'aprovisionamiento explícito debe verificar');
+      const out2 = cliOk(['attest', sampleFile, 'TenZ#0001']);
+      assert.ok(out2.includes('VERIFICADO contra keystore'), 'identidad persistente debe seguir verificando');
+    } finally {
+      for (const f of [idFile, ksFile]) { try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch (e) {} }
+      for (const [bak, content] of backup) { fs.writeFileSync(bak.replace(/\.verdictbak$/, ''), content); try { fs.unlinkSync(bak); } catch (e) {} }
+    }
+  });
+
+check('63. invariant: matriz imposible con jugadores conocidos falla (DUEL_RECONCILE)',
+  () => {
+    const { reconcileDuelMatrix } = require(path.join(scriptsDir, 'invariant_validator.js'));
+    const impossible = {
+      playerMap: { 'A#1': { kills: 5, deaths: 5 }, 'B#2': { kills: 4, deaths: 6 } },
+      duelMatrix: { 'A#1': { 'B#2': 999 }, 'B#2': { 'A#1': 1 } }
+    };
+    const rec = reconcileDuelMatrix(impossible);
+    assert.strictEqual(rec.reconciled, false, 'matriz 999 vs 9 kills debe marcarse irreconciliada');
+    assert.throws(() => validateDuelMatrix(impossible), /DUEL_RECONCILE/);
+    const real = reconcileDuelMatrix(parseDuels(sample, 'TenZ#0001'));
+    assert.strictEqual(real.reconciled, true, 'muestra real debe reconciliar dentro de tolerancia');
+  });
+
+check('64. autodiagnostic/career: muestra cero preserva ceros, sin talento ni horas inventadas',
+  () => {
+    const empty = evaluateTalentVsEffort({
+      summary: { totalGeneral: { hours: 0 }, highestPeakRank: 'Unranked' },
+      accounts: [{ handle: 'X#1', isExcluded: false, competitive: { matches: 0 }, peakRank: 'Unranked' }]
+    });
+    assert.strictEqual(empty.sampleSize, 0, 'matches 0 no debe convertirse en 1');
+    assert.strictEqual(empty.category, 'DATOS INSUFICIENTES');
+    assert.ok(!String(empty.talentRatio).includes('%') || empty.talentRatio === 'N/A', 'sin porcentajes de talento');
+    const levelOnly = extractAccountTelemetry({ metadata: { accountLevel: 30 } }, { handle: 'Y#2' });
+    assert.strictEqual(levelOnly.casual.seconds, 0, 'sin telemetría observada no hay allowance de 25h');
+    assert.strictEqual(levelOnly.insufficientData, true);
+  });
+
+check('65. cli.js profile: Riot ID malformado falla; shorthand declara fixture',
+  () => {
+    let code = 0;
+    try { cliOk(['profile', 'not-a-riot-id']); } catch (e) { code = e.status; }
+    assert.strictEqual(code, 1, 'profile sin formato Nombre#TAG debe salir 1');
+    const out = cliOk(['match', 'TenZ#0001']);
+    assert.ok(out.includes('fixture de ejemplo'), 'shorthand debe declarar uso del fixture');
   });
 
 console.log(`\nResults: ${passed}/${total} tests passed.`);

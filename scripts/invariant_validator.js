@@ -223,6 +223,9 @@ function validateDuelMatrix(duelResult) {
   if (!reconciliation.countsValid) {
     throw new InvariantViolationError('DUEL_COUNTS', 'Conteos de duelos no enteros o negativos en la matriz', { duelMatrix });
   }
+  if (!reconciliation.reconciled) {
+    throw new InvariantViolationError('DUEL_RECONCILE', `Matriz imposible: ${reconciliation.duelTotal} duelos vs ${reconciliation.killsTotal} kills agregadas (desvío ${(reconciliation.deltaPct * 100).toFixed(1)}%, tolerancia 5%)`, { duelTotal: reconciliation.duelTotal, killsTotal: reconciliation.killsTotal });
+  }
 
   return true;
 }

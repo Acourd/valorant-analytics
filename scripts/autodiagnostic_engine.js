@@ -73,12 +73,17 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
 
   personal.forEach(a => {
     const comp = a.competitive || {};
-    const m = comp.matches || 1;
+    const rawMatches = comp.matches ?? 0;
+    const m = (typeof rawMatches === 'number' && Number.isFinite(rawMatches) && rawMatches > 0) ? rawMatches : 0;
     totalCompMatches += m;
-    weightedKd += parseFloat(comp.kd || '1.0') * m;
-    weightedAcs += parseFloat(comp.acs || '200') * m;
-    weightedDd += parseFloat(comp.dd || '10') * m;
-    weightedHs += parseFloat(comp.hs || '20') * m;
+    const kd = parseFloat(comp.kd ?? '1.0');
+    const acs = parseFloat(comp.acs ?? '200');
+    const dd = parseFloat(comp.dd ?? '10');
+    const hs = parseFloat(comp.hs ?? '20');
+    weightedKd += (Number.isFinite(kd) ? kd : 1.0) * m;
+    weightedAcs += (Number.isFinite(acs) ? acs : 200) * m;
+    weightedDd += (Number.isFinite(dd) ? dd : 10) * m;
+    weightedHs += (Number.isFinite(hs) ? hs : 20) * m;
   });
 
   const avgKd = totalCompMatches > 0 ? Number((weightedKd / totalCompMatches).toFixed(2)) : 1.15;
