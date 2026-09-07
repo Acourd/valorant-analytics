@@ -29,10 +29,25 @@ function evaluateMmrDrag(accountTelemetry) {
   const mmrDragDetected = isAgedAccount && hasHighCombatImpact && isRankConstrained;
   const severityScore = isAgedAccount ? Math.min(100, Math.round((matches / 600) * 80 + (dd > 25 ? 20 : 10))) : 20;
 
+  if (matches === 0) {
+    return {
+      mmrDragDetected: false,
+      severityScore: 0,
+      matchesEvaluated: 0,
+      sampleSize: 0,
+      confidence: 'nula',
+      formula: 'MMR-drag requiere matches>=300 con impacto (KD≥1.15 o ACS≥230 o DDΔ≥20) y rango contenido (Gold/Silver)',
+      diagnosis: 'DATOS INSUFICIENTES: sin partidas registradas no se puede evaluar anclaje de MMR ni emitir severidad.'
+    };
+  }
+
   return {
     mmrDragDetected,
     severityScore,
     matchesEvaluated: matches,
+    sampleSize: matches,
+    confidence: matches >= 300 ? 'alta' : (matches >= 50 ? 'media' : 'baja'),
+    formula: 'MMR-drag requiere matches>=300 con impacto (KD≥1.15 o ACS≥230 o DDΔ≥20) y rango contenido (Gold/Silver)',
     diagnosis: mmrDragDetected
       ? 'Anclaje de Certeza Algorítmica Severo: El sistema de Riot posee baja varianza para esta cuenta y frena las ganancias de RR a pesar de que los indicadores individuales (ACS/DDΔ/KD) corresponden a un elo superior.'
       : 'Varianza Normal: La cuenta responde adecuadamente a las fluctuaciones de rendimiento sin penalización excesiva por volumen histórico.'
@@ -73,6 +88,28 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
 
   const totalGenHours = careerReport.summary.totalGeneral.hours;
   const peakRank = careerReport.summary.highestPeakRank;
+
+  if (totalCompMatches === 0) {
+    return {
+      category: 'DATOS INSUFICIENTES',
+      talentRatio: 'N/A',
+      zeroFpsBackground,
+      trueDeservedRank: 'Indeterminado (sin muestra)',
+      sampleSize: 0,
+      confidence: 'nula',
+      formula: 'Clasificación por ACS/KD/DDΔ ponderados por partidas y horas totales; requiere ≥1 partida registrada',
+      telemetrySummary: {
+        averageKd: avgKd,
+        averageAcs: avgAcs,
+        averageDd: avgDd,
+        averageHs: `${avgHs}%`,
+        totalCompetitiveMatches: 0,
+        totalGeneralHours: totalGenHours
+      },
+      rationale: 'Sin partidas registradas no se clasifica talento/esfuerzo ni se proyecta rango merecido.',
+      bottleneckOptimization: null
+    };
+  }
 
   // Check fresh account spike (WubbaLubbaDub effect)
   const freshAccount = personal.find(a => (a.competitive?.matches || 0) > 0 && (a.competitive?.matches || 0) <= 30 && (a.peakRank || '').includes('Diamond'));
@@ -115,6 +152,9 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
     talentRatio: `${talentPct}% Talento / ${effortPct}% Esfuerzo`,
     zeroFpsBackground,
     trueDeservedRank: trueRank,
+    sampleSize: totalCompMatches,
+    confidence: totalCompMatches >= 100 ? 'alta' : (totalCompMatches >= 20 ? 'media' : 'baja'),
+    formula: 'ACS/KD/DDΔ ponderados por partidas; talento si breakout en ≤30 partidas a Diamante o DDΔ≥25 con KD≥1.20',
     telemetrySummary: {
       averageKd: avgKd,
       averageAcs: avgAcs,

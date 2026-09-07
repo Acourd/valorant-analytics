@@ -1,0 +1,15 @@
+{
+  "name": "valorant-analytics",
+  "version": "4.0.0",
+  "description": "Motor determinista de telemetría competitiva de Valorant (Node.js nativo, cero dependencias)",
+  "main": "scripts/cli.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "test": "node test_suite.js",
+    "audit": "node opencode_tester.js"
+  },
+  "license": "MIT",
+  "dependencies": {}
+}

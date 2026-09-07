@@ -14,6 +14,8 @@
  */
 
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 const STATEMENT_TYPE_V1 = 'https://in-toto.io/Statement/v1';
 const PREDICATE_TYPE_VALORANT = 'https://valorant-analytics.dev/attestation/v1';
@@ -72,7 +74,7 @@ function signTelemetryReport(matchReport, keyPair = null) {
   const payloadBytes = Buffer.from(JSON.stringify(statement), 'utf8');
   const payloadBase64 = payloadBytes.toString('base64');
 
-  // Pre-Authentication Encoding (PAE) según especificación oficial DSSE:
+  // Pre-Authentication Encoding (PAE) segÃºn especificaciÃ³n oficial DSSE:
   // PAE(type, body) = "DSSEv1" + " " + len(type) + " " + type + " " + len(body) + " " + body
   const payloadType = 'application/vnd.in-toto+json';
   const paeString = `DSSEv1 ${payloadType.length} ${payloadType} ${payloadBytes.length} ${payloadBytes.toString('latin1')}`;
@@ -97,18 +99,40 @@ function signTelemetryReport(matchReport, keyPair = null) {
 }
 
 /**
- * Verifies a DSSE attestation envelope against the provided public key
+ * Verifies a DSSE attestation envelope.
+ * Secure-by-default: the signer must be present in an EXTERNAL trusted keystore.
+ * Envelope-carried keys are NOT trusted unless options.allowSelfSigned is set
+ * (explicit insecure mode) â€” trusting the key inside the envelope proves only
+ * internal consistency, never authorship.
  */
-function verifyTelemetryAttestation(envelope, publicKeyPem = null) {
+function verifyTelemetryAttestation(envelope, publicKeyPem = null, options = {}) {
   if (!envelope || !envelope.payload || !Array.isArray(envelope.signatures) || envelope.signatures.length === 0) {
-    return { verified: false, error: 'Estructura de sobre DSSE inválida' };
+    return { verified: false, error: 'Estructura de sobre DSSE invÃ¡lida' };
+  }
+
+  const keyid = envelope.signatures[0].keyid;
+
+  if (options.trustedKeystore && Array.isArray(options.trustedKeystore)) {
+    const trusted = options.trustedKeystore.find(k => k.keyid === keyid);
+    if (!trusted) {
+      return { verified: false, error: `Firmante no confiable: keyid ${keyid} ausente del almacÃ©n de claves. Registra la clave con registerTrustedKey antes de verificar.` };
+    }
+    return verifyWithPem(envelope, trusted.publicKeyPem, keyid);
+  }
+
+  if (!options.allowSelfSigned) {
+    return { verified: false, error: 'Sobre auto-firmado sin almacÃ©n de claves: el firmante no es confiable por defecto. Usa trustedKeystore o allowSelfSigned (modo inseguro explÃ­cito).' };
   }
 
   const pem = publicKeyPem || envelope.publicKeyPem;
   if (!pem) {
-    return { verified: false, error: 'Clave pública ausente para verificación' };
+    return { verified: false, error: 'Clave pÃºblica ausente para verificaciÃ³n' };
   }
+  return verifyWithPem(envelope, pem);
+}
 
+function verifyWithPem(envelope, pem) {
+  const keyid = envelope.signatures[0].keyid;
   try {
     const publicKey = crypto.createPublicKey(pem);
     const payloadBytes = Buffer.from(envelope.payload, 'base64');
@@ -119,7 +143,7 @@ function verifyTelemetryAttestation(envelope, publicKeyPem = null) {
     const verified = crypto.verify(null, paeBuffer, publicKey, sigBuffer);
 
     if (!verified) {
-      return { verified: false, error: 'Firma criptográfica Ed25519 no coincide con el payload' };
+      return { verified: false, error: 'Firma criptogrÃ¡fica Ed25519 no coincide con el payload' };
     }
 
     const statement = JSON.parse(payloadBytes.toString('utf8'));
@@ -133,12 +157,43 @@ function verifyTelemetryAttestation(envelope, publicKeyPem = null) {
   }
 }
 
+/**
+ * AlmacÃ©n externo de claves confiables (formato: { "keys": [{ keyid, publicKeyPem, label, created }] }).
+ * La verificaciÃ³n segura EXIGE que el firmante estÃ© registrado aquÃ­.
+ */
+function loadOrCreateKeystore(keystorePath) {
+  try {
+    const raw = fs.readFileSync(keystorePath, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.keys)) return parsed;
+  } catch (e) { /* crear nuevo */ }
+  return { keys: [] };
+}
+
+function saveKeystore(keystorePath, keystore) {
+  fs.mkdirSync(path.dirname(keystorePath), { recursive: true });
+  fs.writeFileSync(keystorePath, JSON.stringify(keystore, null, 2));
+}
+
+function registerTrustedKey(keystorePath, publicKeyPem, label) {
+  const ks = loadOrCreateKeystore(keystorePath);
+  const keyid = crypto.createHash('sha256').update(publicKeyPem).digest('hex').slice(0, 16);
+  if (!ks.keys.some(k => k.keyid === keyid)) {
+    ks.keys.push({ keyid, publicKeyPem, label: label || 'sin etiqueta', created: new Date().toISOString() });
+    saveKeystore(keystorePath, ks);
+  }
+  return keyid;
+}
+
 module.exports = {
   generateAttestationKeyPair,
   sha256Digest,
   createStatement,
   signTelemetryReport,
-  verifyTelemetryAttestation
+  verifyTelemetryAttestation,
+  loadOrCreateKeystore,
+  saveKeystore,
+  registerTrustedKey
 };
 
 if (require.main === module) {
@@ -152,14 +207,19 @@ if (require.main === module) {
   };
 
   const envelope = signTelemetryReport(mockReport);
-  console.log('✓ Sobre DSSE generado y firmado con Ed25519: keyid', envelope.signatures[0].keyid);
+  console.log('Sobre DSSE generado y firmado con Ed25519: keyid', envelope.signatures[0].keyid);
 
-  const res = verifyTelemetryAttestation(envelope);
+  const os = require('os');
+  const demoKeystore = path.join(os.tmpdir(), 'dsse-demo-keystore.json');
+  try { fs.unlinkSync(demoKeystore); } catch (e) { /* continuar */ }
+  registerTrustedKey(demoKeystore, envelope.publicKeyPem, 'demo-local');
+  const res = verifyTelemetryAttestation(envelope, null, { trustedKeystore: loadOrCreateKeystore(demoKeystore).keys });
+  try { fs.unlinkSync(demoKeystore); } catch (e) { /* continuar */ }
   if (res.verified) {
-    console.log('✓ Atestación in-toto v1 verificada exitosamente (Exit 0)');
+    console.log('AtestaciÃ³n in-toto v1 verificada contra almacÃ©n confiable (Exit 0)');
     process.exit(0);
   } else {
-    console.error('✗ Fallo en verificación:', res.error);
+    console.error('Fallo en verificaciÃ³n:', res.error);
     process.exit(1);
   }
 }

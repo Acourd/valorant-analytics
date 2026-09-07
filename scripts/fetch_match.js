@@ -9,12 +9,17 @@ const fs = require('fs');
 const { httpsGetJson } = require('./http_fetch');
 
 function extractMatchId(input) {
-  if (!input || typeof input !== 'string') return null;
+  if (!input) return null;
   const match = input.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i);
   return match ? match[1] : input.trim();
 }
 
+const CANONICAL_MATCH_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+
 function fetchMatchWithRetry(matchId, maxRetries = 3) {
+  if (!CANONICAL_MATCH_ID.test(String(matchId || ''))) {
+    throw new Error(`Match ID no canónico: "${matchId}". Se requiere UUID v4 de Tracker.gg (p. ej. cb4ebb70-4ecf-425d-8aaf-3bf9cf718631).`);
+  }
   const url = `https://api.tracker.gg/api/v2/valorant/standard/matches/${matchId}`;
   const data = httpsGetJson(url, { maxRetries, timeoutMs: 15000 });
   if (data.errors && data.errors.length > 0 && !data.data) {
@@ -119,4 +124,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { extractMatchId, fetchMatch: fetchMatchWithRetry, parseMatchSummary };
+module.exports = { extractMatchId, fetchMatch: fetchMatchWithRetry, parseMatchSummary, CANONICAL_MATCH_ID };

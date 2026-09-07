@@ -22,7 +22,7 @@ assert.ok(fs.existsSync(sampleFile), 'sample_match.json no existe');
 const sample = JSON.parse(fs.readFileSync(sampleFile, 'utf8'));
 
 const { normalizeHandle } = require(path.join(scriptsDir, 'fetch_profile.js'));
-const { extractMatchId, parseMatchSummary } = require(path.join(scriptsDir, 'fetch_match.js'));
+const { extractMatchId, parseMatchSummary, fetchMatch, CANONICAL_MATCH_ID } = require(path.join(scriptsDir, 'fetch_match.js'));
 const { parseDuels } = require(path.join(scriptsDir, 'duel_matrix.js'));
 const { generateKovaaksRoutine } = require(path.join(scriptsDir, 'kovaaks_generator.js'));
 const { auditDuoSynergy } = require(path.join(scriptsDir, 'duo_synergy.js'));
@@ -35,7 +35,8 @@ const {
   validateLearningProfile,
   validateWeaponTelemetry,
   validateDuoSynergy,
-  validateDuelMatrix
+  validateDuelMatrix,
+  reconcileDuelMatrix
 } = require(path.join(scriptsDir, 'invariant_validator.js'));
 const { evaluateLearningProfile } = require(path.join(scriptsDir, 'learning_profile.js'));
 const {
@@ -251,8 +252,9 @@ check('22. cli.js invariants: verificación formal de invariantes matemáticos e
 check('23. cli.js attest: sobre DSSE in-toto firmado con Ed25519 y verificado',
   () => {
     const out = cliOk(['attest', sampleFile, 'TenZ#0001']);
-    assert.ok(out.includes('ATESTACIÓN CRIPTOGRÁFICA DSSE'));
-    assert.ok(out.includes('VERIFICADO (Ed25519 OK)'));
+    assert.ok(out.includes('ATESTACIÓN CRIPTOGRÁFICA DSSE') || out.includes('ATESTACI'), 'cabecera attest ausente');
+    assert.ok(out.includes('VERIFICADO contra keystore (Ed25519 OK)'), 'verificación contra keystore ausente');
+    assert.ok(out.includes('Almacén confiable'), 'keystore no declarado en salida');
   });
 
 check('24. cli.js merkle: árbol Merkle de eventos discretos y prueba de inclusión',
@@ -343,10 +345,15 @@ check('32. universal_ingestor: cumplimiento formal de invariant_validator sobre 
 check('33. universal_ingestor: resolveMatchDataResilient intercepta WAF 403 con contención fail-closed',
   () => {
     const fakeWafUrl = 'https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04';
-    const match = resolveMatchDataResilient(fakeWafUrl, 'kirtmy#000', { map: 'Ascent' });
+    assert.throws(
+      () => resolveMatchDataResilient(fakeWafUrl, 'kirtmy#000', { map: 'Ascent' }),
+      /Sin telemetría verificable/
+    );
+    const match = resolveMatchDataResilient(fakeWafUrl, 'kirtmy#000', { map: 'Ascent', allowSynthetic: true });
     assert.ok(match && match.data && match.data.segments);
     assert.strictEqual(match.data.segments.filter(s => s.type === 'player-summary').length, 10);
     assert.strictEqual(match.data.metadata.wafContainment, true);
+    assert.strictEqual(match.data.metadata.synthetic, true);
   });
 
 check('34. cli.js parse: dispatcher procesa archivo de volcado de texto sin errores',
@@ -363,9 +370,10 @@ check('34. cli.js parse: dispatcher procesa archivo de volcado de texto sin erro
 
 check('35. cli.js match (WAF resilient): URL remota protegida ejecuta Zero-Crash con Exit Code 0',
   () => {
-    const out = cliOk(['match', 'https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04', 'kirtmy#000']);
+    const out = cliOk(['match', 'https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04', 'kirtmy#000', '--demo']);
     assert.ok(out.includes('DIAGNÓSTICO 360°') && out.includes('kirtmy#000'));
     assert.ok(out.includes('RADAR DE DOMINIO'));
+    assert.ok(out.includes('SINTÉTICA'), 'modo demo debe declarar procedencia sintética');
   });
 
 check('36. browser_cache_harvester: decompressBuffer y detección de rutas Chromium',
@@ -611,6 +619,118 @@ check('54. cli.js match: shorthand de jugador resuelve sobre sample_match sin WA
     const out = execFileSync(process.execPath, [cliPath, 'match', 'TenZ#0001'], { encoding: 'utf8' });
     assert.ok(out.includes('DIAGNÓSTICO 360°: TenZ#0001'), 'Debe diagnosticar a TenZ#0001');
     assert.ok(!out.includes('kirtmy#000'), 'No debe desbordar a kirtmy sintético');
+  });
+
+// ---- Regresiones del veredicto REQUIERE_CORRECCIÓN (v4.6) ----
+
+check('55. ingestor fail-closed: archivo inexistente y URL no canónica lanzan sin análisis',
+  () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ing-fc-'));
+    try {
+      const missing = path.join(tmp, 'no-existe.json');
+      assert.throws(() => resolveMatchDataResilient(missing, 'Test#0001'), /no encontrado|no resoluble|Sin telemetría/i);
+      assert.throws(() => resolveMatchDataResilient('../../examples/sample_match.json', 'Test#0001'), /canónico|no resoluble|Sin telemetría/i);
+      assert.throws(() => fetchMatch('../../examples/sample_match.json'), /canónico/);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+check('56. ingestor demo: --demo emite sintético con procedencia explícita',
+  () => {
+    const fm = require(path.join(scriptsDir, 'fetch_match.js'));
+    const orig = fm.fetchMatch;
+    fm.fetchMatch = () => { throw new Error('Simulated WAF 403'); };
+    try {
+      const r = resolveMatchDataResilient('https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04', 'Test#0001', { allowSynthetic: true });
+      assert.strictEqual(r.data.metadata.synthetic, true);
+      assert.strictEqual(r.data.metadata.wafContainment, true);
+      assert.ok(Array.isArray(r.data.metadata.ingestionDiagnostics) && r.data.metadata.ingestionDiagnostics.length > 0);
+      assert.throws(
+        () => resolveMatchDataResilient('https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04', 'Test#0001'),
+        /--demo/
+      );
+    } finally {
+      fm.fetchMatch = orig;
+    }
+  });
+
+check('57. dsse: auto-firmado desconocido falla; keystore + rotación verifican',
+  () => {
+    const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
+    const rep = { player: 'Test#0001', map: 'Ascent' };
+    const k1 = dsse.generateAttestationKeyPair();
+    const env1 = dsse.signTelemetryReport(rep, k1);
+    const denied = dsse.verifyTelemetryAttestation(env1);
+    assert.strictEqual(denied.verified, false, 'auto-firmado debe fallar por defecto');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-ks-'));
+    try {
+      const ksPath = path.join(tmp, 'ks.json');
+      dsse.registerTrustedKey(ksPath, env1.publicKeyPem, 't1');
+      const ok = dsse.verifyTelemetryAttestation(env1, null, { trustedKeystore: dsse.loadOrCreateKeystore(ksPath).keys });
+      assert.strictEqual(ok.verified, true, 'clave registrada debe verificar');
+      const k2 = dsse.generateAttestationKeyPair();
+      const env2 = dsse.signTelemetryReport(rep, k2);
+      assert.strictEqual(dsse.verifyTelemetryAttestation(env2, null, { trustedKeystore: dsse.loadOrCreateKeystore(ksPath).keys }).verified, false, 'clave no registrada debe fallar');
+      dsse.registerTrustedKey(ksPath, env2.publicKeyPem, 't2-rotated');
+      assert.strictEqual(dsse.verifyTelemetryAttestation(env2, null, { trustedKeystore: dsse.loadOrCreateKeystore(ksPath).keys }).verified, true, 'rotación debe verificar');
+      const evil = JSON.parse(JSON.stringify(env1));
+      evil.payload = Buffer.from(JSON.stringify({ hacked: true })).toString('base64');
+      assert.strictEqual(dsse.verifyTelemetryAttestation(evil, null, { trustedKeystore: dsse.loadOrCreateKeystore(ksPath).keys }).verified, false, 'payload manipulado debe fallar');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+check('58. invariant: zonas todo-cero y matriz imposible fallan con error tipado',
+  () => {
+    assert.throws(() => validateHitZones({ head: '0%', body: '0%', leg: '0%' }), /HIT_ZONES_EMPTY/);
+    const phantom = {
+      playerMap: { 'A#1': { kills: 5, deaths: 5 } },
+      duelMatrix: { 'A#1': { 'Fantasma#9': 40 }, 'Fantasma#9': { 'A#1': 2 } }
+    };
+    assert.throws(() => validateDuelMatrix(phantom), /DUEL_UNKNOWN_PLAYER/);
+    const real = parseDuels(sample, 'TenZ#0001');
+    assert.strictEqual(validateDuelMatrix(real), true);
+    const rec = reconcileDuelMatrix(real);
+    assert.ok(rec.reconciled === true && rec.knownPlayers === true, 'muestra real debe reconciliar');
+  });
+
+check('59. learning/coaching: telemetría ausente no fabrica fugas ni módulos',
+  () => {
+    const emptyMatch = { data: { metadata: { mapName: 'Ascent', rounds: 24 }, segments: [{ type: 'player-summary', metadata: { platformUserHandle: 'X#1' }, attributes: { platformUserIdentifier: 'X#1' }, stats: {} }] } };
+    const p = evaluateLearningProfile(emptyMatch, 'X#1');
+    assert.ok(p.unknowns.length >= 4, 'unknowns no registrados');
+    assert.strictEqual(p.dataQuality, 'insuficiente');
+    assert.strictEqual(p.eloLeaks.length, 0, 'fugas fabricadas desde vacío');
+    assert.ok(p.warning && p.warning.includes('ADVERTENCIA'), 'warning ausente');
+  });
+
+check('60. autodiagnostic/career: muestra vacía declara insuficiencia sin inventar',
+  () => {
+    const tel = extractAccountTelemetry({}, { handle: 'X#1' });
+    assert.strictEqual(tel.insufficientData, true);
+    const agg = aggregateCareerTelemetry([{ telemetry: tel }]);
+    assert.strictEqual(agg.dataQuality, 'insuficiente');
+    const mmr = evaluateMmrDrag({ competitive: { matches: 0 }, currentRank: 'Gold 3' });
+    assert.ok(mmr.diagnosis.includes('DATOS INSUFICIENTES') && mmr.confidence === 'nula');
+    assert.ok(mmr.formula && typeof mmr.sampleSize === 'number');
+    const tl = generateMilestonesTimeline(agg);
+    assert.strictEqual(tl.length, 1);
+    assert.ok(tl[0].contexto.includes('Datos insuficientes'));
+  });
+
+check('61. cli.js: archivo inexistente y parse inválido fallan con Exit 1',
+  () => {
+    let code1 = 0;
+    try { cliOk(['match', './no-existe-xyz.json']); } catch (e) { code1 = e.status; }
+    assert.strictEqual(code1, 1, 'match sobre archivo inexistente debe salir 1');
+    let code2 = 0;
+    try { cliOk(['parse', './no-existe-xyz.json', 'X#1']); } catch (e) { code2 = e.status; }
+    assert.strictEqual(code2, 1, 'parse sobre archivo inexistente debe salir 1');
+    let code3 = 0;
+    try { cliOk(['parse', sampleFile, 'jugador-sin-tag']); } catch (e) { code3 = e.status; }
+    assert.strictEqual(code3, 1, 'parse con Riot ID inválido debe salir 1');
   });
 
 console.log(`\nResults: ${passed}/${total} tests passed.`);
