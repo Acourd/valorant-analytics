@@ -99,12 +99,15 @@ function extractAccountTelemetry(profileData, options = {}) {
 
   const totalCasualSeconds = unratedSeconds + otherSeconds + casualAllowanceSeconds;
   const totalGeneralSeconds = competitiveSeconds + totalCasualSeconds;
+  const insufficientData = competitiveSeconds === 0 && unratedSeconds === 0 && otherSeconds === 0 && (level == null);
 
   return {
     handle,
     level,
     isExcluded,
     note,
+    insufficientData,
+    sampleSize: compMatches,
     competitive: {
       seconds: competitiveSeconds,
       hours: Number((competitiveSeconds / 3600).toFixed(1)),
@@ -164,6 +167,9 @@ function aggregateCareerTelemetry(accountsList) {
 
   return {
     accounts: processed,
+    dataQuality: processed.length === 0 || processed.every(a => a.insufficientData)
+      ? 'insuficiente'
+      : (processed.some(a => a.insufficientData) ? 'parcial' : 'completa'),
     summary: {
       totalAccounts: processed.length,
       personalAccounts: personal.length,
@@ -191,6 +197,14 @@ function aggregateCareerTelemetry(accountsList) {
 
 function generateMilestonesTimeline(careerReport, options = {}) {
   const totalComp = careerReport.summary.totalCompetitive.hours;
+  if (!totalComp || totalComp <= 0) {
+    return [{
+      rango: 'Sin datos',
+      tramoHoras: 0,
+      acumuladoHoras: 0,
+      contexto: 'Datos insuficientes: conecta telemetría real de partidas para proyectar hitos de rango. No se inventa historial.'
+    }];
+  }
   const diamondAcc = careerReport.accounts.find(a => (a.peakRank || '').includes('Diamond'));
   const speedrunHours = (diamondAcc && typeof diamondAcc.competitive?.hours === 'number')
     ? diamondAcc.competitive.hours

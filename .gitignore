@@ -16,3 +16,4 @@ output*.json
 temp*.json
 .pipeline/
 .drive-checkpoint/
+.cache/

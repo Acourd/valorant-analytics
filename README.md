@@ -199,6 +199,7 @@ Si utilizas **Google Gemini (Gems)** o **OpenAI (Custom GPTs)**, el archivo [`st
 ## ◈ Privacidad y Especificaciones de Ingeniería
 
 - **100% Local y Confidencial:** Todo el análisis se ejecuta localmente en tu procesador. Ninguna estadística, Riot ID o captura sale de tu máquina.
+- **Red solo bajo demanda explícita:** los comandos `fetch_profile` / `fetch_match` (y URLs remotas en `match`) consultan la API pública de Tracker.gg con reintento y backoff; todo lo demás (JSON local, scoreboards, caché) es 100% offline. Un perfil privado devuelve error instructivo, jamás datos inventados.
 - **Zero Dependencias NPM:** Diseñado exclusivamente sobre las librerías estándar de Node.js (`fs`, `path`, `zlib`, `crypto`, `child_process`). Cero descargas externas.
 - **Compatibilidad Multiplataforma:** Probado y garantizado en Windows 11 (PowerShell/CMD), macOS (zsh) y Linux (bash).
 - **Garantía Determinista:** 54 pruebas automatizadas verificadas con Exit Code 0 y puntuación perfecta de 100/100 en auditorías de código agéntico.

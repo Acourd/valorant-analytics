@@ -72,16 +72,45 @@ function generateCoachingReport(matchData, targetHandle) {
   const hardOpponents = [];
   opponents.forEach(opp => {
     const kills = killsOnOpponents[opp.handle] || 0;
-    const deaths = (duelMatrix[opp.handle] || {})[effectiveTarget] || 0;
+    const deaths = (duelMatrix[opp.handle] || {})[target] || 0;
     if (deaths > kills) {
       hardOpponents.push({ opp, kills, deaths, diff: deaths - kills });
     }
   });
 
+  // Recomendaciones SOLO con condición respaldada por la telemetría del objetivo.
+  const isEntryAgent = ['Iso', 'Jett', 'Raze', 'Neon', 'Yoru', 'Reyna', 'Phoenix'].includes(p.agent);
+  const pKills = p.kills || 0;
+  const pDeaths = p.deaths || 0;
+  const recommendations = [];
+  if (isEntryAgent || hardOpponents.length > 0) {
+    recommendations.push({
+      module: 'iso_site_entry',
+      trigger: isEntryAgent ? `Agente de entrada (${p.agent})` : `Fricción real vs ${hardOpponents.map(h => h.opp.handle).join(', ')}`,
+      rationale: 'Aperturas de sitio respaldadas por telemetría de duelos del objetivo.'
+    });
+  }
+  if (hardOpponents.length > 0 || pDeaths > pKills) {
+    recommendations.push({
+      module: 'gunfight_hygiene',
+      trigger: hardOpponents.length > 0 ? `K/D negativo vs ${hardOpponents[0].opp.handle}` : `K/D global ${pKills}/${pDeaths}`,
+      rationale: 'Higiene de duelo prescrita por derrotas verificadas, no por defecto.'
+    });
+  }
+  if (pDeaths >= pKills) {
+    recommendations.push({
+      module: 'disadvantage_pacing',
+      trigger: `Balance ${pKills}K/${pDeaths}D`,
+      rationale: 'Gestión de desventaja cuando el objetivo pierde más duelos de los que gana.'
+    });
+  }
+
   return {
     player: p,
     hardOpponents,
-    resources: CURATED_RESOURCES
+    resources: CURATED_RESOURCES,
+    recommendations,
+    unrecommended: Object.keys(CURATED_RESOURCES).filter(k => !recommendations.some(r => r.module === k))
   };
 }
 

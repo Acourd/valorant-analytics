@@ -384,12 +384,20 @@ function resolveMatchDataResilient(source, playerHandle = 'kirtmy#000', options 
   }
 
   // 3. Extracción remota con contención WAF
-  const { extractMatchId, fetchMatch } = require('./fetch_match');
+  const { extractMatchId, fetchMatch, CANONICAL_MATCH_ID } = require('./fetch_match');
   const matchId = extractMatchId(source);
 
-  if (matchId) {
+  if (!matchId || !CANONICAL_MATCH_ID.test(matchId)) {
+    throw new Error(`Entrada no resoluble: "${String(source).slice(0, 120)}". Proporciona un archivo JSON local, un volcado de scoreboard, un match ID canónico (UUID) o usa --demo para telemetría sintética explícita.`);
+  }
+
+  {
     const cacheDir = path.join(__dirname, '..', '.cache', 'matches');
     const cacheFile = path.join(cacheDir, `${matchId}.json`);
+    const resolved = path.resolve(cacheFile);
+    if (!resolved.startsWith(path.resolve(cacheDir) + path.sep)) {
+      throw new Error(`Ruta de caché fuera del perímetro permitido: "${matchId}".`);
+    }
     if (fs.existsSync(cacheFile)) {
       try {
         return JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
@@ -413,20 +421,22 @@ function resolveMatchDataResilient(source, playerHandle = 'kirtmy#000', options 
       }
       return remoteData;
     } catch (netErr) {
-      console.log(`\n🛡️ [MOTOR DE RESILIENCIA TÁCTICA ACTIVADO]`);
+      if (!options.allowSynthetic) {
+        throw new Error(`Fallo de red/WAF para Match ${matchId}: ${netErr.message}. Sin telemetría verificable no se emite análisis. Usa --demo para modo sintético explícito.`);
+      }
+      console.log(`\n🛡️ [MOTOR DE RESILIENCIA TÁCTICA ACTIVADO — MODO DEMO]`);
       console.log(`   Causa: Cloudflare Turnstile WAF protegiendo api.tracker.gg para Match: ${matchId}`);
       console.log(`   Acción: Generando reconstrucción de telemetría matemáticamente invariante para ${playerHandle}.`);
-      console.log(`   Garantía: Radar 360°, Duelos 1v1 y Rutina Kovaaks 100% operativos sin interrupción.\n`);
+      console.log(`   ADVERTENCIA: datos SINTÉTICOS, no son la partida real. Solo demostración.\n`);
 
       const synthetic = assembleRawMatchStructure([], options.map || 'Ascent', 24, playerHandle);
       synthetic.data.metadata.matchId = matchId;
       synthetic.data.metadata.wafContainment = true;
-      synthetic.data.metadata.ingestionDiagnostics = [...diagnostics, 'Fallback sintético por fallo de red: NO es telemetría real.'];
+      synthetic.data.metadata.synthetic = true;
+      synthetic.data.metadata.ingestionDiagnostics = [...diagnostics, 'Fallback sintético por fallo de red (modo --demo): NO es telemetría real.'];
       return synthetic;
     }
   }
-
-  return assembleRawMatchStructure([], 'Ascent', 24, playerHandle);
 }
 
 module.exports = {

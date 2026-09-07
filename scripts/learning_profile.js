@@ -39,8 +39,25 @@ function evaluateLearningProfile(matchData, targetHandle) {
   }
 
   const p = playerMap[target];
-  const st = p.stats || {};
+  if (!p) {
+    throw new Error(`Jugador "${targetHandle}" no encontrado en la partida. Sin telemetría del objetivo no se emite diagnóstico.`);
+  }
+  const st = p.stats;
   const totalRounds = meta.rounds || 20;
+
+  // Extract key metrics (track which ones fell back to defaults: unknowns)
+  const unknowns = [];
+  const track = (key, hasValue) => { if (!hasValue) unknowns.push(key); return hasValue; };
+  const hasHs = st.hsAccuracy?.displayValue !== undefined || st.headshotsPercentage?.displayValue !== undefined;
+  const hasKd = st.kdRatio?.displayValue !== undefined;
+  const hasAcs = st.scorePerRound?.displayValue !== undefined;
+  const hasAdr = st.damagePerRound?.displayValue !== undefined;
+  const hasKast = st.kast?.displayValue !== undefined;
+  track('headshot%', hasHs);
+  track('kd', hasKd);
+  track('acs', hasAcs);
+  track('adr', hasAdr);
+  track('kast', hasKast);
 
   // Extract key metrics
   const hsPct = parseFloat(st.hsAccuracy?.displayValue || st.headshotsPercentage?.displayValue || '25%');
@@ -100,13 +117,21 @@ function evaluateLearningProfile(matchData, targetHandle) {
       solution: 'Juega más cerca de un compañero de apoyo para garantizar que cuando mueras, ellos obtengan el re-frag inmediato.'
     });
   }
-  if (eloLeaks.length < 3) {
+  const hasRealData = unknowns.length < 5;
+  if (hasRealData && eloLeaks.length < 3) {
     eloLeaks.push({
       issue: 'Aceleración Prematura del Ritmo de Ronda',
       detail: 'Tendencia a empujar de forma reactiva en rondas donde el equipo ya cuenta con ventaja numérica de 5v3 o 4v2.',
-      solution: 'Congela el avance tras conseguir el primer frag; obliga al rival a gastar su tiempo y utilidad.'
+      solution: 'Congela el avance tras conseguir el primer frag; obliga al rival a gastar su tiempo y utilidad.',
+      confidence: 'media'
     });
   }
+
+  const dataQuality = unknowns.length === 0 ? 'completa' : (unknowns.length >= 5 ? 'insuficiente' : 'parcial');
+  const finalLeaks = unknowns.length >= 5 ? [] : eloLeaks.slice(0, 3);
+  const dataWarning = unknowns.length >= 5
+    ? 'ADVERTENCIA: telemetría del objetivo ausente. No se emiten fugas específicas: conecta datos reales de partida.'
+    : (unknowns.length > 0 ? `Métricas no disponibles y excluidas del diagnóstico: ${unknowns.join(', ')}.` : null);
 
   // 3. Actionable Self-Improvement Prescription
   return {
@@ -115,6 +140,9 @@ function evaluateLearningProfile(matchData, targetHandle) {
     rank: p.rank,
     map: meta.mapName || 'Unknown',
     result: meta.result || 'Finished',
+    dataQuality,
+    unknowns,
+    warning: dataWarning,
     radar: {
       precisionMecanica: `${mechanicalScore} / 100`,
       macrogamePosicionamiento: `${macroScore} / 100`,
@@ -122,7 +150,7 @@ function evaluateLearningProfile(matchData, targetHandle) {
       disciplinaEconomica: `${economyScore} / 100`,
       composturaClutch: `${composureScore} / 100`
     },
-    eloLeaks: eloLeaks.slice(0, 3),
+    eloLeaks: finalLeaks,
     prescripcionInmediata: {
       reglaMental: 'Aplica la regla de los 2 segundos: antes de cada asomo, verifica en el minimapa si tienes un compañero a distancia de tradeo.',
       sesionKovaaks: hsPct >= 35 ? '5 min de Valorant Microshot Speed + 5 min de Thin Aiming Long' : '5 min de Pasu Small Reload + 5 min de 1wall6targets extra small'

@@ -99,8 +99,11 @@ function validateHitZones(hitZoneDistribution) {
   }
 
   const total = h + b + l;
+  if (total <= 0) {
+    throw new InvariantViolationError('HIT_ZONES_EMPTY', 'Distribución de zonas vacía: Head+Body+Leg suman 0%, telemetría sin impactos registrados', { h, b, l, total });
+  }
   // Permitimos margen de tolerancia por redondeo flotante de 0.6%
-  if (Math.abs(total - 100) > 0.6 && total > 0) {
+  if (Math.abs(total - 100) > 0.6) {
     throw new InvariantViolationError('HIT_ZONES_SUM', `La suma de zonas de impacto debe converger a 100%: total fue ${total.toFixed(2)}%`, { h, b, l, total });
   }
 
@@ -208,9 +211,62 @@ function validateDuelMatrix(duelResult) {
     if (!isFiniteNumber(data.kills) || data.kills < 0 || !isFiniteNumber(data.deaths) || data.deaths < 0) {
       throw new InvariantViolationError('DUEL_PLAYER_STATS', `Kills/Deaths inválidos para ${p}`, { data });
     }
+    if (!Number.isInteger(data.kills) || !Number.isInteger(data.deaths)) {
+      throw new InvariantViolationError('DUEL_PLAYER_INTEGER', `Kills/Deaths deben ser enteros no negativos para ${p}`, { data });
+    }
+  }
+
+  const reconciliation = reconcileDuelMatrix({ playerMap, duelMatrix });
+  if (!reconciliation.knownPlayers) {
+    throw new InvariantViolationError('DUEL_UNKNOWN_PLAYER', `La matriz referencia jugadores fuera del roster: ${(reconciliation.unknown || []).join(', ')}`, { unknown: reconciliation.unknown });
+  }
+  if (!reconciliation.countsValid) {
+    throw new InvariantViolationError('DUEL_COUNTS', 'Conteos de duelos no enteros o negativos en la matriz', { duelMatrix });
   }
 
   return true;
+}
+
+/**
+ * Reconcilia la matriz de duelos contra los agregados de jugadores.
+ * Devuelve evidencia (no lanza): la telemetría real puede diferir levemente
+ * (la muestra Tracker difiere 0.6%), así que solo se informa el desvío.
+ * Una matriz es IMPOSIBLE si referencia jugadores fantasma o conteos inválidos.
+ */
+function reconcileDuelMatrix(duelResult) {
+  const playerMap = (duelResult && duelResult.playerMap) || {};
+  const duelMatrix = (duelResult && duelResult.duelMatrix) || {};
+  const roster = new Set(Object.keys(playerMap));
+  const unknown = new Set();
+  let countsValid = true;
+  let duelTotal = 0;
+  let killsTotal = 0;
+
+  for (const [killer, victims] of Object.entries(duelMatrix)) {
+    if (!roster.has(killer)) unknown.add(killer);
+    if (!victims || typeof victims !== 'object') { countsValid = false; continue; }
+    for (const [victim, count] of Object.entries(victims)) {
+      if (!roster.has(victim)) unknown.add(victim);
+      if (!Number.isInteger(count) || count < 0) countsValid = false;
+      else duelTotal += count;
+    }
+  }
+  for (const data of Object.values(playerMap)) {
+    if (Number.isInteger(data.kills) && data.kills >= 0) killsTotal += data.kills;
+  }
+
+  const delta = duelTotal - killsTotal;
+  const deltaPct = killsTotal > 0 ? Math.abs(delta) / killsTotal : (duelTotal > 0 ? 1 : 0);
+  return {
+    duelTotal,
+    killsTotal,
+    delta,
+    deltaPct: Number(deltaPct.toFixed(4)),
+    reconciled: deltaPct <= 0.05,
+    knownPlayers: unknown.size === 0,
+    unknown: [...unknown],
+    countsValid
+  };
 }
 
 module.exports = {
@@ -223,7 +279,8 @@ module.exports = {
   validateLearningProfile,
   validateWeaponTelemetry,
   validateDuoSynergy,
-  validateDuelMatrix
+  validateDuelMatrix,
+  reconcileDuelMatrix
 };
 
 if (require.main === module) {

@@ -6,7 +6,9 @@ const path = require('path');
 const {
   signTelemetryReport,
   verifyTelemetryAttestation,
-  generateAttestationKeyPair
+  generateAttestationKeyPair,
+  registerTrustedKey,
+  loadOrCreateKeystore
 } = require(path.join(__dirname, '..', 'scripts', 'dsse_attestation'));
 const {
   MerkleTree,
@@ -31,9 +33,29 @@ const envelope = signTelemetryReport(sampleReport, keyPair);
 assert.strictEqual(envelope.payloadType, 'application/vnd.in-toto+json');
 assert(Array.isArray(envelope.signatures) && envelope.signatures.length > 0);
 
-const verification = verifyTelemetryAttestation(envelope);
-assert.strictEqual(verification.verified, true, 'La firma Ed25519 sobre PAE debe ser válida');
+const os = require('os');
+const fs = require('fs');
+const ksPath = path.join(os.tmpdir(), 'dsse-test-keystore.json');
+try { fs.unlinkSync(ksPath); } catch (e) { /* continuar */ }
+registerTrustedKey(ksPath, envelope.publicKeyPem, 'test-local');
+const trusted = loadOrCreateKeystore(ksPath).keys;
+
+const verification = verifyTelemetryAttestation(envelope, null, { trustedKeystore: trusted });
+assert.strictEqual(verification.verified, true, 'La firma Ed25519 sobre PAE debe ser válida contra el almacén');
 assert.strictEqual(verification.statement.subject[0].name, 'TenZ#0001');
+
+// 1b. Auto-firmado desconocido se RECHAZA por defecto (sin keystore)
+const otherPair = generateAttestationKeyPair();
+const foreignEnvelope = signTelemetryReport(sampleReport, otherPair);
+const foreignRes = verifyTelemetryAttestation(foreignEnvelope);
+assert.strictEqual(foreignRes.verified, false, 'Sobre auto-firmado desconocido debe fallar');
+assert.ok(foreignRes.error.includes('no es confiable') || foreignRes.error.includes('almacén'), 'Error debe explicar falta de confianza');
+
+// 1c. Rotación de claves: registrar segunda clave y verificar con ella
+registerTrustedKey(ksPath, foreignEnvelope.publicKeyPem, 'test-rotated');
+const rotated = verifyTelemetryAttestation(foreignEnvelope, null, { trustedKeystore: loadOrCreateKeystore(ksPath).keys });
+assert.strictEqual(rotated.verified, true, 'Clave rotada registrada debe verificar');
+try { fs.unlinkSync(ksPath); } catch (e) { /* continuar */ }
 
 // 2. Tamper resistance
 const tamperedEnvelope = JSON.parse(JSON.stringify(envelope));

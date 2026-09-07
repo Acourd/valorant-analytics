@@ -39,7 +39,7 @@ const {
   validateDuelMatrix
 } = require('./invariant_validator');
 const { runPreflight } = require('./preflight_guard');
-const { signTelemetryReport, verifyTelemetryAttestation } = require('./dsse_attestation');
+const { signTelemetryReport, verifyTelemetryAttestation, registerTrustedKey, loadOrCreateKeystore } = require('./dsse_attestation');
 const { buildMatchMerkleLedger, MerkleTree, sha256 } = require('./merkle_ledger');
 const { SessionGuardian } = require('./session_guardian');
 const { DriftDetector } = require('./drift_detector');
@@ -60,7 +60,20 @@ function printBanner() {
 }
 
 function resolveMatchData(source, playerHandle) {
-  return resolveMatchDataResilient(source, playerHandle);
+  const data = resolveMatchDataResilient(source, playerHandle, { allowSynthetic: DEMO_MODE });
+  printProvenance(source, data);
+  return data;
+}
+
+function printProvenance(source, matchData) {
+  const meta = (matchData && matchData.data && matchData.data.metadata) || {};
+  if (meta.synthetic || meta.wafContainment) {
+    console.log(`[FUENTE: SINTÉTICA --demo] Telemetría reconstruida. NO es una partida real: diagnóstico solo demostrativo.`);
+  } else if (typeof source === 'string' && fs.existsSync(source)) {
+    console.log(`[FUENTE: JSON local verificado: ${source}]`);
+  } else {
+    console.log(`[FUENTE: API Tracker.gg / caché local verificada]`);
+  }
 }
 
 function resolveTargetAndPlayer(args) {
@@ -112,6 +125,8 @@ function buildDuelTable(matrixData, playerHandle) {
 }
 
 const args = process.argv.slice(2);
+const DEMO_MODE = args.includes('--demo');
+for (let i = args.length - 1; i >= 0; i--) { if (args[i] === '--demo') args.splice(i, 1); }
 let command = args[0];
 
 if (!command || command === '--help' || command === '-h') {
@@ -406,12 +421,15 @@ try {
     console.log(`------------------------------------------------------------------------`);
 
     const envelope = signTelemetryReport(profile);
-    const verifyRes = verifyTelemetryAttestation(envelope);
+    const keystorePath = path.join(__dirname, '..', '.cache', 'dsse_keystore.json');
+    const keyid = registerTrustedKey(keystorePath, envelope.publicKeyPem, `attest-${effectivePlayer}`);
+    const verifyRes = verifyTelemetryAttestation(envelope, null, { trustedKeystore: loadOrCreateKeystore(keystorePath).keys });
 
     console.log(`  • Tipo de Payload:       ${envelope.payloadType}`);
     console.log(`  • Clave Firmante (KeyID): ${envelope.signatures[0].keyid}`);
     console.log(`  • Longitud Firma Base64:  ${envelope.signatures[0].sig.length} bytes`);
-    console.log(`  • Veredicto Criptográfico: ${verifyRes.verified ? 'VERIFICADO (Ed25519 OK)' : 'FALLIDO'}`);
+    console.log(`  • Almacén confiable:      ${keystorePath} (clave registrada: ${keyid})`);
+    console.log(`  • Veredicto Criptográfico: ${verifyRes.verified ? 'VERIFICADO contra keystore (Ed25519 OK)' : `FALLIDO: ${verifyRes.error}`}`);
     console.log(`------------------------------------------------------------------------`);
     console.log(`✓ Sobre DSSE in-toto v1 inmutable verificado con éxito (Exit 0)`);
     console.log(`========================================================================\n`);
@@ -530,9 +548,15 @@ try {
     handleProfile(handle);
 
   } else if (command === 'parse' || command === 'ingest') {
-    const rawInput = args.slice(1).join(' ');
-    const player = args[args.length - 1]?.includes('#') ? args[args.length - 1] : undefined;
-    const matchData = resolveMatchData(rawInput || 'examples/sample_match.json', player);
+    const fileInput = args[1];
+    const player = (args[2] && args[2].includes('#')) ? args[2] : undefined;
+    if (args[2] && !player) {
+      throw new Error(`parse: Riot ID inválido "${args[2]}" (formato esperado Nombre#TAG).`);
+    }
+    if (fileInput && (/[\\/]/.test(fileInput) || /\.(json|txt|md|csv)$/i.test(fileInput)) && !fs.existsSync(fileInput)) {
+      throw new Error(`parse: archivo no encontrado: "${fileInput}".`);
+    }
+    const matchData = resolveMatchData(fileInput || path.join(__dirname, '..', 'examples', 'sample_match.json'), player);
     const res = evaluateLearningProfile(matchData, player);
     validateLearningProfile(res);
     printBanner();
