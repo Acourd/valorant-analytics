@@ -796,6 +796,71 @@ check('65. cli.js profile: Riot ID malformado falla; shorthand declara fixture',
     assert.ok(out.includes('fixture de ejemplo'), 'shorthand debe declarar uso del fixture');
   });
 
+check('66. identidad DSSE: creación 0600 y rechazo de permisos inseguros',
+  () => {
+    const cacheDir = path.join(__dirname, '.cache');
+    const idFile = path.join(cacheDir, 'attest_identity.json');
+    const ksFile = path.join(cacheDir, 'dsse_keystore.json');
+    const backup = [];
+    for (const f of [idFile, ksFile]) {
+      if (fs.existsSync(f)) {
+        backup.push([f + '.permtestbak', fs.readFileSync(f)]);
+        fs.renameSync(f, f + '.permtestbak');
+      }
+    }
+    try {
+      const out = cliOk(['attest', sampleFile, 'TenZ#0001', '--trust-new-key']);
+      assert.ok(out.includes('VERIFICADO contra keystore'), 'aprovisionamiento debe verificar');
+      assert.ok(fs.existsSync(idFile), 'identidad no creada');
+      if (process.platform !== 'win32') {
+        const mode = fs.statSync(idFile).mode & 0o777;
+        assert.strictEqual(mode & 0o077, 0, `identidad con permisos ${mode.toString(8)}, se exige 0600`);
+        fs.chmodSync(idFile, 0o644);
+        let code = 0;
+        let stderr = '';
+        try { cliOk(['attest', sampleFile, 'TenZ#0001', '--trust-new-key']); }
+        catch (e) { code = e.status; stderr = String(e.stdout || '') + String(e.stderr || '') + String(e.message || ''); }
+        assert.strictEqual(code, 1, 'identidad 0644 debe rechazarse');
+        assert.ok(stderr.includes('permisos inseguros'), 'debe explicar permisos inseguros');
+      }
+    } finally {
+      for (const f of [idFile, ksFile]) { try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch (e) {} }
+      for (const [bak, content] of backup) { fs.writeFileSync(bak.replace(/\.permtestbak$/, ''), content); try { fs.unlinkSync(bak); } catch (e) {} }
+    }
+  });
+
+check('67. autodiagnostic: muestra cero devuelve null, no promedios fabricados',
+  () => {
+    const r = evaluateTalentVsEffort({
+      summary: { totalGeneral: { hours: 0 }, highestPeakRank: 'Unranked' },
+      accounts: [{ handle: 'X#1', isExcluded: false, competitive: { matches: 0 }, peakRank: 'Unranked' }]
+    });
+    assert.strictEqual(r.telemetrySummary.averageKd, null);
+    assert.strictEqual(r.telemetrySummary.averageAcs, null);
+    assert.strictEqual(r.telemetrySummary.averageDd, null);
+    assert.strictEqual(r.telemetrySummary.averageHs, null);
+  });
+
+check('68. ingestor: IDs no-archivo no provocan sondas fs; parse sin entrada falla',
+  () => {
+    let code = 0;
+    try { cliOk(['parse']); } catch (e) { code = e.status; }
+    assert.strictEqual(code, 1, 'parse sin entrada debe salir 1');
+    const fsMod = require('fs');
+    const origExists = fsMod.existsSync;
+    const origStat = fsMod.statSync;
+    const probed = [];
+    fsMod.existsSync = (...a) => { probed.push('existsSync'); return origExists(...a); };
+    fsMod.statSync = (...a) => { probed.push('statSync'); return origStat(...a); };
+    try {
+      assert.throws(() => resolveMatchDataResilient('..%2f..%2fx', 'X#1'), /canónico/);
+    } finally {
+      fsMod.existsSync = origExists;
+      fsMod.statSync = origStat;
+    }
+    assert.strictEqual(probed.length, 0, `sondas fs inesperadas: ${probed.join(',')}`);
+  });
+
 console.log(`\nResults: ${passed}/${total} tests passed.`);
 if (passed !== total) process.exit(1);
 console.log('All valorant-analytics deterministic tests passed with Exit Code: 0');

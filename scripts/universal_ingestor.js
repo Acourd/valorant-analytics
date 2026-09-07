@@ -378,8 +378,15 @@ function resolveMatchDataResilient(source, playerHandle = 'kirtmy#000', options 
     return source;
   }
 
-  // 1. Archivo local existente
-  if (typeof source === 'string' && fs.existsSync(source)) {
+  // 1. Archivo local: solo las entradas con forma de ruta tocan el filesystem.
+  // Los IDs/URLs jamás provocan sondas: se clasifican por sintaxis primero.
+  // Las URLs (https://...) se excluyen de la rama archivo aunque contengan '/'.
+  const isUrl = typeof source === 'string' && /^https?:\/\//i.test(source);
+  const looksLikeFile = typeof source === 'string' && !isUrl && (/[\\/]/.test(source) || /\.(json|txt|md|csv)$/i.test(source));
+  if (looksLikeFile) {
+    if (!fs.existsSync(source)) {
+      throw new Error(`Archivo no encontrado: "${source}". Proporciona una ruta existente, un volcado de scoreboard, un match ID canónico o usa --demo.`);
+    }
     const content = fs.readFileSync(source, 'utf8');
     if (content.trim().startsWith('{')) {
       try {

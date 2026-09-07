@@ -202,7 +202,7 @@ Si utilizas **Google Gemini (Gems)** o **OpenAI (Custom GPTs)**, el archivo [`st
 - **Red solo bajo demanda explícita:** los comandos `fetch_profile` / `fetch_match` (y URLs remotas en `match`) consultan la API pública de Tracker.gg con reintento y backoff; todo lo demás (JSON local, scoreboards, caché) es 100% offline. Un perfil privado devuelve error instructivo, jamás datos inventados.
 - **Zero Dependencias NPM:** Diseñado exclusivamente sobre las librerías estándar de Node.js (`fs`, `path`, `zlib`, `crypto`, `child_process`). Cero descargas externas.
 - **Compatibilidad Multiplataforma:** Probado y garantizado en Windows 11 (PowerShell/CMD), macOS (zsh) y Linux (bash).
-- **Garantía Determinista:** 61 pruebas automatizadas verificadas con Exit Code 0 (`node test_suite.js`) y puntuación perfecta de 100/100 en auditorías de código agéntico (`node opencode_tester.js`).
+- **Garantía Determinista:** 68 pruebas automatizadas verificadas con Exit Code 0 (`node test_suite.js`) y puntuación perfecta de 100/100 en auditorías de código agéntico (`node opencode_tester.js`).
 
 ---
 

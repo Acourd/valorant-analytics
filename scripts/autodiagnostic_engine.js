@@ -104,10 +104,10 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
       confidence: 'nula',
       formula: 'Clasificación por ACS/KD/DDΔ ponderados por partidas y horas totales; requiere ≥1 partida registrada',
       telemetrySummary: {
-        averageKd: avgKd,
-        averageAcs: avgAcs,
-        averageDd: avgDd,
-        averageHs: `${avgHs}%`,
+        averageKd: null,
+        averageAcs: null,
+        averageDd: null,
+        averageHs: null,
         totalCompetitiveMatches: 0,
         totalGeneralHours: totalGenHours
       },

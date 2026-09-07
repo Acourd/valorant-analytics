@@ -69,6 +69,10 @@ function loadAttestIdentity() {
   const crypto = require('crypto');
   const idPath = path.join(__dirname, '..', '.cache', 'attest_identity.json');
   try {
+    const st = fs.statSync(idPath);
+    if (process.platform !== 'win32' && (st.mode & 0o077) !== 0) {
+      throw new Error(`Identidad con permisos inseguros (${(st.mode & 0o777).toString(8)}) en ${idPath}: elimina el archivo y re-ejecuta para regenerarla con 0600.`);
+    }
     const saved = JSON.parse(fs.readFileSync(idPath, 'utf8'));
     if (saved && saved.privateKey && saved.publicKey) {
       return {
@@ -76,7 +80,10 @@ function loadAttestIdentity() {
         publicKey: crypto.createPublicKey(saved.publicKey)
       };
     }
-  } catch (e) { /* crear nueva identidad persistente */ }
+  } catch (e) {
+    if (/permisos inseguros/.test(e.message)) throw e;
+    /* crear nueva identidad persistente */
+  }
   const kp = generateAttestationKeyPair();
   const persisted = {
     privateKey: kp.privateKey.export({ type: 'pkcs8', format: 'pem' }),
@@ -85,7 +92,10 @@ function loadAttestIdentity() {
   };
   try {
     fs.mkdirSync(path.dirname(idPath), { recursive: true });
-    fs.writeFileSync(idPath, JSON.stringify(persisted, null, 2));
+    const tmp = `${idPath}.tmp-${process.pid}`;
+    fs.writeFileSync(tmp, JSON.stringify(persisted, null, 2), { mode: 0o600 });
+    fs.renameSync(tmp, idPath);
+    try { fs.chmodSync(idPath, 0o600); } catch (e) { /* Windows: mejor esfuerzo */ }
   } catch (e) { /* continuar en memoria */ }
   return kp;
 }
@@ -593,6 +603,9 @@ try {
 
   } else if (command === 'parse' || command === 'ingest') {
     const fileInput = args[1];
+    if (!fileInput) {
+      throw new Error('parse requiere entrada explícita: archivo JSON/Texto, match ID, URL o texto de scoreboard. Sin entrada no se analiza el fixture incluido.');
+    }
     const player = (args[2] && args[2].includes('#')) ? args[2] : undefined;
     if (args[2] && !player) {
       throw new Error(`parse: Riot ID inválido "${args[2]}" (formato esperado Nombre#TAG).`);
