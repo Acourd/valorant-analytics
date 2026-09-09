@@ -861,6 +861,63 @@ check('68. ingestor: IDs no-archivo no provocan sondas fs; parse sin entrada fal
     assert.strictEqual(probed.length, 0, `sondas fs inesperadas: ${probed.join(',')}`);
   });
 
+check('69. identidad DSSE: symlink en destino se rechaza sin seguirlo',
+  () => {
+    const cacheDir = path.join(__dirname, '.cache');
+    const idFile = path.join(cacheDir, 'attest_identity.json');
+    const ksFile = path.join(cacheDir, 'dsse_keystore.json');
+    const backup = [];
+    for (const f of [idFile, ksFile]) {
+      if (fs.existsSync(f)) {
+        backup.push([f + '.linktestbak', fs.readFileSync(f)]);
+        fs.renameSync(f, f + '.linktestbak');
+      }
+    }
+    const outside = path.join(os.tmpdir(), 'attest-outside-target.txt');
+    fs.writeFileSync(outside, 'ORIGINAL-EXTERNO');
+    let linkOk = true;
+    try {
+      try { if (fs.existsSync(idFile)) fs.unlinkSync(idFile); } catch (e) {}
+      fs.symlinkSync(outside, idFile, 'file');
+    } catch (e) {
+      linkOk = false;
+    }
+    try {
+      if (!linkOk) {
+        assert.ok(true, 'entorno sin privilegios de symlink: caso no aplicable');
+        return;
+      }
+      let code = 0;
+      let out = '';
+      try { cliOk(['attest', sampleFile, 'TenZ#0001', '--trust-new-key']); }
+      catch (e) { code = e.status; out = String(e.stdout || '') + String(e.stderr || '') + String(e.message || ''); }
+      assert.strictEqual(code, 1, 'symlink en identidad debe fallar');
+      assert.ok(out.includes('enlace simbólico'), 'debe explicar el symlink');
+      assert.strictEqual(fs.readFileSync(outside, 'utf8'), 'ORIGINAL-EXTERNO', 'el objetivo externo fue sobrescrito');
+      const lst = fs.lstatSync(idFile);
+      assert.ok(lst.isSymbolicLink(), 'la identidad debe seguir siendo symlink (no reemplazada)');
+    } finally {
+      try { if (fs.existsSync(idFile) || linkOk) fs.unlinkSync(idFile); } catch (e) {}
+      for (const f of [idFile, ksFile]) { try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch (e) {} }
+      for (const [bak, content] of backup) { fs.writeFileSync(bak.replace(/\.linktestbak$/, ''), content); try { fs.unlinkSync(bak); } catch (e) {} }
+      try { fs.unlinkSync(outside); } catch (e) {}
+    }
+  });
+
+check('70. autodiagnostic: perfil parcial (matches sin métricas) no clasifica',
+  () => {
+    const r = evaluateTalentVsEffort({
+      summary: { totalGeneral: { hours: 50 }, highestPeakRank: 'Gold 2' },
+      accounts: [{ handle: 'P#1', isExcluded: false, competitive: { matches: 10 }, peakRank: 'Gold 2' }]
+    });
+    assert.strictEqual(r.category, 'DATOS INSUFICIENTES');
+    assert.strictEqual(r.talentRatio, 'N/A');
+    assert.ok(r.formula.includes('kd, acs, dd, hs') || r.formula.includes('faltan'), 'fórmula debe listar métricas faltantes');
+    assert.strictEqual(r.telemetrySummary.averageKd, null);
+    const m = evaluateMmrDrag({ competitive: { matches: 400 }, currentRank: 'Gold 2' });
+    assert.ok(m.diagnosis.includes('DATOS INSUFICIENTES'), 'MMR sin métricas de impacto debe declararse insuficiente');
+  });
+
 console.log(`\nResults: ${passed}/${total} tests passed.`);
 if (passed !== total) process.exit(1);
 console.log('All valorant-analytics deterministic tests passed with Exit Code: 0');

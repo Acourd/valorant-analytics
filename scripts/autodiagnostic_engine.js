@@ -17,10 +17,25 @@ function evaluateMmrDrag(accountTelemetry) {
     throw new Error('evaluateMmrDrag requiere telemetría de cuenta (objeto con competitive/currentRank). Entrada recibida: ' + String(accountTelemetry));
   }
   const matches = accountTelemetry.competitive?.matches || 0;
-  const kd = parseFloat(accountTelemetry.competitive?.kd || '1.0');
-  const acs = parseFloat(accountTelemetry.competitive?.acs || '200');
-  const dd = parseFloat(accountTelemetry.competitive?.dd || '0');
-  const rank = accountTelemetry.currentRank || 'Gold 3';
+  const kdRaw = accountTelemetry.competitive?.kd;
+  const acsRaw = accountTelemetry.competitive?.acs;
+  const ddRaw = accountTelemetry.competitive?.dd;
+  const hasImpactMetrics = kdRaw !== undefined || acsRaw !== undefined || ddRaw !== undefined;
+  if (matches === 0 || !hasImpactMetrics) {
+    return {
+      mmrDragDetected: false,
+      severityScore: 0,
+      matchesEvaluated: matches,
+      sampleSize: matches,
+      confidence: 'nula',
+      formula: 'MMR-drag requiere matches>=300 con impacto observado (KD≥1.15 o ACS≥230 o DDΔ≥20) y rango contenido (Gold/Silver)',
+      diagnosis: 'DATOS INSUFICIENTES: sin impacto observado no se puede evaluar anclaje de MMR ni emitir severidad.'
+    };
+  }
+  const kd = parseFloat(kdRaw);
+  const acs = parseFloat(acsRaw);
+  const dd = parseFloat(ddRaw);
+  const rank = accountTelemetry.currentRank || '';
 
   const isAgedAccount = matches >= 300;
   const hasHighCombatImpact = kd >= 1.15 || acs >= 230 || dd >= 20;
@@ -70,29 +85,34 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
   let weightedAcs = 0;
   let weightedDd = 0;
   let weightedHs = 0;
+  let kdMatches = 0;
+  let acsMatches = 0;
+  let ddMatches = 0;
+  let hsMatches = 0;
 
   personal.forEach(a => {
     const comp = a.competitive || {};
     const rawMatches = comp.matches ?? 0;
     const m = (typeof rawMatches === 'number' && Number.isFinite(rawMatches) && rawMatches > 0) ? rawMatches : 0;
     totalCompMatches += m;
-    const kd = parseFloat(comp.kd ?? '1.0');
-    const acs = parseFloat(comp.acs ?? '200');
-    const dd = parseFloat(comp.dd ?? '10');
-    const hs = parseFloat(comp.hs ?? '20');
-    weightedKd += (Number.isFinite(kd) ? kd : 1.0) * m;
-    weightedAcs += (Number.isFinite(acs) ? acs : 200) * m;
-    weightedDd += (Number.isFinite(dd) ? dd : 10) * m;
-    weightedHs += (Number.isFinite(hs) ? hs : 20) * m;
+    const kd = parseFloat(comp.kd ?? 'NaN');
+    const acs = parseFloat(comp.acs ?? 'NaN');
+    const dd = parseFloat(comp.dd ?? 'NaN');
+    const hs = parseFloat(comp.hs ?? 'NaN');
+    if (Number.isFinite(kd)) { weightedKd += kd * m; kdMatches += m; }
+    if (Number.isFinite(acs)) { weightedAcs += acs * m; acsMatches += m; }
+    if (Number.isFinite(dd)) { weightedDd += dd * m; ddMatches += m; }
+    if (Number.isFinite(hs)) { weightedHs += hs * m; hsMatches += m; }
   });
-
-  const avgKd = totalCompMatches > 0 ? Number((weightedKd / totalCompMatches).toFixed(2)) : 1.15;
-  const avgAcs = totalCompMatches > 0 ? Number((weightedAcs / totalCompMatches).toFixed(1)) : 225.0;
-  const avgDd = totalCompMatches > 0 ? Number((weightedDd / totalCompMatches).toFixed(1)) : 22.0;
-  const avgHs = totalCompMatches > 0 ? Number((weightedHs / totalCompMatches).toFixed(1)) : 19.5;
+  const avgKd = kdMatches > 0 ? Number((weightedKd / kdMatches).toFixed(2)) : null;
+  const avgAcs = acsMatches > 0 ? Number((weightedAcs / acsMatches).toFixed(1)) : null;
+  const avgDd = ddMatches > 0 ? Number((weightedDd / ddMatches).toFixed(1)) : null;
+  const avgHs = hsMatches > 0 ? Number((weightedHs / hsMatches).toFixed(1)) : null;
+  const metricsPresent = { kd: kdMatches > 0, acs: acsMatches > 0, dd: ddMatches > 0, hs: hsMatches > 0 };
+  const missingMetrics = Object.keys(metricsPresent).filter(k => !metricsPresent[k]);
 
   const totalGenHours = careerReport.summary.totalGeneral.hours;
-  const peakRank = careerReport.summary.highestPeakRank;
+  const peakRank = careerReport.summary.highestPeakRank || 'Unranked';
 
   if (totalCompMatches === 0) {
     return {
@@ -116,6 +136,29 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
     };
   }
 
+  if (missingMetrics.length > 0) {
+    return {
+      category: 'DATOS INSUFICIENTES',
+      talentRatio: 'N/A',
+      zeroFpsBackground,
+      trueDeservedRank: 'Indeterminado (métricas ausentes)',
+      sampleSize: totalCompMatches,
+      confidence: 'nula',
+      formula: 'Clasificación requiere kd, acs, dd y hs observados; faltan: ' + missingMetrics.join(', '),
+      metricsPresent,
+      telemetrySummary: {
+        averageKd: avgKd,
+        averageAcs: avgAcs,
+        averageDd: avgDd,
+        averageHs: avgHs === null ? null : `${avgHs}%`,
+        totalCompetitiveMatches: totalCompMatches,
+        totalGeneralHours: totalGenHours
+      },
+      rationale: `Con ${totalCompMatches} partidas pero sin ${missingMetrics.join(', ')} no se clasifica talento/esfuerzo ni se proyecta rango merecido.`,
+      bottleneckOptimization: null
+    };
+  }
+
   // Check fresh account spike (WubbaLubbaDub effect)
   const freshAccount = personal.find(a => (a.competitive?.matches || 0) > 0 && (a.competitive?.matches || 0) <= 30 && (a.peakRank || '').includes('Diamond'));
   const hasSmurfBreakout = Boolean(freshAccount);
@@ -129,7 +172,7 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
     category = 'TALENTO TÁCTICO INDIVIDUAL (High-Impact Duelist)';
     talentPct = 75;
     effortPct = 25;
-    rationale = `Alcanzar Diamante 1 en tan solo ${freshAccount ? freshAccount.competitive.hours : 10} horas en cuenta limpia con KD ${freshAccount ? freshAccount.competitive.kd : '1.5+'} y DDΔ +${freshAccount ? freshAccount.competitive.dd : '50+'} demuestra impacto individual nato y lectura de ángulos. No es volumen ciego.`;
+    rationale = `Alcanzar Diamante 1 en tan solo ${freshAccount?.competitive?.hours ?? 10} horas en cuenta limpia con KD ${freshAccount?.competitive?.kd ?? '1.5+'} y DDΔ +${freshAccount?.competitive?.dd ?? '50+'} demuestra impacto individual nato y lectura de ángulos. No es volumen ciego.`;
   } else if (totalGenHours > 1200 && avgKd <= 1.05) {
     category = 'Esfuerzo Puro (The Hard-Grinder)';
     talentPct = 25;
@@ -160,6 +203,7 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
     sampleSize: totalCompMatches,
     confidence: totalCompMatches >= 100 ? 'alta' : (totalCompMatches >= 20 ? 'media' : 'baja'),
     formula: 'ACS/KD/DDΔ ponderados por partidas; talento si breakout en ≤30 partidas a Diamante o DDΔ≥25 con KD≥1.20',
+    metricsPresent,
     telemetrySummary: {
       averageKd: avgKd,
       averageAcs: avgAcs,

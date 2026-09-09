@@ -69,9 +69,12 @@ function loadAttestIdentity() {
   const crypto = require('crypto');
   const idPath = path.join(__dirname, '..', '.cache', 'attest_identity.json');
   try {
-    const st = fs.statSync(idPath);
-    if (process.platform !== 'win32' && (st.mode & 0o077) !== 0) {
-      throw new Error(`Identidad con permisos inseguros (${(st.mode & 0o777).toString(8)}) en ${idPath}: elimina el archivo y re-ejecuta para regenerarla con 0600.`);
+    const lst = fs.lstatSync(idPath);
+    if (lst.isSymbolicLink()) {
+      throw new Error(`Identidad es un enlace simbólico (${idPath}): elimínalo manualmente y re-ejecuta. Nunca se sigue un symlink para material privado.`);
+    }
+    if (process.platform !== 'win32' && (lst.mode & 0o077) !== 0) {
+      throw new Error(`Identidad con permisos inseguros (${(lst.mode & 0o777).toString(8)}) en ${idPath}: elimina el archivo y re-ejecuta para regenerarla con 0600.`);
     }
     const saved = JSON.parse(fs.readFileSync(idPath, 'utf8'));
     if (saved && saved.privateKey && saved.publicKey) {
@@ -81,7 +84,8 @@ function loadAttestIdentity() {
       };
     }
   } catch (e) {
-    if (/permisos inseguros/.test(e.message)) throw e;
+    if (/enlace simbólico|permisos inseguros/.test(e.message)) throw e;
+    if (e.code !== 'ENOENT' && !/Identidad inválida|no es un objeto|Unexpected token|Unexpected end/.test(e.message)) throw e;
     /* crear nueva identidad persistente */
   }
   const kp = generateAttestationKeyPair();
@@ -90,13 +94,26 @@ function loadAttestIdentity() {
     publicKey: kp.publicKey.export({ type: 'spki', format: 'pem' }),
     created: new Date().toISOString()
   };
+  fs.mkdirSync(path.dirname(idPath), { recursive: true });
+  const nonce = crypto.randomBytes(8).toString('hex');
+  const tmp = `${idPath}.tmp-${process.pid}-${nonce}`;
+  let fd = null;
   try {
-    fs.mkdirSync(path.dirname(idPath), { recursive: true });
-    const tmp = `${idPath}.tmp-${process.pid}`;
-    fs.writeFileSync(tmp, JSON.stringify(persisted, null, 2), { mode: 0o600 });
+    fd = fs.openSync(tmp, 'wx', 0o600);
+    fs.writeFileSync(fd, JSON.stringify(persisted, null, 2));
+  } catch (e) {
+    if (fd !== null) { try { fs.closeSync(fd); } catch (_) {} }
+    try { fs.unlinkSync(tmp); } catch (_) {}
+    throw new Error(`No se pudo crear la identidad de forma exclusiva (${e.code || e.message}).`);
+  }
+  try { fs.closeSync(fd); } catch (e) { try { fs.unlinkSync(tmp); } catch (_) {} throw new Error(`No se pudo finalizar la identidad (${e.message}).`); }
+  try { fs.chmodSync(tmp, 0o600); } catch (e) { /* Windows: mejor esfuerzo */ }
+  try {
     fs.renameSync(tmp, idPath);
-    try { fs.chmodSync(idPath, 0o600); } catch (e) { /* Windows: mejor esfuerzo */ }
-  } catch (e) { /* continuar en memoria */ }
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch (_) {}
+    throw new Error(`No se pudo instalar la identidad (${e.message}).`);
+  }
   return kp;
 }
 
