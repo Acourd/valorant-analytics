@@ -170,9 +170,41 @@ function loadOrCreateKeystore(keystorePath) {
   return { keys: [] };
 }
 
+function writeKeystoreAtomic(keystorePath, keystore) {
+  try {
+    const lst = fs.lstatSync(keystorePath);
+    if (lst.isSymbolicLink()) {
+      throw new Error(`El keystore es un enlace simbólico (${keystorePath}): elimínalo manualmente. Nunca se instala sobre un symlink.`);
+    }
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
+  const nonce = crypto.randomBytes(8).toString('hex');
+  const tmp = `${keystorePath}.tmp-${process.pid}-${nonce}`;
+  let fd = null;
+  try {
+    fd = fs.openSync(tmp, 'wx', 0o600);
+    fs.writeFileSync(fd, JSON.stringify(keystore, null, 2));
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = null;
+    try { fs.chmodSync(tmp, 0o600); } catch (e) { /* Windows: mejor esfuerzo */ }
+    fs.renameSync(tmp, keystorePath);
+    try {
+      const dirFd = fs.openSync(path.dirname(keystorePath), 'r');
+      try { fs.fsyncSync(dirFd); } finally { try { fs.closeSync(dirFd); } catch (e) {} }
+    } catch (e) { /* filesystems sin fsync de directorio */ }
+  } catch (e) {
+    if (fd !== null) { try { fs.closeSync(fd); } catch (_) {} }
+    try { fs.unlinkSync(tmp); } catch (_) {}
+    throw new Error(`No se pudo instalar el keystore (${e.message}). Estado anterior intacto.`);
+  }
+}
+
 function saveKeystore(keystorePath, keystore) {
   fs.mkdirSync(path.dirname(keystorePath), { recursive: true });
-  fs.writeFileSync(keystorePath, JSON.stringify(keystore, null, 2));
+  const lockPath = `${keystorePath}.lock`;
+  return withFileLock(lockPath, () => writeKeystoreAtomic(keystorePath, keystore));
 }
 
 function withFileLock(lockPath, fn, options = {}) {
@@ -240,26 +272,7 @@ function registerTrustedKey(keystorePath, publicKeyPem, label) {
     const keyid = crypto.createHash('sha256').update(publicKeyPem).digest('hex').slice(0, 16);
     if (!ks.keys.some(k => k.keyid === keyid)) {
       ks.keys.push({ keyid, publicKeyPem, label: label || 'sin etiqueta', created: new Date().toISOString() });
-      const nonce = crypto.randomBytes(8).toString('hex');
-      const tmp = `${keystorePath}.tmp-${process.pid}-${nonce}`;
-      let fd = null;
-      try {
-        fd = fs.openSync(tmp, 'wx', 0o600);
-        fs.writeFileSync(fd, JSON.stringify(ks, null, 2));
-        fs.fsyncSync(fd);
-        fs.closeSync(fd);
-        fd = null;
-        try { fs.chmodSync(tmp, 0o600); } catch (e) { /* Windows: mejor esfuerzo */ }
-        fs.renameSync(tmp, keystorePath);
-        try {
-          const dirFd = fs.openSync(path.dirname(keystorePath), 'r');
-          try { fs.fsyncSync(dirFd); } finally { try { fs.closeSync(dirFd); } catch (e) {} }
-        } catch (e) { /* filesystems sin fsync de directorio */ }
-      } catch (e) {
-        if (fd !== null) { try { fs.closeSync(fd); } catch (_) {} }
-        try { fs.unlinkSync(tmp); } catch (_) {}
-        throw new Error(`No se pudo instalar el keystore (${e.message}). Estado anterior intacto.`);
-      }
+      writeKeystoreAtomic(keystorePath, ks);
     }
     return keyid;
   });

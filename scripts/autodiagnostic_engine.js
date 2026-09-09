@@ -28,12 +28,26 @@ function parseStrictNumber(v, allowPercent) {
 }
 
 const KNOWN_TIERS = ['iron', 'bronze', 'silver', 'gold', 'platinum', 'diamond', 'ascendant', 'immortal', 'radiant', 'unranked'];
+const RANK_GRAMMAR = /^(iron|bronze|silver|gold|platinum|diamond|ascendant|immortal)\s+([1-3])$|^radiant$|^unranked$/i;
 
 function canonicalRank(v) {
   if (typeof v !== 'string') return null;
-  const s = v.trim().toLowerCase();
-  if (s.length === 0) return null;
-  return KNOWN_TIERS.some(t => s.includes(t)) ? v.trim() : null;
+  const s = v.trim();
+  const m = s.match(RANK_GRAMMAR);
+  if (!m) return null;
+  if (/^radiant$/i.test(s)) return 'Radiant';
+  if (/^unranked$/i.test(s)) return 'Unranked';
+  const tier = m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase();
+  return `${tier} ${m[2]}`;
+}
+
+function rankTier(label) {
+  if (typeof label !== 'string') return null;
+  const m = label.trim().match(RANK_GRAMMAR);
+  if (!m) return null;
+  if (/^radiant$/i.test(label.trim())) return 'radiant';
+  if (/^unranked$/i.test(label.trim())) return 'unranked';
+  return m[1].toLowerCase();
 }
 
 function inDomain(v, min, max) {
@@ -51,7 +65,7 @@ function evaluateMmrDrag(accountTelemetry) {
   const dd = inDomain(parseStrictNumber(accountTelemetry.competitive?.dd), -300, 300);
   const rank = canonicalRank(accountTelemetry.currentRank);
   const hasImpactMetrics = kd !== null && acs !== null && dd !== null;
-  const hasMeaningfulImpact = (kd !== null && kd > 0) || (acs !== null && acs >= 50);
+  const hasMeaningfulImpact = (kd !== null && kd >= 0.3) || (acs !== null && acs >= 100);
   if (matches === 0 || !hasImpactMetrics || rank === null || !hasMeaningfulImpact) {
     return {
       mmrDragDetected: false,
@@ -66,7 +80,7 @@ function evaluateMmrDrag(accountTelemetry) {
 
   const isAgedAccount = matches >= 300;
   const hasHighCombatImpact = kd >= 1.15 || acs >= 230 || dd >= 20;
-  const isRankConstrained = rank.includes('Gold') || rank.includes('Silver');
+  const isRankConstrained = rankTier(rank) === 'gold' || rankTier(rank) === 'silver';
 
   const mmrDragDetected = isAgedAccount && hasHighCombatImpact && isRankConstrained;
   const severityScore = isAgedAccount ? Math.min(100, Math.round((matches / 600) * 80 + (dd !== null && dd > 25 ? 20 : 10))) : 20;
@@ -174,7 +188,7 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
     };
   }
 
-  const hasMeaningfulImpact = totalCompMatches >= 5 && ((avgKd !== null && avgKd > 0) || (avgAcs !== null && avgAcs >= 50) || (avgHs !== null && avgHs > 0));
+  const hasMeaningfulImpact = totalCompMatches >= 5 && ((avgKd !== null && avgKd >= 0.3) || (avgAcs !== null && avgAcs >= 100) || (avgHs !== null && avgHs >= 5));
   if (!hasMeaningfulImpact) {
     return {
       category: 'DATOS INSUFICIENTES',
@@ -183,7 +197,7 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
       trueDeservedRank: 'Indeterminado (evidencia mínima)',
       sampleSize: totalCompMatches,
       confidence: 'nula',
-      formula: 'Clasificación requiere ≥5 partidas y al menos una métrica con impacto significativo (KD>0, ACS≥50 o HS>0)',
+      formula: 'Clasificación requiere ≥5 partidas y al menos una métrica con impacto significativo (KD≥0.3, ACS≥100 o HS≥5)',
       metricsPresent,
       telemetrySummary: {
         averageKd: avgKd,
@@ -199,7 +213,7 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
   }
 
   // Check fresh account spike (WubbaLubbaDub effect)
-  const freshAccount = personal.find(a => (a.competitive?.matches || 0) > 0 && (a.competitive?.matches || 0) <= 30 && (a.peakRank || '').includes('Diamond'));
+  const freshAccount = personal.find(a => (a.competitive?.matches || 0) > 0 && (a.competitive?.matches || 0) <= 30 && rankTier(a.peakRank) === 'diamond');
   const hasSmurfBreakout = Boolean(freshAccount);
 
   let category = 'Talento Táctico Adaptativo (High Learning Velocity)';
@@ -226,7 +240,7 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
 
   // Determine true deserved rank
   let trueRank = 'Platino 2';
-  if (peakRank.includes('Diamond') || (hasSmurfBreakout && avgDd >= 20)) {
+  if (rankTier(peakRank) === 'diamond' || (hasSmurfBreakout && avgDd >= 20)) {
     trueRank = 'Platino 3 – Diamante 1';
   } else if (avgAcs >= 240 && avgKd >= 1.25) {
     trueRank = 'Platino 2 – Platino 3';

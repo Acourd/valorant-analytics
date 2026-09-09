@@ -999,6 +999,62 @@ check('70. autodiagnostic: perfil parcial (matches sin métricas) no clasifica',
     assert.ok(m.diagnosis.includes('DATOS INSUFICIENTES'), 'MMR sin métricas de impacto debe declararse insuficiente');
   });
 
+check('75. dsse: lock rancio se recupera y lock malformado no bloquea',
+  () => {
+    const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-lock-'));
+    try {
+      const ksPath = path.join(tmp, 'ks.json');
+      fs.writeFileSync(ksPath + '.lock', `999999:${Date.now() - 120000}:deadbeef`);
+      const k = dsse.generateAttestationKeyPair();
+      const keyid = dsse.registerTrustedKey(ksPath, k.publicKey.export({ type: 'spki', format: 'pem' }), 'stale-test');
+      assert.ok(keyid, 'registro tras lock rancio debe funcionar');
+      assert.ok(!fs.existsSync(ksPath + '.lock'), 'lock rancio debe liberarse');
+      fs.writeFileSync(ksPath + '.lock', 'basura-sin-formato');
+      const k2 = dsse.generateAttestationKeyPair();
+      dsse.registerTrustedKey(ksPath, k2.publicKey.export({ type: 'spki', format: 'pem' }), 'spoof-test');
+      const ks = JSON.parse(fs.readFileSync(ksPath, 'utf8'));
+      assert.strictEqual(ks.keys.length, 2, 'locks malformados no deben bloquear ni perder claves');
+      assert.ok(!fs.existsSync(ksPath + '.lock'), 'lock malformado debe liberarse');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+check('76. ranks: gramática exacta insensible a mayúsculas; subcadenas rechazadas',
+  () => {
+    const prober = { competitive: { matches: 400, kd: '1.5', acs: '250', dd: '30' }, currentRank: 'GOLD 2' };
+    const upper = evaluateMmrDrag(prober);
+    const lower = evaluateMmrDrag({ competitive: { matches: 400, kd: '1.5', acs: '250', dd: '30' }, currentRank: 'gold 2' });
+    assert.strictEqual(upper.mmrDragDetected, lower.mmrDragDetected, 'casing no debe cambiar el veredicto');
+    assert.strictEqual(upper.mmrDragDetected, true);
+    for (const bad of ['xxGoldfish', 'Goldfish', 'Master 5', 'Oro 3', '']) {
+      const r = evaluateMmrDrag({ competitive: { matches: 400, kd: '1.5', acs: '250', dd: '30' }, currentRank: bad });
+      assert.ok(r.diagnosis.includes('DATOS INSUFICIENTES'), `rango '${bad}' debe ser insuficiente`);
+    }
+  });
+
+check('77. talento: epsilon (KD 0.01, HS 0.1%) no clasifica; débil-real sí',
+  () => {
+    const mk = (comp) => ({
+      summary: { totalGeneral: { hours: 100 }, highestPeakRank: 'Gold 2' },
+      accounts: [{ handle: 'E#1', isExcluded: false, competitive: comp, peakRank: 'Gold 2' }]
+    });
+    const eps = evaluateTalentVsEffort(mk({ matches: 20, kd: 0.01, acs: 1, dd: -290, hs: 0.1 }));
+    assert.strictEqual(eps.category, 'DATOS INSUFICIENTES', 'epsilon no debe clasificar');
+    const weak = evaluateTalentVsEffort(mk({ matches: 50, kd: 0.8, acs: 150, dd: -5, hs: 12 }));
+    assert.ok(weak.category !== 'DATOS INSUFICIENTES', 'rendimiento débil-real debe clasificarse');
+    assert.ok(weak.confidence === 'media' || weak.confidence === 'baja', 'confianza calibrada por muestra');
+  });
+
+check('78. MMR: pisos significativos (KD≥0.3 o ACS≥100) para evaluar',
+  () => {
+    const thin = evaluateMmrDrag({ competitive: { matches: 400, kd: '0.1', acs: '40', dd: '5' }, currentRank: 'Gold 2' });
+    assert.ok(thin.diagnosis.includes('DATOS INSUFICIENTES'), 'bajo umbral debe ser insuficiente');
+    const solid = evaluateMmrDrag({ competitive: { matches: 400, kd: '0.5', acs: '140', dd: '5' }, currentRank: 'Gold 2' });
+    assert.ok(!solid.diagnosis.includes('DATOS INSUFICIENTES'), 'sobre umbral debe evaluarse');
+  });
+
 console.log(`\nResults: ${passed}/${total} tests passed.`);
 if (passed !== total) process.exit(1);
 console.log('All valorant-analytics deterministic tests passed with Exit Code: 0');
