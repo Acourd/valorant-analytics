@@ -212,42 +212,89 @@ function withFileLock(lockPath, fn, options = {}) {
   const waitMs = options.waitMs || 50;
   const staleMs = options.staleMs || 30000;
   const transient = new Set(['EEXIST', 'EPERM', 'EACCES', 'EBUSY']);
-  const owner = `${process.pid}:${Date.now()}`;
-  let fd = null;
+  const owner = `${process.pid}:${Date.now()}:${crypto.randomBytes(4).toString('hex')}`;
+  const inspectLock = () => {
+    let st;
+    try {
+      st = fs.lstatSync(lockPath);
+    } catch (e) {
+      return e.code === 'ENOENT' ? { state: 'missing' } : { state: 'unreadable' };
+    }
+    if (st.isSymbolicLink()) return { state: 'suspicious', reason: 'symlink' };
+    let raw = '';
+    try { raw = fs.readFileSync(lockPath, 'utf8'); } catch (e) { return { state: 'unreadable' }; }
+    const m = raw.trim().match(/^(\d+):(\d+):([0-9a-f]+)$/);
+    if (!m) return { state: 'malformed', mtimeMs: st.mtimeMs };
+    const ownerPid = parseInt(m[1], 10);
+    const ownerStamp = parseInt(m[2], 10);
+    let alive = null;
+    try { process.kill(ownerPid, 0); alive = true; }
+    catch (e) { alive = e.code === 'ESRCH' ? false : null; }
+    return { state: 'held', pid: ownerPid, stamp: ownerStamp, alive, mtimeMs: st.mtimeMs };
+  };
+  let acquired = false;
   for (let i = 0; i < retries; i++) {
     try {
-      fd = fs.openSync(lockPath, 'wx', 0o600);
-      try {
-        fs.writeFileSync(fd, owner);
-        fs.fsyncSync(fd);
-      } catch (e) {
-        try { fs.closeSync(fd); } catch (_) {}
-        try { fs.unlinkSync(lockPath); } catch (_) {}
-        throw new Error(`No se pudo inicializar el lock ${lockPath} (${e.message}).`);
+      // Creación atómica CON contenido: jamás existe un lock vacío observable.
+      fs.writeFileSync(lockPath, owner, { flag: 'wx', mode: 0o600 });
+      const back = fs.readFileSync(lockPath, 'utf8');
+      if (back !== owner) {
+        throw new Error('contención: el lock cambió durante la adquisición');
       }
+      acquired = true;
       break;
     } catch (e) {
       if (e.code !== undefined && !transient.has(e.code)) throw e;
-      if (/No se pudo inicializar/.test(e.message)) throw e;
-      try {
-        const raw = fs.readFileSync(lockPath, 'utf8');
-        const stamp = parseInt(String(raw).split(':')[1] || '0', 10);
-        if (Number.isFinite(stamp) && Date.now() - stamp > staleMs) {
+      if (/contención/.test(e.message)) { execSleep(waitMs); continue; }
+      const info = inspectLock();
+      if (info.state === 'missing') continue;
+      if (info.state === 'held') {
+        if (info.pid === process.pid) {
+          try {
+            if (fs.readFileSync(lockPath, 'utf8') === owner) { acquired = true; break; }
+          } catch (_) {}
           try { fs.unlinkSync(lockPath); } catch (_) {}
           continue;
         }
-      } catch (_) { /* lock ilegible: reintentar con backoff */ }
+        if (info.alive === false) {
+          try { fs.unlinkSync(lockPath); } catch (_) {}
+          continue;
+        }
+        execSleep(waitMs);
+        continue;
+      }
+      // Malformed/suspicious/unreadable: recuperar solo por mtime del kernel,
+      // nunca por contenido. Ningún holder legítimo crea symlinks ni contenido
+      // malformado (creación atómica con contenido), así que lo anómalo más
+      // antiguo que la quiescencia es residuo o sabotaje inerte: se elimina.
+      const quiesceLimit = options.quiesceMs || 2000;
+      try {
+        const st = fs.lstatSync(lockPath);
+        if ((Date.now() - st.mtimeMs) > quiesceLimit) {
+          try { fs.unlinkSync(lockPath); } catch (_) {}
+          continue;
+        }
+      } catch (_) {}
       execSleep(waitMs);
     }
   }
-  if (fd === null) throw new Error(`No se pudo adquirir el lock ${lockPath} tras ${retries} intentos.`);
+  if (!acquired) {
+    throw new Error(`No se pudo adquirir el lock ${lockPath} tras ${retries} intentos.`);
+  }
+  // Verificación de propiedad antes de entrar a la sección crítica (fencing).
+  try {
+    if (fs.readFileSync(lockPath, 'utf8') !== owner) {
+      throw new Error(`Lock perdido antes de entrar a sección crítica (${lockPath}).`);
+    }
+  } catch (e) {
+    if (/Lock perdido/.test(e.message)) throw e;
+    throw new Error(`No se pudo verificar propiedad del lock ${lockPath}.`);
+  }
   try {
     return fn();
   } finally {
-    try { fs.closeSync(fd); } catch (e) { /* continuar */ }
     try {
-      const raw = fs.readFileSync(lockPath, 'utf8');
-      if (raw === owner) fs.unlinkSync(lockPath);
+      if (fs.readFileSync(lockPath, 'utf8') === owner) fs.unlinkSync(lockPath);
     } catch (e) { /* otro dueño o ya liberado */ }
   }
 }
@@ -287,7 +334,8 @@ module.exports = {
   loadOrCreateKeystore,
   saveKeystore,
   registerTrustedKey,
-  withFileLock
+  withFileLock,
+  writeKeystoreAtomic
 };
 
 if (require.main === module) {

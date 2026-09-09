@@ -73,9 +73,13 @@ function resolveMatchData(source, playerHandle) {
   return data;
 }
 
+function cacheDir() {
+  return process.env.VALORANT_CACHE_DIR || path.join(__dirname, '..', '.cache');
+}
+
 function loadAttestIdentity() {
   const crypto = require('crypto');
-  const idPath = path.join(__dirname, '..', '.cache', 'attest_identity.json');
+  const idPath = path.join(cacheDir(), 'attest_identity.json');
   try {
     const lst = fs.lstatSync(idPath);
     if (lst.isSymbolicLink()) {
@@ -103,25 +107,8 @@ function loadAttestIdentity() {
     created: new Date().toISOString()
   };
   fs.mkdirSync(path.dirname(idPath), { recursive: true });
-  const nonce = crypto.randomBytes(8).toString('hex');
-  const tmp = `${idPath}.tmp-${process.pid}-${nonce}`;
-  let fd = null;
-  try {
-    fd = fs.openSync(tmp, 'wx', 0o600);
-    fs.writeFileSync(fd, JSON.stringify(persisted, null, 2));
-  } catch (e) {
-    if (fd !== null) { try { fs.closeSync(fd); } catch (_) {} }
-    try { fs.unlinkSync(tmp); } catch (_) {}
-    throw new Error(`No se pudo crear la identidad de forma exclusiva (${e.code || e.message}).`);
-  }
-  try { fs.closeSync(fd); } catch (e) { try { fs.unlinkSync(tmp); } catch (_) {} throw new Error(`No se pudo finalizar la identidad (${e.message}).`); }
-  try { fs.chmodSync(tmp, 0o600); } catch (e) { /* Windows: mejor esfuerzo */ }
-  try {
-    fs.renameSync(tmp, idPath);
-  } catch (e) {
-    try { fs.unlinkSync(tmp); } catch (_) {}
-    throw new Error(`No se pudo instalar la identidad (${e.message}).`);
-  }
+  const { writeKeystoreAtomic } = require('./dsse_attestation');
+  writeKeystoreAtomic(idPath, persisted);
   return kp;
 }
 
@@ -488,7 +475,7 @@ try {
     console.log(`------------------------------------------------------------------------`);
 
     const envelope = signTelemetryReport(profile, loadAttestIdentity());
-    const keystorePath = path.join(__dirname, '..', '.cache', 'dsse_keystore.json');
+    const keystorePath = path.join(cacheDir(), 'dsse_keystore.json');
     const keystore = loadOrCreateKeystore(keystorePath);
     let verifyRes = verifyTelemetryAttestation(envelope, null, { trustedKeystore: keystore.keys });
     let provisioned = false;

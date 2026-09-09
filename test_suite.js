@@ -154,6 +154,29 @@ function cliOk(args) {
   return execFileSync(process.execPath, [cliPath].concat(args), { encoding: 'utf8' });
 }
 
+function isolatedCache() {
+  const tmpCache = fs.mkdtempSync(path.join(os.tmpdir(), 'va-cache-'));
+  const prev = process.env.VALORANT_CACHE_DIR;
+  process.env.VALORANT_CACHE_DIR = tmpCache;
+  return {
+    tmpCache,
+    restore() {
+      if (prev === undefined) delete process.env.VALORANT_CACHE_DIR;
+      else process.env.VALORANT_CACHE_DIR = prev;
+      fs.rmSync(tmpCache, { recursive: true, force: true });
+    }
+  };
+}
+
+function withIsolatedCache(fn) {
+  const iso = isolatedCache();
+  try {
+    return fn(iso.tmpCache);
+  } finally {
+    iso.restore();
+  }
+}
+
 check('10. cli.js aim: dispatcher ejecuta la rutina sin TypeError (regresión P0)',
   () => {
     const out = cliOk(['aim', sampleFile, 'TenZ#0001']);
@@ -251,10 +274,12 @@ check('22. cli.js invariants: verificación formal de invariantes matemáticos e
 
 check('23. cli.js attest: sobre DSSE in-toto firmado con Ed25519 y verificado',
   () => {
-    const out = cliOk(['attest', sampleFile, 'TenZ#0001', '--trust-new-key']);
-    assert.ok(out.includes('ATESTACIÓN CRIPTOGRÁFICA DSSE') || out.includes('ATESTACI'), 'cabecera attest ausente');
-    assert.ok(out.includes('VERIFICADO contra keystore (Ed25519 OK)'), 'verificación contra keystore ausente');
-    assert.ok(out.includes('Almacén confiable'), 'keystore no declarado en salida');
+    withIsolatedCache(() => {
+      const out = cliOk(['attest', sampleFile, 'TenZ#0001', '--trust-new-key']);
+      assert.ok(out.includes('ATESTACI') , 'cabecera attest ausente');
+      assert.ok(out.includes('VERIFICADO contra keystore (Ed25519 OK)'), 'verificación contra keystore ausente');
+      assert.ok(out.includes('Almac'), 'keystore no declarado en salida');
+    });
   });
 
 check('24. cli.js merkle: árbol Merkle de eventos discretos y prueba de inclusión',
@@ -735,17 +760,7 @@ check('61. cli.js: archivo inexistente y parse inválido fallan con Exit 1',
 
 check('62. attest: identidad persistente + --trust-new-key explícito (sin TOFU silencioso)',
   () => {
-    const cacheDir = path.join(__dirname, '.cache');
-    const idFile = path.join(cacheDir, 'attest_identity.json');
-    const ksFile = path.join(cacheDir, 'dsse_keystore.json');
-    const backup = [];
-    for (const f of [idFile, ksFile]) {
-      if (fs.existsSync(f)) {
-        backup.push([f + '.verdictbak', fs.readFileSync(f)]);
-        fs.renameSync(f, f + '.verdictbak');
-      }
-    }
-    try {
+    withIsolatedCache(() => {
       let code1 = 0;
       try { cliOk(['attest', sampleFile, 'TenZ#0001']); } catch (e) { code1 = e.status; }
       assert.strictEqual(code1, 1, 'attest con firmante desconocido debe fallar (no TOFU)');
@@ -753,10 +768,7 @@ check('62. attest: identidad persistente + --trust-new-key explícito (sin TOFU 
       assert.ok(out.includes('VERIFICADO contra keystore'), 'aprovisionamiento explícito debe verificar');
       const out2 = cliOk(['attest', sampleFile, 'TenZ#0001']);
       assert.ok(out2.includes('VERIFICADO contra keystore'), 'identidad persistente debe seguir verificando');
-    } finally {
-      for (const f of [idFile, ksFile]) { try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch (e) {} }
-      for (const [bak, content] of backup) { fs.writeFileSync(bak.replace(/\.verdictbak$/, ''), content); try { fs.unlinkSync(bak); } catch (e) {} }
-    }
+    });
   });
 
 check('63. invariant: matriz imposible con jugadores conocidos falla (DUEL_RECONCILE)',
@@ -798,17 +810,8 @@ check('65. cli.js profile: Riot ID malformado falla; shorthand declara fixture',
 
 check('66. identidad DSSE: creación 0600 y rechazo de permisos inseguros',
   () => {
-    const cacheDir = path.join(__dirname, '.cache');
-    const idFile = path.join(cacheDir, 'attest_identity.json');
-    const ksFile = path.join(cacheDir, 'dsse_keystore.json');
-    const backup = [];
-    for (const f of [idFile, ksFile]) {
-      if (fs.existsSync(f)) {
-        backup.push([f + '.permtestbak', fs.readFileSync(f)]);
-        fs.renameSync(f, f + '.permtestbak');
-      }
-    }
-    try {
+    withIsolatedCache((tmpCache) => {
+      const idFile = path.join(tmpCache, 'attest_identity.json');
       const out = cliOk(['attest', sampleFile, 'TenZ#0001', '--trust-new-key']);
       assert.ok(out.includes('VERIFICADO contra keystore'), 'aprovisionamiento debe verificar');
       assert.ok(fs.existsSync(idFile), 'identidad no creada');
@@ -823,10 +826,7 @@ check('66. identidad DSSE: creación 0600 y rechazo de permisos inseguros',
         assert.strictEqual(code, 1, 'identidad 0644 debe rechazarse');
         assert.ok(stderr.includes('permisos inseguros'), 'debe explicar permisos inseguros');
       }
-    } finally {
-      for (const f of [idFile, ksFile]) { try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch (e) {} }
-      for (const [bak, content] of backup) { fs.writeFileSync(bak.replace(/\.permtestbak$/, ''), content); try { fs.unlinkSync(bak); } catch (e) {} }
-    }
+    });
   });
 
 check('67. autodiagnostic: muestra cero devuelve null, no promedios fabricados',
@@ -944,45 +944,34 @@ check('74. versión única: banner CLI y SBOM derivan de package.json',
 
 check('69. identidad DSSE: symlink en destino se rechaza sin seguirlo',
   () => {
-    const cacheDir = path.join(__dirname, '.cache');
-    const idFile = path.join(cacheDir, 'attest_identity.json');
-    const ksFile = path.join(cacheDir, 'dsse_keystore.json');
-    const backup = [];
-    for (const f of [idFile, ksFile]) {
-      if (fs.existsSync(f)) {
-        backup.push([f + '.linktestbak', fs.readFileSync(f)]);
-        fs.renameSync(f, f + '.linktestbak');
+    withIsolatedCache((tmpCache) => {
+      const idFile = path.join(tmpCache, 'attest_identity.json');
+      const outside = path.join(os.tmpdir(), 'attest-outside-target.txt');
+      fs.writeFileSync(outside, 'ORIGINAL-EXTERNO');
+      let linkOk = true;
+      try {
+        fs.symlinkSync(outside, idFile, 'file');
+      } catch (e) {
+        linkOk = false;
       }
-    }
-    const outside = path.join(os.tmpdir(), 'attest-outside-target.txt');
-    fs.writeFileSync(outside, 'ORIGINAL-EXTERNO');
-    let linkOk = true;
-    try {
-      try { if (fs.existsSync(idFile)) fs.unlinkSync(idFile); } catch (e) {}
-      fs.symlinkSync(outside, idFile, 'file');
-    } catch (e) {
-      linkOk = false;
-    }
-    try {
-      if (!linkOk) {
-        assert.ok(true, 'entorno sin privilegios de symlink: caso no aplicable');
-        return;
+      try {
+        if (!linkOk) {
+          assert.ok(true, 'entorno sin privilegios de symlink: caso no aplicable');
+          return;
+        }
+        let code = 0;
+        let out = '';
+        try { cliOk(['attest', sampleFile, 'TenZ#0001', '--trust-new-key']); }
+        catch (e) { code = e.status; out = String(e.stdout || '') + String(e.stderr || '') + String(e.message || ''); }
+        assert.strictEqual(code, 1, 'symlink en identidad debe fallar');
+        assert.ok(out.includes('enlace simb'), 'debe explicar el symlink');
+        assert.strictEqual(fs.readFileSync(outside, 'utf8'), 'ORIGINAL-EXTERNO', 'el objetivo externo fue sobrescrito');
+        const lst = fs.lstatSync(idFile);
+        assert.ok(lst.isSymbolicLink(), 'la identidad debe seguir siendo symlink (no reemplazada)');
+      } finally {
+        try { fs.unlinkSync(outside); } catch (e) {}
       }
-      let code = 0;
-      let out = '';
-      try { cliOk(['attest', sampleFile, 'TenZ#0001', '--trust-new-key']); }
-      catch (e) { code = e.status; out = String(e.stdout || '') + String(e.stderr || '') + String(e.message || ''); }
-      assert.strictEqual(code, 1, 'symlink en identidad debe fallar');
-      assert.ok(out.includes('enlace simbólico'), 'debe explicar el symlink');
-      assert.strictEqual(fs.readFileSync(outside, 'utf8'), 'ORIGINAL-EXTERNO', 'el objetivo externo fue sobrescrito');
-      const lst = fs.lstatSync(idFile);
-      assert.ok(lst.isSymbolicLink(), 'la identidad debe seguir siendo symlink (no reemplazada)');
-    } finally {
-      try { if (fs.existsSync(idFile) || linkOk) fs.unlinkSync(idFile); } catch (e) {}
-      for (const f of [idFile, ksFile]) { try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch (e) {} }
-      for (const [bak, content] of backup) { fs.writeFileSync(bak.replace(/\.linktestbak$/, ''), content); try { fs.unlinkSync(bak); } catch (e) {} }
-      try { fs.unlinkSync(outside); } catch (e) {}
-    }
+    });
   });
 
 check('70. autodiagnostic: perfil parcial (matches sin métricas) no clasifica',
@@ -1097,6 +1086,98 @@ check('81. MMR: una sola señal límite (kd 0.3 aislado) es insuficiencia',
     const r = evaluateMmrDrag({ competitive: { matches: 400, kd: '0.3', acs: '0', dd: '-300' }, currentRank: 'Gold 2' });
     assert.ok(r.diagnosis.includes('DATOS INSUFICIENTES'), 'una sola señal no basta para evaluar MMR');
     assert.strictEqual(r.confidence, 'nula');
+  });
+
+check('82. dsse saveKeystore público: rechaza symlink y escribe bajo lock',
+  () => {
+    const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-save-'));
+    try {
+      const ksPath = path.join(tmp, 'ks.json');
+      const outside = path.join(tmp, 'outside.txt');
+      fs.writeFileSync(outside, 'ORIGINAL-EXTERNO');
+      let linkOk = true;
+      try { fs.symlinkSync(outside, ksPath, 'file'); } catch (e) { linkOk = false; }
+      if (linkOk) {
+        assert.throws(() => dsse.saveKeystore(ksPath, { keys: [] }), /enlace simbólico/);
+        assert.strictEqual(fs.readFileSync(outside, 'utf8'), 'ORIGINAL-EXTERNO', 'symlink no debe redirigir escritura');
+        fs.unlinkSync(ksPath);
+      }
+      dsse.saveKeystore(ksPath, { keys: [{ keyid: 'zz', publicKeyPem: 'X', label: 't', created: 'now' }] });
+      assert.strictEqual(dsse.loadOrCreateKeystore(ksPath).keys.length, 1);
+      assert.ok(!fs.existsSync(ksPath + '.lock'), 'lock liberado tras escritura pública');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+check('83. talento: promedios calculados solo sobre muestra conjunta',
+  () => {
+    const r = evaluateTalentVsEffort({
+      summary: { totalGeneral: { hours: 500 }, highestPeakRank: 'Gold 2' },
+      accounts: [
+        { handle: 'A#1', isExcluded: false, competitive: { matches: 2000, kd: '9.9', acs: '900', dd: '290', hs: '90' }, peakRank: 'Gold 2' },
+        { handle: 'B#1', isExcluded: false, competitive: { matches: 5, kd: '1.1', acs: '220', dd: '15', hs: '22' }, peakRank: 'Gold 2' }
+      ]
+    });
+    assert.strictEqual(r.jointMatches, 2005);
+    assert.strictEqual(r.telemetrySummary.averageKd, 9.88, 'promedio debe reflejar conjunto, no solo disjoint');
+    assert.ok(r.confidence === 'alta', 'joint 2005 debe dar alta confianza');
+  });
+
+check('84. talento: valores límite exactos (kd 0.3/acs 100) no clasifican',
+  () => {
+    const mk = (comp) => ({
+      summary: { totalGeneral: { hours: 100 }, highestPeakRank: 'Gold 2' },
+      accounts: [{ handle: 'E#1', isExcluded: false, competitive: comp, peakRank: 'Gold 2' }]
+    });
+    const r = evaluateTalentVsEffort(mk({ matches: 5, kd: 0.3, acs: 100, dd: -300, hs: 0 }));
+    assert.strictEqual(r.category, 'DATOS INSUFICIENTES', 'frontera exacta no debe clasificar favorablemente');
+  });
+
+check('85. dsse: holder vivo nunca es desalojado (sin overlap)',
+  () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-live-'));
+    try {
+      const ksPath = path.join(tmp, 'ks.json');
+      const lockPath = ksPath + '.lock';
+      const heldFile = path.join(tmp, 'held.txt');
+      const holderScript = path.join(tmp, 'holder.js');
+      const coordScript = path.join(tmp, 'coord.js');
+      fs.writeFileSync(holderScript, `
+const dsse = require(${JSON.stringify(path.join(scriptsDir, 'dsse_attestation.js'))});
+dsse.withFileLock(${JSON.stringify(lockPath)}, () => {
+  require('fs').writeFileSync(${JSON.stringify(heldFile)}, 'held');
+  const end = Date.now() + 3000;
+  while (Date.now() < end) {}
+  return 'held-ok';
+}, { retries: 200, waitMs: 50 });
+`);
+      fs.writeFileSync(coordScript, `
+const { spawn } = require('child_process');
+const fs = require('fs');
+const dsse = require(${JSON.stringify(path.join(scriptsDir, 'dsse_attestation.js'))});
+(async () => {
+  const holder = spawn(process.execPath, [${JSON.stringify(holderScript)}], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let herr = '';
+  holder.stderr.on('data', d => { herr += d; });
+  await new Promise(r => setTimeout(r, 800));
+  const k = dsse.generateAttestationKeyPair();
+  dsse.registerTrustedKey(${JSON.stringify(ksPath)}, k.publicKey.export({ type: 'spki', format: 'pem' }), 'after-live');
+  const code = await new Promise((res) => holder.on('close', res));
+  if (code !== 0) { console.error('HOLDER_FAIL ' + herr.slice(0, 300)); process.exit(1); }
+  if (!fs.existsSync(${JSON.stringify(heldFile)})) { console.error('HOLDER_NO_HELD'); process.exit(1); }
+  const ks = dsse.loadOrCreateKeystore(${JSON.stringify(ksPath)});
+  if (ks.keys.length !== 1) { console.error('KEYS=' + ks.keys.length); process.exit(1); }
+  if (fs.existsSync(${JSON.stringify(lockPath)})) { console.error('ORPHAN_LOCK'); process.exit(1); }
+  console.log('LIVE_NO_OVERLAP_OK');
+})();
+`);
+      const out = execFileSync(process.execPath, [coordScript], { encoding: 'utf8', timeout: 60000 });
+      assert.ok(out.includes('LIVE_NO_OVERLAP_OK'), 'overlap o fallo en holder vivo');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
 console.log(`\nResults: ${passed}/${total} tests passed.`);

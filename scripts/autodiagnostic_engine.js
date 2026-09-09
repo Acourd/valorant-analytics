@@ -65,7 +65,7 @@ function evaluateMmrDrag(accountTelemetry) {
   const dd = inDomain(parseStrictNumber(accountTelemetry.competitive?.dd), -300, 300);
   const rank = canonicalRank(accountTelemetry.currentRank);
   const hasImpactMetrics = kd !== null && acs !== null && dd !== null;
-  const strongSignals = [kd !== null && kd >= 0.3, acs !== null && acs >= 100, dd !== null && dd > -300].filter(Boolean).length;
+  const strongSignals = [kd !== null && kd > 0.3, acs !== null && acs > 100, dd !== null && dd > -300].filter(Boolean).length;
   const hasMeaningfulImpact = strongSignals >= 2;
   if (matches === 0 || !hasImpactMetrics || rank === null || !hasMeaningfulImpact) {
     return {
@@ -74,7 +74,7 @@ function evaluateMmrDrag(accountTelemetry) {
       matchesEvaluated: matches,
       sampleSize: matches,
       confidence: 'nula',
-      formula: 'MMR-drag requiere matches entero≥0, KD[0,10], ACS[0,1000], DD[-300,300] observados, rango canónico y ≥2 señales significativas (KD≥0.3, ACS≥100, DD>-300); detección con matches>=300 e impacto (KD≥1.15 o ACS≥230 o DD≥20) y rango contenido (Gold/Silver)',
+      formula: 'MMR-drag requiere matches entero≥0, KD[0,10], ACS[0,1000], DD[-300,300] observados, rango canónico y ≥2 señales significativas (KD>0.3, ACS>100, DD>-300); detección con matches>=300 e impacto (KD≥1.15 o ACS≥230 o DD≥20) y rango contenido (Gold/Silver)',
       diagnosis: 'DATOS INSUFICIENTES: sin muestra válida (partidas, métricas de impacto y rango con dominio verificado) no se puede evaluar anclaje de MMR ni emitir severidad.'
     };
   }
@@ -191,7 +191,7 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
     };
   }
 
-  const strongMetrics = [avgKd !== null && avgKd >= 0.3, avgAcs !== null && avgAcs >= 100, avgHs !== null && avgHs >= 5].filter(Boolean).length;
+  const strongMetrics = [avgKd !== null && avgKd > 0.3, avgAcs !== null && avgAcs > 100, avgHs !== null && avgHs > 5].filter(Boolean).length;
   const hasMeaningfulImpact = jointMatches >= 5 && strongMetrics >= 2;
   if (!hasMeaningfulImpact) {
     return {
@@ -201,7 +201,7 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
       trueDeservedRank: 'Indeterminado (evidencia mínima)',
       sampleSize: jointMatches,
       confidence: 'nula',
-      formula: 'Clasificación requiere ≥5 partidas CONJUNTAS (las 4 métricas en la misma muestra) y ≥2 métricas con impacto significativo (KD≥0.3, ACS≥100, HS≥5)',
+      formula: 'Clasificación requiere ≥5 partidas CONJUNTAS (las 4 métricas en la misma muestra) y ≥2 métricas con impacto significativo (KD>0.3, ACS>100, HS>5)',
       metricsPresent,
       jointMatches,
       telemetrySummary: {
