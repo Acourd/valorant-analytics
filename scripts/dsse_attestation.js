@@ -175,14 +175,53 @@ function saveKeystore(keystorePath, keystore) {
   fs.writeFileSync(keystorePath, JSON.stringify(keystore, null, 2));
 }
 
-function registerTrustedKey(keystorePath, publicKeyPem, label) {
-  const ks = loadOrCreateKeystore(keystorePath);
-  const keyid = crypto.createHash('sha256').update(publicKeyPem).digest('hex').slice(0, 16);
-  if (!ks.keys.some(k => k.keyid === keyid)) {
-    ks.keys.push({ keyid, publicKeyPem, label: label || 'sin etiqueta', created: new Date().toISOString() });
-    saveKeystore(keystorePath, ks);
+function withFileLock(lockPath, fn, options = {}) {
+  const retries = options.retries || 100;
+  const waitMs = options.waitMs || 50;
+  const transient = new Set(['EEXIST', 'EPERM', 'EACCES', 'EBUSY']);
+  let fd = null;
+  for (let i = 0; i < retries; i++) {
+    try {
+      fd = fs.openSync(lockPath, 'wx', 0o600);
+      break;
+    } catch (e) {
+      if (!transient.has(e.code)) throw e;
+      execSleep(waitMs);
+    }
   }
-  return keyid;
+  if (fd === null) throw new Error(`No se pudo adquirir el lock ${lockPath} tras ${retries} intentos.`);
+  try {
+    return fn();
+  } finally {
+    try { fs.closeSync(fd); } catch (e) { /* continuar */ }
+    try { fs.unlinkSync(lockPath); } catch (e) { /* continuar */ }
+  }
+}
+
+function execSleep(ms) {
+  const start = Date.now();
+  while (Date.now() - start < ms) { /* espera activa acotada para IPC sin timers */ }
+}
+
+function registerTrustedKey(keystorePath, publicKeyPem, label) {
+  const lockPath = `${keystorePath}.lock`;
+  return withFileLock(lockPath, () => {
+    const ks = loadOrCreateKeystore(keystorePath);
+    const keyid = crypto.createHash('sha256').update(publicKeyPem).digest('hex').slice(0, 16);
+    if (!ks.keys.some(k => k.keyid === keyid)) {
+      ks.keys.push({ keyid, publicKeyPem, label: label || 'sin etiqueta', created: new Date().toISOString() });
+      const tmp = `${keystorePath}.tmp-${process.pid}`;
+      const fd = fs.openSync(tmp, 'w', 0o600);
+      try {
+        fs.writeFileSync(fd, JSON.stringify(ks, null, 2));
+        fs.fsyncSync(fd);
+      } finally {
+        try { fs.closeSync(fd); } catch (e) { /* continuar */ }
+      }
+      fs.renameSync(tmp, keystorePath);
+    }
+    return keyid;
+  });
 }
 
 module.exports = {
@@ -193,7 +232,8 @@ module.exports = {
   verifyTelemetryAttestation,
   loadOrCreateKeystore,
   saveKeystore,
-  registerTrustedKey
+  registerTrustedKey,
+  withFileLock
 };
 
 if (require.main === module) {

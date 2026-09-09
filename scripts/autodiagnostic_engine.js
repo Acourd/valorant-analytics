@@ -12,49 +12,45 @@
  * 5. Cero dependencias externas (Node.js core).
  */
 
+function toFiniteNumber(v) {
+  const n = typeof v === 'string' ? parseFloat(v) : (typeof v === 'number' ? v : NaN);
+  return Number.isFinite(n) ? n : null;
+}
+
+function inDomain(v, min, max) {
+  return v !== null && v >= min && v <= max ? v : null;
+}
+
 function evaluateMmrDrag(accountTelemetry) {
   if (!accountTelemetry || typeof accountTelemetry !== 'object') {
     throw new Error('evaluateMmrDrag requiere telemetría de cuenta (objeto con competitive/currentRank). Entrada recibida: ' + String(accountTelemetry));
   }
-  const matches = accountTelemetry.competitive?.matches || 0;
-  const kdRaw = accountTelemetry.competitive?.kd;
-  const acsRaw = accountTelemetry.competitive?.acs;
-  const ddRaw = accountTelemetry.competitive?.dd;
-  const hasImpactMetrics = kdRaw !== undefined || acsRaw !== undefined || ddRaw !== undefined;
-  if (matches === 0 || !hasImpactMetrics) {
+  const matchesRaw = accountTelemetry.competitive?.matches;
+  const matches = (typeof matchesRaw === 'number' && Number.isFinite(matchesRaw) && matchesRaw >= 0) ? Math.floor(matchesRaw) : 0;
+  const kd = inDomain(toFiniteNumber(accountTelemetry.competitive?.kd), 0, 10);
+  const acs = inDomain(toFiniteNumber(accountTelemetry.competitive?.acs), 0, 1000);
+  const dd = inDomain(toFiniteNumber(accountTelemetry.competitive?.dd), -300, 300);
+  const rankRaw = accountTelemetry.currentRank;
+  const rank = (typeof rankRaw === 'string' && rankRaw.trim().length > 0) ? rankRaw : null;
+  const hasImpactMetrics = kd !== null && acs !== null && dd !== null;
+  if (matches === 0 || !hasImpactMetrics || rank === null) {
     return {
       mmrDragDetected: false,
       severityScore: 0,
       matchesEvaluated: matches,
       sampleSize: matches,
       confidence: 'nula',
-      formula: 'MMR-drag requiere matches>=300 con impacto observado (KD≥1.15 o ACS≥230 o DDΔ≥20) y rango contenido (Gold/Silver)',
-      diagnosis: 'DATOS INSUFICIENTES: sin impacto observado no se puede evaluar anclaje de MMR ni emitir severidad.'
+      formula: 'MMR-drag requiere matches>=0 entero finito, KD[0,10], ACS[0,1000], DD[-300,300] observados y rango no vacío, con matches>=300 e impacto (KD≥1.15 o ACS≥230 o DD≥20) y rango contenido (Gold/Silver)',
+      diagnosis: 'DATOS INSUFICIENTES: sin muestra válida (partidas, métricas de impacto y rango con dominio verificado) no se puede evaluar anclaje de MMR ni emitir severidad.'
     };
   }
-  const kd = parseFloat(kdRaw);
-  const acs = parseFloat(acsRaw);
-  const dd = parseFloat(ddRaw);
-  const rank = accountTelemetry.currentRank || '';
 
   const isAgedAccount = matches >= 300;
   const hasHighCombatImpact = kd >= 1.15 || acs >= 230 || dd >= 20;
   const isRankConstrained = rank.includes('Gold') || rank.includes('Silver');
 
   const mmrDragDetected = isAgedAccount && hasHighCombatImpact && isRankConstrained;
-  const severityScore = isAgedAccount ? Math.min(100, Math.round((matches / 600) * 80 + (dd > 25 ? 20 : 10))) : 20;
-
-  if (matches === 0) {
-    return {
-      mmrDragDetected: false,
-      severityScore: 0,
-      matchesEvaluated: 0,
-      sampleSize: 0,
-      confidence: 'nula',
-      formula: 'MMR-drag requiere matches>=300 con impacto (KD≥1.15 o ACS≥230 o DDΔ≥20) y rango contenido (Gold/Silver)',
-      diagnosis: 'DATOS INSUFICIENTES: sin partidas registradas no se puede evaluar anclaje de MMR ni emitir severidad.'
-    };
-  }
+  const severityScore = isAgedAccount ? Math.min(100, Math.round((matches / 600) * 80 + (dd !== null && dd > 25 ? 20 : 10))) : 20;
 
   return {
     mmrDragDetected,
@@ -95,14 +91,14 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
     const rawMatches = comp.matches ?? 0;
     const m = (typeof rawMatches === 'number' && Number.isFinite(rawMatches) && rawMatches > 0) ? rawMatches : 0;
     totalCompMatches += m;
-    const kd = parseFloat(comp.kd ?? 'NaN');
-    const acs = parseFloat(comp.acs ?? 'NaN');
-    const dd = parseFloat(comp.dd ?? 'NaN');
-    const hs = parseFloat(comp.hs ?? 'NaN');
-    if (Number.isFinite(kd)) { weightedKd += kd * m; kdMatches += m; }
-    if (Number.isFinite(acs)) { weightedAcs += acs * m; acsMatches += m; }
-    if (Number.isFinite(dd)) { weightedDd += dd * m; ddMatches += m; }
-    if (Number.isFinite(hs)) { weightedHs += hs * m; hsMatches += m; }
+    const kd = inDomain(toFiniteNumber(comp.kd), 0, 10);
+    const acs = inDomain(toFiniteNumber(comp.acs), 0, 1000);
+    const dd = inDomain(toFiniteNumber(comp.dd), -300, 300);
+    const hs = inDomain(toFiniteNumber(comp.hs), 0, 100);
+    if (kd !== null) { weightedKd += kd * m; kdMatches += m; }
+    if (acs !== null) { weightedAcs += acs * m; acsMatches += m; }
+    if (dd !== null) { weightedDd += dd * m; ddMatches += m; }
+    if (hs !== null) { weightedHs += hs * m; hsMatches += m; }
   });
   const avgKd = kdMatches > 0 ? Number((weightedKd / kdMatches).toFixed(2)) : null;
   const avgAcs = acsMatches > 0 ? Number((weightedAcs / acsMatches).toFixed(1)) : null;
@@ -155,6 +151,29 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
         totalGeneralHours: totalGenHours
       },
       rationale: `Con ${totalCompMatches} partidas pero sin ${missingMetrics.join(', ')} no se clasifica talento/esfuerzo ni se proyecta rango merecido.`,
+      bottleneckOptimization: null
+    };
+  }
+
+  if (avgKd === 0 && avgAcs === 0 && avgDd === 0 && avgHs === 0) {
+    return {
+      category: 'DATOS INSUFICIENTES',
+      talentRatio: 'N/A',
+      zeroFpsBackground,
+      trueDeservedRank: 'Indeterminado (rendimiento cero)',
+      sampleSize: totalCompMatches,
+      confidence: 'nula',
+      formula: 'Clasificación requiere rendimiento observado positivo en al menos una métrica (KD, ACS, DDΔ o HS)',
+      metricsPresent,
+      telemetrySummary: {
+        averageKd: 0,
+        averageAcs: 0,
+        averageDd: 0,
+        averageHs: '0%',
+        totalCompetitiveMatches: totalCompMatches,
+        totalGeneralHours: totalGenHours
+      },
+      rationale: 'Rendimiento cero observado en todas las métricas: sin evidencia de impacto no se clasifica talento/esfuerzo ni se proyecta rango.',
       bottleneckOptimization: null
     };
   }

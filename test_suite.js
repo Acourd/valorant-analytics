@@ -861,6 +861,87 @@ check('68. ingestor: IDs no-archivo no provocan sondas fs; parse sin entrada fal
     assert.strictEqual(probed.length, 0, `sondas fs inesperadas: ${probed.join(',')}`);
   });
 
+check('71. dsse: registros concurrentes al keystore no pierden claves (merge atómico)',
+  () => {
+    const dssePath = path.join(scriptsDir, 'dsse_attestation.js').replace(/\\/g, '/');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-conc-'));
+    const ksPath = path.join(tmp, 'ks.json').replace(/\\/g, '/');
+    const coord = path.join(tmp, 'coordinator.js');
+    fs.writeFileSync(coord, `
+const { spawn } = require('child_process');
+const fs = require('fs');
+const KS = ${JSON.stringify(ksPath)};
+const DSSE = ${JSON.stringify(dssePath)};
+(async () => {
+  const procs = [];
+  for (let i = 0; i < 6; i++) {
+    const p = spawn(process.execPath, ['-e', "const d=require('" + DSSE + "');const k=d.generateAttestationKeyPair();d.registerTrustedKey('" + KS + "',k.publicKey.export({type:'spki',format:'pem'}),'c" + i + "');"], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let err = '';
+    p.stderr.on('data', d => { err += d; });
+    procs.push(new Promise((resolve) => p.on('close', (code) => resolve({ i, code, err: err.slice(0, 300) }))));
+  }
+  const results = await Promise.all(procs);
+  const bad = results.filter(r => r.code !== 0);
+  if (bad.length) { console.error('CHILD_FAIL ' + JSON.stringify(bad)); process.exit(1); }
+  const ks = JSON.parse(fs.readFileSync(${JSON.stringify(path.join(tmp, 'ks.json'))}, 'utf8'));
+  if (ks.keys.length !== 6) { console.error('KEYS_LOST ' + ks.keys.length); process.exit(1); }
+  if (fs.existsSync(${JSON.stringify(path.join(tmp, 'ks.json.lock'))})) { console.error('ORPHAN_LOCK'); process.exit(1); }
+  console.log('CONCURRENT_MERGE_OK 6/6');
+})();
+`);
+    try {
+      const out = execFileSync(process.execPath, [coord], { encoding: 'utf8', timeout: 60000 });
+      assert.ok(out.includes('CONCURRENT_MERGE_OK 6/6'), 'merge concurrente incompleto');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+check('72. autodiagnostic MMR: null/NaN/Infinity/negativos/rango ausente son insuficiencia',
+  () => {
+    const bad = [
+      { competitive: { matches: 400, kd: null, acs: null, dd: null }, currentRank: 'Gold 2' },
+      { competitive: { matches: 400, kd: 'NaN', acs: 'Infinity', dd: '-5' }, currentRank: 'Gold 2' },
+      { competitive: { matches: -10, kd: '1.5', acs: '250', dd: '30' }, currentRank: 'Gold 2' },
+      { competitive: { matches: 400, kd: '1.5', acs: '250', dd: '30' }, currentRank: '' },
+      { competitive: { matches: 400, kd: '1.5', acs: '250', dd: '30' } }
+    ];
+    for (const input of bad) {
+      const r = evaluateMmrDrag(input);
+      assert.strictEqual(r.mmrDragDetected, false, `MMR drag con entrada inválida: ${JSON.stringify(input)}`);
+      assert.ok(r.diagnosis.includes('DATOS INSUFICIENTES'), 'sin declaración de insuficiencia');
+    }
+    const inf = evaluateMmrDrag({ competitive: { matches: 400, kd: '9.9', acs: '900', dd: '299' }, currentRank: 'Gold 2' });
+    assert.strictEqual(inf.mmrDragDetected, true, 'valores altos en dominio deben detectarse');
+  });
+
+check('73. autodiagnostic talento: ceros/negativos/HS150% no clasifican',
+  () => {
+    const mk = (comp) => ({
+      summary: { totalGeneral: { hours: 100 }, highestPeakRank: 'Gold 2' },
+      accounts: [{ handle: 'Z#1', isExcluded: false, competitive: comp, peakRank: 'Gold 2' }]
+    });
+    for (const comp of [
+      { matches: 10, kd: 0, acs: 0, dd: 0, hs: 0 },
+      { matches: 10, kd: -1, acs: -50, dd: -400, hs: -5 },
+      { matches: 10, kd: 1.2, acs: 230, dd: 18, hs: 150 }
+    ]) {
+      const r = evaluateTalentVsEffort(mk(comp));
+      assert.strictEqual(r.category, 'DATOS INSUFICIENTES', `clasificó con entrada inválida: ${JSON.stringify(comp)}`);
+      assert.strictEqual(r.talentRatio, 'N/A');
+    }
+  });
+
+check('74. versión única: banner CLI y SBOM derivan de package.json',
+  () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+    const out = cliOk([]);
+    assert.ok(out.includes(`V${pkg.version}`), `banner no refleja package.json (${pkg.version})`);
+    const sbom = require(path.join(scriptsDir, 'sbom_manifest.js'));
+    const manifest = sbom.generateSbom(path.join(__dirname));
+    assert.strictEqual(manifest.metadata.component.version, pkg.version, 'SBOM no deriva versión de package.json');
+  });
+
 check('69. identidad DSSE: symlink en destino se rechaza sin seguirlo',
   () => {
     const cacheDir = path.join(__dirname, '.cache');

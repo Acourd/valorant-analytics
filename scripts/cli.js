@@ -55,8 +55,16 @@ const { generateCoachingReport } = require('./coaching_engine');
 
 function printBanner() {
   console.log(`\n========================================================================`);
-  console.log(`⚡ VALORANT ANALYTICS: UNIVERSAL SOVEREIGN ENGINE (V4.0)`);
+  console.log(`⚡ VALORANT ANALYTICS: UNIVERSAL SOVEREIGN ENGINE (V${getProjectVersion()})`);
   console.log(`========================================================================`);
+}
+
+function getProjectVersion() {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    if (pkg && typeof pkg.version === 'string' && pkg.version.trim()) return pkg.version.trim();
+  } catch (e) { /* fallback */ }
+  return '4.5.0';
 }
 
 function resolveMatchData(source, playerHandle) {
