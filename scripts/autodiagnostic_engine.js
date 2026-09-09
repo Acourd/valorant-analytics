@@ -17,6 +17,25 @@ function toFiniteNumber(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+function parseStrictNumber(v, allowPercent) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v !== 'string') return null;
+  let s = v.trim();
+  if (allowPercent && s.endsWith('%')) s = s.slice(0, -1).trim();
+  if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(s)) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+const KNOWN_TIERS = ['iron', 'bronze', 'silver', 'gold', 'platinum', 'diamond', 'ascendant', 'immortal', 'radiant', 'unranked'];
+
+function canonicalRank(v) {
+  if (typeof v !== 'string') return null;
+  const s = v.trim().toLowerCase();
+  if (s.length === 0) return null;
+  return KNOWN_TIERS.some(t => s.includes(t)) ? v.trim() : null;
+}
+
 function inDomain(v, min, max) {
   return v !== null && v >= min && v <= max ? v : null;
 }
@@ -26,14 +45,14 @@ function evaluateMmrDrag(accountTelemetry) {
     throw new Error('evaluateMmrDrag requiere telemetría de cuenta (objeto con competitive/currentRank). Entrada recibida: ' + String(accountTelemetry));
   }
   const matchesRaw = accountTelemetry.competitive?.matches;
-  const matches = (typeof matchesRaw === 'number' && Number.isFinite(matchesRaw) && matchesRaw >= 0) ? Math.floor(matchesRaw) : 0;
-  const kd = inDomain(toFiniteNumber(accountTelemetry.competitive?.kd), 0, 10);
-  const acs = inDomain(toFiniteNumber(accountTelemetry.competitive?.acs), 0, 1000);
-  const dd = inDomain(toFiniteNumber(accountTelemetry.competitive?.dd), -300, 300);
-  const rankRaw = accountTelemetry.currentRank;
-  const rank = (typeof rankRaw === 'string' && rankRaw.trim().length > 0) ? rankRaw : null;
+  const matches = (typeof matchesRaw === 'number' && Number.isInteger(matchesRaw) && matchesRaw >= 0) ? matchesRaw : 0;
+  const kd = inDomain(parseStrictNumber(accountTelemetry.competitive?.kd), 0, 10);
+  const acs = inDomain(parseStrictNumber(accountTelemetry.competitive?.acs), 0, 1000);
+  const dd = inDomain(parseStrictNumber(accountTelemetry.competitive?.dd), -300, 300);
+  const rank = canonicalRank(accountTelemetry.currentRank);
   const hasImpactMetrics = kd !== null && acs !== null && dd !== null;
-  if (matches === 0 || !hasImpactMetrics || rank === null) {
+  const hasMeaningfulImpact = (kd !== null && kd > 0) || (acs !== null && acs >= 50);
+  if (matches === 0 || !hasImpactMetrics || rank === null || !hasMeaningfulImpact) {
     return {
       mmrDragDetected: false,
       severityScore: 0,
@@ -88,13 +107,13 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
 
   personal.forEach(a => {
     const comp = a.competitive || {};
-    const rawMatches = comp.matches ?? 0;
-    const m = (typeof rawMatches === 'number' && Number.isFinite(rawMatches) && rawMatches > 0) ? rawMatches : 0;
+    const mRaw = comp.matches;
+    const m = (typeof mRaw === 'number' && Number.isInteger(mRaw) && mRaw > 0) ? mRaw : 0;
     totalCompMatches += m;
-    const kd = inDomain(toFiniteNumber(comp.kd), 0, 10);
-    const acs = inDomain(toFiniteNumber(comp.acs), 0, 1000);
-    const dd = inDomain(toFiniteNumber(comp.dd), -300, 300);
-    const hs = inDomain(toFiniteNumber(comp.hs), 0, 100);
+    const kd = inDomain(parseStrictNumber(comp.kd), 0, 10);
+    const acs = inDomain(parseStrictNumber(comp.acs), 0, 1000);
+    const dd = inDomain(parseStrictNumber(comp.dd), -300, 300);
+    const hs = inDomain(parseStrictNumber(comp.hs, true), 0, 100);
     if (kd !== null) { weightedKd += kd * m; kdMatches += m; }
     if (acs !== null) { weightedAcs += acs * m; acsMatches += m; }
     if (dd !== null) { weightedDd += dd * m; ddMatches += m; }
@@ -140,7 +159,7 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
       trueDeservedRank: 'Indeterminado (métricas ausentes)',
       sampleSize: totalCompMatches,
       confidence: 'nula',
-      formula: 'Clasificación requiere kd, acs, dd y hs observados; faltan: ' + missingMetrics.join(', '),
+      formula: 'Clasificación requiere kd[0,10], acs[0,1000], dd[-300,300] y hs[0,100] observados con parseo estricto; faltan: ' + missingMetrics.join(', '),
       metricsPresent,
       telemetrySummary: {
         averageKd: avgKd,
@@ -155,25 +174,26 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
     };
   }
 
-  if (avgKd === 0 && avgAcs === 0 && avgDd === 0 && avgHs === 0) {
+  const hasMeaningfulImpact = totalCompMatches >= 5 && ((avgKd !== null && avgKd > 0) || (avgAcs !== null && avgAcs >= 50) || (avgHs !== null && avgHs > 0));
+  if (!hasMeaningfulImpact) {
     return {
       category: 'DATOS INSUFICIENTES',
       talentRatio: 'N/A',
       zeroFpsBackground,
-      trueDeservedRank: 'Indeterminado (rendimiento cero)',
+      trueDeservedRank: 'Indeterminado (evidencia mínima)',
       sampleSize: totalCompMatches,
       confidence: 'nula',
-      formula: 'Clasificación requiere rendimiento observado positivo en al menos una métrica (KD, ACS, DDΔ o HS)',
+      formula: 'Clasificación requiere ≥5 partidas y al menos una métrica con impacto significativo (KD>0, ACS≥50 o HS>0)',
       metricsPresent,
       telemetrySummary: {
-        averageKd: 0,
-        averageAcs: 0,
-        averageDd: 0,
-        averageHs: '0%',
+        averageKd: avgKd,
+        averageAcs: avgAcs,
+        averageDd: avgDd,
+        averageHs: `${avgHs}%`,
         totalCompetitiveMatches: totalCompMatches,
         totalGeneralHours: totalGenHours
       },
-      rationale: 'Rendimiento cero observado en todas las métricas: sin evidencia de impacto no se clasifica talento/esfuerzo ni se proyecta rango.',
+      rationale: 'Muestra insuficiente o rendimiento no significativo: no se clasifica talento/esfuerzo ni se proyecta rango.',
       bottleneckOptimization: null
     };
   }
