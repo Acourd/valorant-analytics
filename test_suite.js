@@ -1182,6 +1182,56 @@ const dsse = require(${JSON.stringify(path.join(scriptsDir, 'dsse_attestation.js
     }
   });
 
-console.log(`\nResults: ${passed}/${total} tests passed.`);
+check('86. talento: duplicados exactos no inflan muestra ni confianza',
+  () => {
+    const one = { handle: 'D#1', isExcluded: false, competitive: { matches: 10, kd: '1.1', acs: '220', dd: '15', hs: '22' }, peakRank: 'Gold 2' };
+    const ten = Array.from({ length: 10 }, () => JSON.parse(JSON.stringify(one)));
+    const r = evaluateTalentVsEffort({
+      summary: { totalGeneral: { hours: 500 }, highestPeakRank: 'Gold 2' },
+      accounts: ten
+    });
+    assert.strictEqual(r.duplicatesSkipped, 9, 'repetidos exactos deben contarse');
+    assert.strictEqual(r.sampleSize, 10, 'muestra debe ser 10, no 100');
+    assert.strictEqual(r.jointMatches, 10);
+    assert.ok(r.confidence !== 'alta', 'duplicados jamás dan alta confianza');
+  });
+
+check('87. talento: identidad incierta (vacíos/duplicados de handle) topa confianza',
+  () => {
+    const mkAcc = (handle, comp) => ({ handle, isExcluded: false, competitive: comp, peakRank: 'Gold 2' });
+    const blanks = evaluateTalentVsEffort({
+      summary: { totalGeneral: { hours: 800 }, highestPeakRank: 'Gold 2' },
+      accounts: [
+        mkAcc('', { matches: 60, kd: '1.3', acs: '250', dd: '20', hs: '24' }),
+        mkAcc('  ', { matches: 60, kd: '1.3', acs: '250', dd: '20', hs: '24' })
+      ]
+    });
+    assert.strictEqual(blanks.duplicatesSkipped, 0, 'handles vacíos jamás se fusionan');
+    assert.strictEqual(blanks.identityUncertain, true);
+    assert.strictEqual(blanks.confidence, 'media', 'identidad incierta topa en media aunque joint>=100');
+    const sameHandle = evaluateTalentVsEffort({
+      summary: { totalGeneral: { hours: 800 }, highestPeakRank: 'Gold 2' },
+      accounts: [
+        mkAcc('X#1', { matches: 60, kd: '1.3', acs: '250', dd: '20', hs: '24' }),
+        mkAcc('X#1', { matches: 60, kd: '0.9', acs: '180', dd: '5', hs: '15' })
+      ]
+    });
+    assert.strictEqual(sameHandle.duplicatesSkipped, 0, 'datos distintos se preservan');
+    assert.strictEqual(sameHandle.identityUncertain, true);
+    assert.strictEqual(sameHandle.confidence, 'media', 'mismo handle con datos distintos topa en media');
+  });
+
+check('88. talento/MMR: apenas-sobre-umbral no produce conclusiones favorables',
+  () => {
+    const r = evaluateTalentVsEffort({
+      summary: { totalGeneral: { hours: 100 }, highestPeakRank: 'Gold 2' },
+      accounts: [{ handle: 'B#1', isExcluded: false, competitive: { matches: 5, kd: 0.306, acs: 100.06, dd: -300, hs: 0 }, peakRank: 'Gold 2' }]
+    });
+    assert.strictEqual(r.category, 'EVIDENCIA DESCRIPTIVA', 'límite apenas-superado no clasifica favorablemente');
+    assert.strictEqual(r.talentRatio, 'N/A');
+    const m = evaluateMmrDrag({ competitive: { matches: 400, kd: '0.31', acs: '101', dd: '5' }, currentRank: 'Gold 2' });
+    assert.ok(m.confidence === 'media' || m.confidence === 'baja', 'MMR límite no debe dar alta confianza');
+    assert.ok(m.confidence !== 'alta', 'MMR límite jamás alta confianza');
+  });
 if (passed !== total) process.exit(1);
 console.log('All valorant-analytics deterministic tests passed with Exit Code: 0');

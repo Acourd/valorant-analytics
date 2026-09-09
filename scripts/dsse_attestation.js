@@ -249,11 +249,21 @@ function withFileLock(lockPath, fn, options = {}) {
       const info = inspectLock();
       if (info.state === 'missing') continue;
       if (info.state === 'held') {
+        let cur = null;
+        try { cur = fs.readFileSync(lockPath, 'utf8'); } catch (_) {}
+        if (cur === owner) { acquired = true; break; }
         if (info.pid === process.pid) {
+          // Mismo proceso (otro hilo/worker): la identidad es el TOKEN COMPLETO,
+          // jamás el PID solo. Solo se recupera un lock propio abandonado cuando
+          // su mtime supera staleMs (hilo muerto); en otro caso se espera.
           try {
-            if (fs.readFileSync(lockPath, 'utf8') === owner) { acquired = true; break; }
+            const st = fs.lstatSync(lockPath);
+            if ((Date.now() - st.mtimeMs) > staleMs) {
+              try { fs.unlinkSync(lockPath); } catch (_) {}
+              continue;
+            }
           } catch (_) {}
-          try { fs.unlinkSync(lockPath); } catch (_) {}
+          execSleep(waitMs);
           continue;
         }
         if (info.alive === false) {

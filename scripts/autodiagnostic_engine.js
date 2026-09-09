@@ -86,7 +86,7 @@ function evaluateMmrDrag(accountTelemetry) {
   const mmrDragDetected = isAgedAccount && hasHighCombatImpact && isRankConstrained;
   const severityScore = isAgedAccount ? Math.min(100, Math.round((matches / 600) * 80 + (dd !== null && dd > 25 ? 20 : 10))) : 20;
   const decisiveSignals = [kd !== null && kd >= 0.6, acs !== null && acs >= 200, dd !== null && dd >= 0].filter(Boolean).length;
-  const calibratedConfidence = (matches >= 300 && decisiveSignals >= 2) ? 'alta' : (matches >= 50 ? 'media' : 'baja');
+  const calibratedConfidence = (matches >= 300 && decisiveSignals >= 2) ? 'alta' : ((matches >= 50 && decisiveSignals >= 1) ? 'media' : 'baja');
 
   return {
     mmrDragDetected,
@@ -110,11 +110,20 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
   }
   const zeroFpsBackground = options.zeroFpsBackground !== false; // default true based on user profile
   const seenAccounts = new Set();
+  const seenHandles = new Set();
   let duplicatesSkipped = 0;
+  let identityUncertain = false;
   const personal = careerReport.accounts.filter(a => {
     if (a.isExcluded) return false;
-    const key = `${String(a.handle || '').trim().toLowerCase()}||${JSON.stringify(a.competitive || null)}||${String(a.peakRank || '')}`;
+    const handleKey = String(a.handle || '').trim().toLowerCase();
+    if (!handleKey) {
+      identityUncertain = true;
+      return true;
+    }
+    const key = `${handleKey}||${JSON.stringify(a.competitive || null)}||${String(a.peakRank || '')}`;
     if (seenAccounts.has(key)) { duplicatesSkipped++; return false; }
+    if (seenHandles.has(handleKey)) identityUncertain = true;
+    seenHandles.add(handleKey);
     seenAccounts.add(key);
     return true;
   });
@@ -214,7 +223,7 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
     };
   }
 
-  const strongMetrics = [avgKd !== null && avgKd > 0.3, avgAcs !== null && avgAcs > 100, avgHs !== null && avgHs > 5].filter(Boolean).length;
+  const strongMetrics = [avgKd !== null && avgKd > 0.6, avgAcs !== null && avgAcs > 150, avgHs !== null && avgHs > 10].filter(Boolean).length;
   const hasMeaningfulImpact = jointMatches >= 5 && strongMetrics >= 2;
   if (!hasMeaningfulImpact) {
     const observed = [`KD ${avgKd === null ? 'n/d' : avgKd}`, `ACS ${avgAcs === null ? 'n/d' : avgAcs}`, `DDΔ ${avgDd === null ? 'n/d' : avgDd}`, `HS ${avgHs === null ? 'n/d' : avgHs + '%'}`].join(', ');
@@ -225,7 +234,7 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
       trueDeservedRank: 'Indeterminado (evidencia límite)',
       sampleSize: jointMatches,
       confidence: 'baja',
-      formula: 'Clasificación favorable requiere ≥5 partidas CONJUNTAS y ≥2 métricas decisivas (KD>0.3, ACS>100, HS>5); bajo ese umbral solo se describe lo observado',
+      formula: 'Clasificación favorable requiere ≥5 partidas CONJUNTAS y ≥2 métricas decisivas (KD>0.6, ACS>150, HS>10); bajo ese umbral solo se describe lo observado',
       metricsPresent,
       jointMatches,
       duplicatesSkipped,
@@ -284,11 +293,12 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
     zeroFpsBackground,
     trueDeservedRank: trueRank,
     sampleSize: jointMatches,
-    confidence: jointMatches >= 100 ? 'alta' : (jointMatches >= 20 ? 'media' : 'baja'),
+    confidence: identityUncertain ? 'media' : (jointMatches >= 100 ? 'alta' : (jointMatches >= 20 ? 'media' : 'baja')),
     formula: 'ACS/KD/DDΔ ponderados por partidas; talento si breakout en ≤30 partidas a Diamante o DDΔ≥25 con KD≥1.20; confianza por cobertura conjunta',
     metricsPresent,
     jointMatches,
     duplicatesSkipped,
+    identityUncertain,
     telemetrySummary: {
       averageKd: avgKd,
       averageAcs: avgAcs,
