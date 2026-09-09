@@ -65,7 +65,8 @@ function evaluateMmrDrag(accountTelemetry) {
   const dd = inDomain(parseStrictNumber(accountTelemetry.competitive?.dd), -300, 300);
   const rank = canonicalRank(accountTelemetry.currentRank);
   const hasImpactMetrics = kd !== null && acs !== null && dd !== null;
-  const hasMeaningfulImpact = (kd !== null && kd >= 0.3) || (acs !== null && acs >= 100);
+  const strongSignals = [kd !== null && kd >= 0.3, acs !== null && acs >= 100, dd !== null && dd > -300].filter(Boolean).length;
+  const hasMeaningfulImpact = strongSignals >= 2;
   if (matches === 0 || !hasImpactMetrics || rank === null || !hasMeaningfulImpact) {
     return {
       mmrDragDetected: false,
@@ -73,7 +74,7 @@ function evaluateMmrDrag(accountTelemetry) {
       matchesEvaluated: matches,
       sampleSize: matches,
       confidence: 'nula',
-      formula: 'MMR-drag requiere matches>=0 entero finito, KD[0,10], ACS[0,1000], DD[-300,300] observados y rango no vacío, con matches>=300 e impacto (KD≥1.15 o ACS≥230 o DD≥20) y rango contenido (Gold/Silver)',
+      formula: 'MMR-drag requiere matches entero≥0, KD[0,10], ACS[0,1000], DD[-300,300] observados, rango canónico y ≥2 señales significativas (KD≥0.3, ACS≥100, DD>-300); detección con matches>=300 e impacto (KD≥1.15 o ACS≥230 o DD≥20) y rango contenido (Gold/Silver)',
       diagnosis: 'DATOS INSUFICIENTES: sin muestra válida (partidas, métricas de impacto y rango con dominio verificado) no se puede evaluar anclaje de MMR ni emitir severidad.'
     };
   }
@@ -118,6 +119,7 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
   let acsMatches = 0;
   let ddMatches = 0;
   let hsMatches = 0;
+  let jointMatches = 0;
 
   personal.forEach(a => {
     const comp = a.competitive || {};
@@ -132,6 +134,7 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
     if (acs !== null) { weightedAcs += acs * m; acsMatches += m; }
     if (dd !== null) { weightedDd += dd * m; ddMatches += m; }
     if (hs !== null) { weightedHs += hs * m; hsMatches += m; }
+    if (kd !== null && acs !== null && dd !== null && hs !== null) jointMatches += m;
   });
   const avgKd = kdMatches > 0 ? Number((weightedKd / kdMatches).toFixed(2)) : null;
   const avgAcs = acsMatches > 0 ? Number((weightedAcs / acsMatches).toFixed(1)) : null;
@@ -188,17 +191,19 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
     };
   }
 
-  const hasMeaningfulImpact = totalCompMatches >= 5 && ((avgKd !== null && avgKd >= 0.3) || (avgAcs !== null && avgAcs >= 100) || (avgHs !== null && avgHs >= 5));
+  const strongMetrics = [avgKd !== null && avgKd >= 0.3, avgAcs !== null && avgAcs >= 100, avgHs !== null && avgHs >= 5].filter(Boolean).length;
+  const hasMeaningfulImpact = jointMatches >= 5 && strongMetrics >= 2;
   if (!hasMeaningfulImpact) {
     return {
       category: 'DATOS INSUFICIENTES',
       talentRatio: 'N/A',
       zeroFpsBackground,
       trueDeservedRank: 'Indeterminado (evidencia mínima)',
-      sampleSize: totalCompMatches,
+      sampleSize: jointMatches,
       confidence: 'nula',
-      formula: 'Clasificación requiere ≥5 partidas y al menos una métrica con impacto significativo (KD≥0.3, ACS≥100 o HS≥5)',
+      formula: 'Clasificación requiere ≥5 partidas CONJUNTAS (las 4 métricas en la misma muestra) y ≥2 métricas con impacto significativo (KD≥0.3, ACS≥100, HS≥5)',
       metricsPresent,
+      jointMatches,
       telemetrySummary: {
         averageKd: avgKd,
         averageAcs: avgAcs,
@@ -253,10 +258,11 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
     talentRatio: `${talentPct}% Talento / ${effortPct}% Esfuerzo`,
     zeroFpsBackground,
     trueDeservedRank: trueRank,
-    sampleSize: totalCompMatches,
-    confidence: totalCompMatches >= 100 ? 'alta' : (totalCompMatches >= 20 ? 'media' : 'baja'),
-    formula: 'ACS/KD/DDΔ ponderados por partidas; talento si breakout en ≤30 partidas a Diamante o DDΔ≥25 con KD≥1.20',
+    sampleSize: jointMatches,
+    confidence: jointMatches >= 100 ? 'alta' : (jointMatches >= 20 ? 'media' : 'baja'),
+    formula: 'ACS/KD/DDΔ ponderados por partidas; talento si breakout en ≤30 partidas a Diamante o DDΔ≥25 con KD≥1.20; confianza por cobertura conjunta',
     metricsPresent,
+    jointMatches,
     telemetrySummary: {
       averageKd: avgKd,
       averageAcs: avgAcs,

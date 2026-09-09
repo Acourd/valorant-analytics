@@ -1055,6 +1055,50 @@ check('78. MMR: pisos significativos (KD≥0.3 o ACS≥100) para evaluar',
     assert.ok(!solid.diagnosis.includes('DATOS INSUFICIENTES'), 'sobre umbral debe evaluarse');
   });
 
+check('79. dsse saveKeystore público: rechaza symlink y escribe atómicamente bajo lock',
+  () => {
+    const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-save-'));
+    try {
+      const ksPath = path.join(tmp, 'ks.json');
+      const outside = path.join(tmp, 'outside.txt');
+      fs.writeFileSync(outside, 'ORIGINAL-EXTERNO');
+      let linkOk = true;
+      try { fs.symlinkSync(outside, ksPath, 'file'); } catch (e) { linkOk = false; }
+      if (linkOk) {
+        assert.throws(() => dsse.saveKeystore(ksPath, { keys: [] }), /enlace simbólico/);
+        assert.strictEqual(fs.readFileSync(outside, 'utf8'), 'ORIGINAL-EXTERNO', 'symlink no debe redirigir escritura');
+        fs.unlinkSync(ksPath);
+      }
+      dsse.saveKeystore(ksPath, { keys: [{ keyid: 'ab', publicKeyPem: 'X', label: 't', created: 'now' }] });
+      assert.strictEqual(dsse.loadOrCreateKeystore(ksPath).keys.length, 1);
+      assert.ok(!fs.existsSync(ksPath + '.lock'), 'lock liberado tras escritura');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+check('80. talento: cobertura disjunta no infla confianza (joint, no suma)',
+  () => {
+    const r = evaluateTalentVsEffort({
+      summary: { totalGeneral: { hours: 500 }, highestPeakRank: 'Gold 2' },
+      accounts: [
+        { handle: 'A#1', isExcluded: false, competitive: { matches: 1000, kd: '1.4' }, peakRank: 'Gold 2' },
+        { handle: 'B#1', isExcluded: false, competitive: { matches: 5, kd: '1.1', acs: '220', dd: '15', hs: '22' }, peakRank: 'Gold 2' }
+      ]
+    });
+    assert.strictEqual(r.sampleSize, 5, 'muestra debe ser cobertura conjunta, no suma');
+    assert.strictEqual(r.confidence, 'baja', 'cobertura disjunta jamás da alta confianza');
+    assert.strictEqual(r.jointMatches, 5);
+  });
+
+check('81. MMR: una sola señal límite (kd 0.3 aislado) es insuficiencia',
+  () => {
+    const r = evaluateMmrDrag({ competitive: { matches: 400, kd: '0.3', acs: '0', dd: '-300' }, currentRank: 'Gold 2' });
+    assert.ok(r.diagnosis.includes('DATOS INSUFICIENTES'), 'una sola señal no basta para evaluar MMR');
+    assert.strictEqual(r.confidence, 'nula');
+  });
+
 console.log(`\nResults: ${passed}/${total} tests passed.`);
 if (passed !== total) process.exit(1);
 console.log('All valorant-analytics deterministic tests passed with Exit Code: 0');
