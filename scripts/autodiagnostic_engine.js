@@ -85,13 +85,15 @@ function evaluateMmrDrag(accountTelemetry) {
 
   const mmrDragDetected = isAgedAccount && hasHighCombatImpact && isRankConstrained;
   const severityScore = isAgedAccount ? Math.min(100, Math.round((matches / 600) * 80 + (dd !== null && dd > 25 ? 20 : 10))) : 20;
+  const decisiveSignals = [kd !== null && kd >= 0.6, acs !== null && acs >= 200, dd !== null && dd >= 0].filter(Boolean).length;
+  const calibratedConfidence = (matches >= 300 && decisiveSignals >= 2) ? 'alta' : (matches >= 50 ? 'media' : 'baja');
 
   return {
     mmrDragDetected,
     severityScore,
     matchesEvaluated: matches,
     sampleSize: matches,
-    confidence: matches >= 300 ? 'alta' : (matches >= 50 ? 'media' : 'baja'),
+    confidence: calibratedConfidence,
     formula: 'MMR-drag requiere matches>=300 con impacto (KD≥1.15 o ACS≥230 o DDΔ≥20) y rango contenido (Gold/Silver)',
     diagnosis: mmrDragDetected
       ? 'Anclaje de Certeza Algorítmica Severo: El sistema de Riot posee baja varianza para esta cuenta y frena las ganancias de RR a pesar de que los indicadores individuales (ACS/DDΔ/KD) corresponden a un elo superior.'
@@ -107,7 +109,15 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
     throw new Error('evaluateTalentVsEffort requiere careerReport.summary.totalGeneral. Resumen ausente.');
   }
   const zeroFpsBackground = options.zeroFpsBackground !== false; // default true based on user profile
-  const personal = careerReport.accounts.filter(a => !a.isExcluded);
+  const seenAccounts = new Set();
+  let duplicatesSkipped = 0;
+  const personal = careerReport.accounts.filter(a => {
+    if (a.isExcluded) return false;
+    const key = `${String(a.handle || '').trim().toLowerCase()}||${JSON.stringify(a.competitive || null)}||${String(a.peakRank || '')}`;
+    if (seenAccounts.has(key)) { duplicatesSkipped++; return false; }
+    seenAccounts.add(key);
+    return true;
+  });
   
   // Aggregate weighted stats
   let totalCompMatches = 0;
@@ -120,6 +130,10 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
   let ddMatches = 0;
   let hsMatches = 0;
   let jointMatches = 0;
+  let jointKdSum = 0;
+  let jointAcsSum = 0;
+  let jointDdSum = 0;
+  let jointHsSum = 0;
 
   personal.forEach(a => {
     const comp = a.competitive || {};
@@ -130,16 +144,25 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
     const acs = inDomain(parseStrictNumber(comp.acs), 0, 1000);
     const dd = inDomain(parseStrictNumber(comp.dd), -300, 300);
     const hs = inDomain(parseStrictNumber(comp.hs, true), 0, 100);
+    const jointlyComplete = kd !== null && acs !== null && dd !== null && hs !== null;
     if (kd !== null) { weightedKd += kd * m; kdMatches += m; }
     if (acs !== null) { weightedAcs += acs * m; acsMatches += m; }
     if (dd !== null) { weightedDd += dd * m; ddMatches += m; }
     if (hs !== null) { weightedHs += hs * m; hsMatches += m; }
-    if (kd !== null && acs !== null && dd !== null && hs !== null) jointMatches += m;
+    // Promedios de clasificación SOLO sobre observaciones conjuntamente completas:
+    // datos disjuntos (métricas de distintas muestras) jamás alteran los promedios.
+    if (jointlyComplete) {
+      jointMatches += m;
+      jointKdSum += kd * m;
+      jointAcsSum += acs * m;
+      jointDdSum += dd * m;
+      jointHsSum += hs * m;
+    }
   });
-  const avgKd = kdMatches > 0 ? Number((weightedKd / kdMatches).toFixed(2)) : null;
-  const avgAcs = acsMatches > 0 ? Number((weightedAcs / acsMatches).toFixed(1)) : null;
-  const avgDd = ddMatches > 0 ? Number((weightedDd / ddMatches).toFixed(1)) : null;
-  const avgHs = hsMatches > 0 ? Number((weightedHs / hsMatches).toFixed(1)) : null;
+  const avgKd = jointMatches > 0 ? Number((jointKdSum / jointMatches).toFixed(2)) : null;
+  const avgAcs = jointMatches > 0 ? Number((jointAcsSum / jointMatches).toFixed(1)) : null;
+  const avgDd = jointMatches > 0 ? Number((jointDdSum / jointMatches).toFixed(1)) : null;
+  const avgHs = jointMatches > 0 ? Number((jointHsSum / jointMatches).toFixed(1)) : null;
   const metricsPresent = { kd: kdMatches > 0, acs: acsMatches > 0, dd: ddMatches > 0, hs: hsMatches > 0 };
   const missingMetrics = Object.keys(metricsPresent).filter(k => !metricsPresent[k]);
 
@@ -194,25 +217,27 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
   const strongMetrics = [avgKd !== null && avgKd > 0.3, avgAcs !== null && avgAcs > 100, avgHs !== null && avgHs > 5].filter(Boolean).length;
   const hasMeaningfulImpact = jointMatches >= 5 && strongMetrics >= 2;
   if (!hasMeaningfulImpact) {
+    const observed = [`KD ${avgKd === null ? 'n/d' : avgKd}`, `ACS ${avgAcs === null ? 'n/d' : avgAcs}`, `DDΔ ${avgDd === null ? 'n/d' : avgDd}`, `HS ${avgHs === null ? 'n/d' : avgHs + '%'}`].join(', ');
     return {
-      category: 'DATOS INSUFICIENTES',
+      category: 'EVIDENCIA DESCRIPTIVA',
       talentRatio: 'N/A',
       zeroFpsBackground,
-      trueDeservedRank: 'Indeterminado (evidencia mínima)',
+      trueDeservedRank: 'Indeterminado (evidencia límite)',
       sampleSize: jointMatches,
-      confidence: 'nula',
-      formula: 'Clasificación requiere ≥5 partidas CONJUNTAS (las 4 métricas en la misma muestra) y ≥2 métricas con impacto significativo (KD>0.3, ACS>100, HS>5)',
+      confidence: 'baja',
+      formula: 'Clasificación favorable requiere ≥5 partidas CONJUNTAS y ≥2 métricas decisivas (KD>0.3, ACS>100, HS>5); bajo ese umbral solo se describe lo observado',
       metricsPresent,
       jointMatches,
+      duplicatesSkipped,
       telemetrySummary: {
         averageKd: avgKd,
         averageAcs: avgAcs,
         averageDd: avgDd,
-        averageHs: `${avgHs}%`,
+        averageHs: avgHs === null ? null : `${avgHs}%`,
         totalCompetitiveMatches: totalCompMatches,
         totalGeneralHours: totalGenHours
       },
-      rationale: 'Muestra insuficiente o rendimiento no significativo: no se clasifica talento/esfuerzo ni se proyecta rango.',
+      rationale: `Observado en muestra conjunta (${jointMatches} partidas): ${observed}. Evidencia insuficiente para clasificar talento o proyectar rango.`,
       bottleneckOptimization: null
     };
   }
@@ -263,6 +288,7 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
     formula: 'ACS/KD/DDΔ ponderados por partidas; talento si breakout en ≤30 partidas a Diamante o DDΔ≥25 con KD≥1.20; confianza por cobertura conjunta',
     metricsPresent,
     jointMatches,
+    duplicatesSkipped,
     telemetrySummary: {
       averageKd: avgKd,
       averageAcs: avgAcs,

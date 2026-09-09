@@ -921,15 +921,14 @@ check('73. autodiagnostic talento: ceros/negativos/HS150% no clasifican',
       summary: { totalGeneral: { hours: 100 }, highestPeakRank: 'Gold 2' },
       accounts: [{ handle: 'Z#1', isExcluded: false, competitive: comp, peakRank: 'Gold 2' }]
     });
-    for (const comp of [
-      { matches: 10, kd: 0, acs: 0, dd: 0, hs: 0 },
-      { matches: 10, kd: -1, acs: -50, dd: -400, hs: -5 },
-      { matches: 10, kd: 1.2, acs: 230, dd: 18, hs: 150 }
-    ]) {
-      const r = evaluateTalentVsEffort(mk(comp));
-      assert.strictEqual(r.category, 'DATOS INSUFICIENTES', `clasificó con entrada inválida: ${JSON.stringify(comp)}`);
-      assert.strictEqual(r.talentRatio, 'N/A');
-    }
+    const allZero = evaluateTalentVsEffort(mk({ matches: 10, kd: 0, acs: 0, dd: 0, hs: 0 }));
+    assert.strictEqual(allZero.category, 'EVIDENCIA DESCRIPTIVA', 'ceros deben describirse, no clasificarse favorablemente');
+    assert.strictEqual(allZero.talentRatio, 'N/A');
+    assert.ok(allZero.trueDeservedRank.includes('Indeterminado'), 'sin proyección de rango');
+    const neg = evaluateTalentVsEffort(mk({ matches: 10, kd: -1, acs: -50, dd: -400, hs: -5 }));
+    assert.strictEqual(neg.category, 'DATOS INSUFICIENTES', 'negativos fuera de dominio son insuficiencia');
+    const hs150 = evaluateTalentVsEffort(mk({ matches: 10, kd: 1.2, acs: 230, dd: 18, hs: 150 }));
+    assert.strictEqual(hs150.category, 'DATOS INSUFICIENTES', 'HS150 fuera de dominio es insuficiencia');
   });
 
 check('74. versión única: banner CLI y SBOM derivan de package.json',
@@ -1030,7 +1029,9 @@ check('77. talento: epsilon (KD 0.01, HS 0.1%) no clasifica; débil-real sí',
       accounts: [{ handle: 'E#1', isExcluded: false, competitive: comp, peakRank: 'Gold 2' }]
     });
     const eps = evaluateTalentVsEffort(mk({ matches: 20, kd: 0.01, acs: 1, dd: -290, hs: 0.1 }));
-    assert.strictEqual(eps.category, 'DATOS INSUFICIENTES', 'epsilon no debe clasificar');
+    assert.strictEqual(eps.category, 'EVIDENCIA DESCRIPTIVA', 'epsilon debe describirse, no clasificarse favorablemente');
+    assert.strictEqual(eps.talentRatio, 'N/A');
+    assert.ok(eps.trueDeservedRank.includes('Indeterminado'), 'sin proyección de rango');
     const weak = evaluateTalentVsEffort(mk({ matches: 50, kd: 0.8, acs: 150, dd: -5, hs: 12 }));
     assert.ok(weak.category !== 'DATOS INSUFICIENTES', 'rendimiento débil-real debe clasificarse');
     assert.ok(weak.confidence === 'media' || weak.confidence === 'baja', 'confianza calibrada por muestra');
@@ -1132,7 +1133,8 @@ check('84. talento: valores límite exactos (kd 0.3/acs 100) no clasifican',
       accounts: [{ handle: 'E#1', isExcluded: false, competitive: comp, peakRank: 'Gold 2' }]
     });
     const r = evaluateTalentVsEffort(mk({ matches: 5, kd: 0.3, acs: 100, dd: -300, hs: 0 }));
-    assert.strictEqual(r.category, 'DATOS INSUFICIENTES', 'frontera exacta no debe clasificar favorablemente');
+    assert.strictEqual(r.category, 'EVIDENCIA DESCRIPTIVA', 'frontera exacta no debe clasificar favorablemente');
+    assert.strictEqual(r.talentRatio, 'N/A');
   });
 
 check('85. dsse: holder vivo nunca es desalojado (sin overlap)',
