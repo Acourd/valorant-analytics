@@ -1233,5 +1233,50 @@ check('88. talento/MMR: apenas-sobre-umbral no produce conclusiones favorables',
     assert.ok(m.confidence === 'media' || m.confidence === 'baja', 'MMR límite no debe dar alta confianza');
     assert.ok(m.confidence !== 'alta', 'MMR límite jamás alta confianza');
   });
+check('89. dsse: 8 worker-threads concurrentes retienen todas las claves (sin overlap)',
+  () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-workers-'));
+    try {
+      const ksPath = path.join(tmp, 'ks.json');
+      const workerScript = path.join(tmp, 'reg.js');
+      fs.writeFileSync(workerScript, `
+const dsse = require(${JSON.stringify(path.join(scriptsDir, 'dsse_attestation.js'))});
+const k = dsse.generateAttestationKeyPair();
+dsse.registerTrustedKey(${JSON.stringify(ksPath)}, k.publicKey.export({ type: 'spki', format: 'pem' }), 'w' + (require('worker_threads').threadId || 'x'));
+`);
+      const coordScript = path.join(tmp, 'coordW.js');
+      fs.writeFileSync(coordScript, `
+const { Worker } = require('worker_threads');
+const fs = require('fs');
+(async () => {
+  const workers = [];
+  for (let i = 0; i < 8; i++) {
+    workers.push(new Promise((resolve, reject) => {
+      const w = new Worker(${JSON.stringify(workerScript)});
+      w.on('error', reject);
+      w.on('exit', (code) => code === 0 ? resolve(i) : reject(new Error('worker ' + i + ' exit ' + code)));
+    }));
+  }
+  await Promise.all(workers);
+  const ks = JSON.parse(fs.readFileSync(${JSON.stringify(ksPath)}, 'utf8'));
+  if (ks.keys.length !== 8) { console.error('KEYS=' + ks.keys.length); process.exit(1); }
+  console.log('WORKERS_OK 8/8');
+})();
+`);
+      const out = execFileSync(process.execPath, [coordScript], { encoding: 'utf8', timeout: 120000 });
+      assert.ok(out.includes('WORKERS_OK 8/8'), 'workers concurrentes perdieron claves');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+check('90. MMR límite (1 señal decisiva) es evidencia límite, no veredicto',
+  () => {
+    const m = evaluateMmrDrag({ competitive: { matches: 400, kd: '0.4', acs: '120', dd: '-50' }, currentRank: 'Gold 2' });
+    assert.ok(m.diagnosis.includes('EVIDENCIA L'), 'MMR débil debe declararse límite');
+    assert.strictEqual(m.confidence, 'baja');
+    assert.strictEqual(m.mmrDragDetected, false);
+  });
+
 if (passed !== total) process.exit(1);
 console.log('All valorant-analytics deterministic tests passed with Exit Code: 0');

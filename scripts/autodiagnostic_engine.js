@@ -87,6 +87,17 @@ function evaluateMmrDrag(accountTelemetry) {
   const severityScore = isAgedAccount ? Math.min(100, Math.round((matches / 600) * 80 + (dd !== null && dd > 25 ? 20 : 10))) : 20;
   const decisiveSignals = [kd !== null && kd >= 0.6, acs !== null && acs >= 200, dd !== null && dd >= 0].filter(Boolean).length;
   const calibratedConfidence = (matches >= 300 && decisiveSignals >= 2) ? 'alta' : ((matches >= 50 && decisiveSignals >= 1) ? 'media' : 'baja');
+  if (decisiveSignals < 2) {
+    return {
+      mmrDragDetected: false,
+      severityScore: 0,
+      matchesEvaluated: matches,
+      sampleSize: matches,
+      confidence: 'baja',
+      formula: 'MMR-drag requiere ≥2 señales decisivas (KD≥0.6, ACS≥200, DD≥0); bajo ese umbral solo se describe lo observado',
+      diagnosis: 'EVIDENCIA LÍMITE: métricas presentes pero sin fuerza decisiva; no se afirma ni descarta anclaje de MMR.'
+    };
+  }
 
   return {
     mmrDragDetected,
@@ -293,7 +304,7 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
     zeroFpsBackground,
     trueDeservedRank: trueRank,
     sampleSize: jointMatches,
-    confidence: identityUncertain ? 'media' : (jointMatches >= 100 ? 'alta' : (jointMatches >= 20 ? 'media' : 'baja')),
+    confidence: identityUncertain ? (jointMatches >= 20 ? 'media' : 'baja') : (jointMatches >= 100 ? 'alta' : (jointMatches >= 20 ? 'media' : 'baja')),
     formula: 'ACS/KD/DDΔ ponderados por partidas; talento si breakout en ≤30 partidas a Diamante o DDΔ≥25 con KD≥1.20; confianza por cobertura conjunta',
     metricsPresent,
     jointMatches,
