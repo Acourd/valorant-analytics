@@ -2,7 +2,7 @@
 
 /**
  * test_career_autodiagnostic.js - Tests deterministas para Telemetría de Carrera,
- * Cosecha de Caché de Navegadores y Motor de Autodiagnóstico de Rango Real.
+ * Cosecha de Caché de Navegadores y Señal Heurística de MMR (no verificada).
  */
 
 const assert = require('assert');

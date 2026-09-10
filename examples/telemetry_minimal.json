@@ -1,0 +1,12 @@
+{
+  "source": "summary",
+  "description": "Nivel mínimo: solo KDA agregado y ACS. Sin evidencia por ronda ni mecánica.",
+  "map": "Sunset",
+  "mode": "competitive",
+  "agent": "Cypher",
+  "observed": {
+    "kda": "21/16/7",
+    "kd": 1.31,
+    "acs": 215
+  }
+}

@@ -440,7 +440,7 @@ check('career_telemetry: desglose de horas competitivas vs general y cronología
     assert.strictEqual(tl[0].rango, 'Hierro 3 (Inicio)');
   });
 
-check('autodiagnostic_engine: diagnóstico de MMR drag, verdadero rango merecido y ratio de talento',
+check('autodiagnostic_engine: señal heurística de MMR y mezcla de indicadores (no verificada)',
   () => {
     const drag = evaluateMmrDrag({
       competitive: { matches: 500, kd: '1.20', acs: '240', dd: '25' },
@@ -918,7 +918,7 @@ check('autodiagnostic MMR: null/NaN/Infinity/negativos/rango ausente son insufic
     ];
     for (const input of bad) {
       const r = evaluateMmrDrag(input);
-      assert.strictEqual(r.mmrDragDetected, false, `MMR drag con entrada inválida: ${JSON.stringify(input)}`);
+      assert.strictEqual(r.mmrDragDetected, false, `señal MMR con entrada inválida: ${JSON.stringify(input)}`);
       assert.ok(r.diagnosis.includes('DATOS INSUFICIENTES'), 'sin declaración de insuficiencia');
     }
     const inf = evaluateMmrDrag({ competitive: { matches: 400, kd: '9.9', acs: '900', dd: '299' }, currentRank: 'Gold 2' });
@@ -1838,18 +1838,25 @@ check('honestidad: el motor marca toda salida interpretativa como hipótesis no 
     assert.ok(!/demuestra/i.test(String(favorable.rationale)), 'la justificación no debe afirmar demostración');
   });
 
-check('honestidad: docs y CLI no afirman MMR/talento/rango como hechos verificados',
+check('honestidad: matriz de superficies públicas sin lenguaje absoluto',
   () => {
-    const docs = ['README.md', 'README.es.md', 'README.en.md', 'standalone_prompt.md', 'SKILL.md'];
-    const banned = [/RANGO REAL MERECIDO/i, /Rango Merecido real/i, /True Deserved Rank/i, /Anclaje de Certeza Algorítmica Severo/i, /ha fijado el MMR interno/i];
-    const claimMarkers = [/hip[oó]tesis/i, /hypothesis/i, /no verificad/i, /unverified/i, /not validated/i];
-    for (const f of docs) {
-      const txt = fs.readFileSync(path.join(__dirname, f), 'utf8');
-      for (const b of banned) {
-        assert.ok(!b.test(txt), `${f} contiene una promesa sobreafirmada: ${b}`);
-      }
-      assert.ok(claimMarkers.some(r => r.test(txt)), `${f} debe declarar el carácter hipotético/no verificado`);
-    }
+    // Inventario de superficies públicas: docs, prompt, help renderizado y
+    // salida de diagnose. Cada LÍNEA con un rótulo absoluto debe llevar un
+    // matiz explícito; si no, la suite falla (no basta con que el documento
+    // tenga un marcador en cualquier parte).
+    const absoluteLabels = [/rango real/i, /merecido/i, /detecta mmr/i, /mmr drag/i, /true rank/i, /deserved rank/i];
+    const hedge = /hip[oó]tesis|hypothesis|no verifica|unverified|no mide|prohib|nunca|sin embargo|cota|indicative|no implica|no es un|no un|no afirma|no se |alcance|scope|l[ií]mit|no probad|compatible|indicio|señal/i;
+    const docSurfaces = ['README.md', 'README.es.md', 'README.en.md', 'SKILL.md', 'standalone_prompt.md'];
+    const offenders = [];
+    const scan = (surface, text) => {
+      text.split(/\r?\n/).forEach((line, i) => {
+        if (absoluteLabels.some(r => r.test(line)) && !hedge.test(line)) {
+          offenders.push(`${surface}:${i + 1} → ${line.trim().slice(0, 120)}`);
+        }
+      });
+    };
+    for (const f of docSurfaces) scan(f, fs.readFileSync(path.join(__dirname, f), 'utf8'));
+    scan('CLI --help', cliOk(['--help']));
     const mockFile = path.join(os.tmpdir(), `mock-claims-${process.pid}.json`);
     fs.writeFileSync(mockFile, JSON.stringify({
       platformInfo: { platformUserHandle: 'Claims#1' },
@@ -1864,15 +1871,58 @@ check('honestidad: docs y CLI no afirman MMR/talento/rango como hechos verificad
         }
       }]
     }), 'utf8');
+    let diagOut = '';
     try {
-      const diagOut = cliOk(['diagnose', mockFile, 'Claims#1']);
-      assert.ok(/NO VERIFICAD/i.test(diagOut), 'CLI diagnose debe mostrar el aviso de no verificado');
-      assert.ok(/ALCANCE/i.test(diagOut), 'CLI diagnose debe mostrar el alcance/límites');
-      assert.ok(!/RANGO REAL MERECIDO/i.test(diagOut), 'CLI no debe usar el rótulo RANGO REAL MERECIDO');
-      assert.ok(!/DETECTADO \(ANCLADO\)/i.test(diagOut), 'CLI no debe afirmar anclaje detectado');
+      diagOut = cliOk(['diagnose', mockFile, 'Claims#1']);
     } finally {
       if (fs.existsSync(mockFile)) fs.unlinkSync(mockFile);
     }
+    scan('CLI diagnose', diagOut);
+    assert.strictEqual(offenders.length, 0, `lenguaje absoluto sin matiz en superficies públicas:\n${offenders.join('\n')}`);
+    assert.ok(/NO VERIFICAD/i.test(diagOut), 'CLI diagnose debe mostrar el aviso de no verificado');
+    assert.ok(/ALCANCE/i.test(diagOut), 'CLI diagnose debe mostrar el alcance/límites');
+    assert.ok(!/DETECTADO \(ANCLADO\)/i.test(diagOut), 'CLI no debe afirmar anclaje detectado');
+  });
+
+check('honestidad: la política de evidencia no fuerza coaching ni diagnósticos (fixtures)',
+  () => {
+    const { classifyEvidence } = require(path.join(scriptsDir, 'evidence_policy.js'));
+    const fixture = f => JSON.parse(fs.readFileSync(path.join(__dirname, 'examples', f), 'utf8'));
+    const minimal = classifyEvidence(fixture('telemetry_minimal.json'));
+    assert.strictEqual(minimal.level, 'aggregate', 'solo KDA/ACS es evidencia agregada');
+    for (const s of ['round_leaks', 'aim_routine', 'duel_matrix', 'weapon_telemetry']) {
+      assert.ok(!minimal.allowedSections.includes(s), `mínimo NO debe permitir ${s}`);
+      assert.ok(minimal.forbiddenSections.includes(s), `${s} debe estar prohibido en mínimo`);
+    }
+    assert.strictEqual(minimal.maxLeaks, 0, 'sin evidencia por ronda no hay fugas');
+    assert.ok(minimal.missing.includes('eventos_por_ronda'), 'debe declarar la falta de evidencia por ronda');
+    const partial = classifyEvidence(fixture('telemetry_partial.json'));
+    assert.strictEqual(partial.level, 'aggregate', 'un marcador agregado sigue siendo evidencia agregada');
+    assert.ok(!partial.allowedSections.includes('round_leaks'), 'sin rondas no se atribuyen fugas');
+    assert.ok(!partial.allowedSections.includes('aim_routine'), 'sin evidencia mecánica no hay rutina');
+    const complete = classifyEvidence(fixture('telemetry_complete.json'));
+    assert.strictEqual(complete.level, 'complete');
+    for (const s of ['round_leaks', 'duel_matrix', 'weapon_telemetry', 'aim_routine']) {
+      assert.ok(complete.allowedSections.includes(s), `completo debe permitir ${s}`);
+    }
+    assert.strictEqual(complete.maxLeaks, 3);
+    const none = classifyEvidence({ observed: {} });
+    assert.strictEqual(none.level, 'insufficient');
+    assert.ok(!none.allowedSections.includes('aggregate_radar'), 'sin métricas no hay radar');
+    assert.ok(!none.allowedSections.includes('round_leaks'), 'sin rondas no hay fugas');
+  });
+
+check('honestidad: el prompt exige salida condicional y no fuerza conclusiones',
+  () => {
+    const prompt = fs.readFileSync(path.join(__dirname, 'standalone_prompt.md'), 'utf8');
+    assert.ok(/0 a 3/i.test(prompt), 'el prompt debe permitir 0–3 hallazgos, no forzar 3');
+    assert.ok(/evidencia por ronda/i.test(prompt), 'el prompt debe exigir evidencia por ronda para causas');
+    assert.ok(/cat[aá]logo/i.test(prompt), 'el prompt debe restringir escenarios al catálogo disponible');
+    assert.ok(/NIVEL DE EVIDENCIA/i.test(prompt) && /insufficient/i.test(prompt) && /aggregate/i.test(prompt) && /complete/i.test(prompt),
+      'el prompt debe clasificar el nivel de evidencia con la política compartida');
+    assert.ok(!/TOP 3 FUGAS CR[ÍI]TICAS/i.test(prompt), 'no debe forzar siempre 3 fugas');
+    assert.ok(!/15 MINUTOS EXACTOS/i.test(prompt), 'no debe forzar siempre la rutina de 15 minutos');
+    assert.ok(/evidence_policy\.js/.test(prompt), 'el prompt debe referenciar la política de evidencia compartida');
   });
 
 check('honestidad: los hitos de carrera se declaran escenario ilustrativo (no predicción)',

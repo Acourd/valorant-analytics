@@ -250,7 +250,7 @@ if (!command || command === '--help' || command === '-h') {
   console.log(`  node cli.js calibrate [jugador] [rango] [rol]     ➔ Calibración Instantánea Zero-Cloud`);
   console.log(`  node cli.js harvest [jugador]                     ➔ Cosecha de Partidas desde Caché Local`);
   console.log(`  node cli.js career <perfil_json|handle>           ➔ Auditoría de Horas y Trayectoria`);
-  console.log(`  node cli.js diagnose <perfil_json|handle>         ➔ Diagnóstico de Rango Real y MMR Drag`);
+  console.log(`  node cli.js diagnose <perfil_json|handle>         ➜ Señal heurística de MMR y estimación de rango (hipótesis no verificada)`);
   console.log(`  node cli.js parse <texto_o_archivo> [jugador]     ➔ Ingesta Universal Resiliente (Anti-WAF)`);
   console.log(`  node cli.js invariants <partida_o_id> [jugador]   ➔ Verificación Formal de Invariantes`);
   console.log(`  node cli.js attest <partida_o_id> [jugador]       ➔ Sobre DSSE in-toto firmado con Ed25519`);

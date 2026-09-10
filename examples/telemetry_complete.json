@@ -1,0 +1,25 @@
+{
+  "source": "match_full",
+  "description": "Nivel completo: evidencia por ronda, duelos y zonas de daño (habilita fugas, matriz 1v1 y rutina).",
+  "map": "Ascent",
+  "mode": "competitive",
+  "agent": "Iso",
+  "observed": {
+    "kda": "24/12/4",
+    "kd": 2.0,
+    "acs": 347,
+    "hs": 29.9,
+    "fk": 4,
+    "fd": 1
+  },
+  "rounds": [
+    { "n": 7, "side": "attack", "event": "post_plant_5v3", "detail": "Sobre-asomo buscando la baja final con ventaja numérica." },
+    { "n": 11, "side": "defense", "event": "long_range_burst", "detail": "Ráfaga prolongada a >30m contra Vandal." },
+    { "n": 14, "side": "attack", "event": "post_plant_5v3", "detail": "Repetición del patrón de la ronda 7." }
+  ],
+  "duels": [
+    { "opponent": "rival_1#LATAM", "agent": "Jett", "kills": 3, "deaths": 1 },
+    { "opponent": "rival_2#LAN", "agent": "Sova", "kills": 2, "deaths": 0 }
+  ],
+  "weaponZones": { "head": 30, "body": 60, "leg": 10 }
+}
