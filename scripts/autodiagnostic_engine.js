@@ -92,8 +92,13 @@ function evaluateMmrDrag(accountTelemetry) {
 
   const mmrDragDetected = isAgedAccount && hasHighCombatImpact && isRankConstrained;
   const severityScore = isAgedAccount ? Math.min(100, Math.round((matches / 600) * 80 + (dd !== null && dd > 25 ? 20 : 10))) : 20;
-  const decisiveSignals = [kd !== null && kd > 0.6, acs !== null && acs > 200, dd !== null && dd > 0].filter(Boolean).length;
-  const calibratedConfidence = (matches >= 300 && decisiveSignals >= 2) ? 'alta' : ((matches >= 50 && decisiveSignals >= 1) ? 'media' : 'baja');
+  // Señales decisivas CON MARGEN CONCLUYENTE (KD>0.75, ACS>250, DDΔ>15): un
+  // epsilon sobre el umbral de validez no es evidencia conclusiva. Además,
+  // una métrica en el extremo contrario de su dominio (DDΔ cerca del piso)
+  // es evidencia contraria que impide confianza ALTA en "Varianza Normal".
+  const decisiveSignals = [kd !== null && kd > 0.75, acs !== null && acs > 250, dd !== null && dd > 15].filter(Boolean).length;
+  const hasContraryExtreme = dd !== null && dd <= -200;
+  const calibratedConfidence = (matches >= 300 && decisiveSignals >= 2 && !hasContraryExtreme) ? 'alta' : ((matches >= 50 && decisiveSignals >= 1) ? 'media' : 'baja');
   if (decisiveSignals < 2) {
     return {
       mmrDragDetected: false,
@@ -101,7 +106,7 @@ function evaluateMmrDrag(accountTelemetry) {
       matchesEvaluated: matches,
       sampleSize: matches,
       confidence: 'baja',
-      formula: 'MMR-drag requiere ≥2 señales decisivas (KD≥0.6, ACS≥200, DD≥0); bajo ese umbral solo se describe lo observado',
+      formula: 'MMR-drag exige ≥2 señales decisivas CON MARGEN (KD>0.75, ACS>250, DDΔ>15); en frontera exacta, igual o apenas-sobre-umbral solo se describe lo observado',
       diagnosis: 'EVIDENCIA LÍMITE: métricas presentes pero sin fuerza decisiva; no se afirma ni descarta anclaje de MMR.'
     };
   }
@@ -115,7 +120,9 @@ function evaluateMmrDrag(accountTelemetry) {
     formula: 'MMR-drag requiere matches>=300 con impacto (KD≥1.15 o ACS≥230 o DDΔ≥20) y rango contenido (Gold/Silver)',
     diagnosis: mmrDragDetected
       ? 'Anclaje de Certeza Algorítmica Severo: El sistema de Riot posee baja varianza para esta cuenta y frena las ganancias de RR a pesar de que los indicadores individuales (ACS/DDΔ/KD) corresponden a un elo superior.'
-      : 'Varianza Normal: La cuenta responde adecuadamente a las fluctuaciones de rendimiento sin penalización excesiva por volumen histórico.'
+      : (hasContraryExtreme
+        ? 'Varianza Indeterminada: las señales decisivas conviven con una métrica en el extremo contrario de su dominio (DDΔ muy negativo); la confianza queda acotada y no se afirma normalidad de varianza.'
+        : 'Varianza Normal: La cuenta responde adecuadamente a las fluctuaciones de rendimiento sin penalización excesiva por volumen histórico.')
   };
 }
 
@@ -127,22 +134,34 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
     throw new Error('evaluateTalentVsEffort requiere careerReport.summary.totalGeneral. Resumen ausente.');
   }
   const zeroFpsBackground = options.zeroFpsBackground !== false; // default true based on user profile
-  const seenAccounts = new Set();
-  const seenHandles = new Set();
+  // Identidad estable por ID de cuenta (handle normalizado): trim + minúsculas
+  // + NFC. Variantes Unicode canónicamente equivalentes son LA MISMA cuenta.
+  // El primer snapshot de cada handle gana; los snapshots cambiantes jamás
+  // inflan la muestra y los registros sin ID jamás participan en agregación
+  // que soporte confianza.
+  const seenHandles = new Map();
   let duplicatesSkipped = 0;
+  let conflictingSnapshots = 0;
+  let unidentifiedRecords = 0;
   let identityUncertain = false;
   const personal = careerReport.accounts.filter(a => {
     if (a.isExcluded) return false;
-    const handleKey = String(a.handle || '').trim().toLowerCase();
+    const handleKey = String(a.handle || '').trim().toLowerCase().normalize('NFC');
     if (!handleKey) {
+      // Sin ID de cuenta no hay identidad: excluido de toda agregación.
       identityUncertain = true;
-      return true;
+      unidentifiedRecords++;
+      return false;
     }
-    const key = JSON.stringify([handleKey, stableEncode(a.competitive || null), String(a.peakRank || '')]);
-    if (seenAccounts.has(key)) { duplicatesSkipped++; return false; }
-    if (seenHandles.has(handleKey)) identityUncertain = true;
-    seenHandles.add(handleKey);
-    seenAccounts.add(key);
+    const snapKey = `${stableEncode(a.competitive || null)}@${stableEncode(String(a.peakRank || ''))}`;
+    const known = seenHandles.get(handleKey);
+    if (known !== undefined) {
+      if (known === snapKey) { duplicatesSkipped++; return false; }
+      identityUncertain = true;
+      conflictingSnapshots++;
+      return false;
+    }
+    seenHandles.set(handleKey, snapKey);
     return true;
   });
   
@@ -205,6 +224,10 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
       sampleSize: 0,
       confidence: 'nula',
       formula: 'Clasificación por ACS/KD/DDΔ ponderados por partidas y horas totales; requiere ≥1 partida registrada',
+      duplicatesSkipped,
+      identityUncertain,
+      conflictingSnapshots,
+      unidentifiedRecords,
       telemetrySummary: {
         averageKd: null,
         averageAcs: null,
@@ -228,6 +251,10 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
       confidence: 'nula',
       formula: 'Clasificación requiere kd[0,10], acs[0,1000], dd[-300,300] y hs[0,100] observados con parseo estricto; faltan: ' + missingMetrics.join(', '),
       metricsPresent,
+      duplicatesSkipped,
+      identityUncertain,
+      conflictingSnapshots,
+      unidentifiedRecords,
       telemetrySummary: {
         averageKd: avgKd,
         averageAcs: avgAcs,
@@ -241,8 +268,12 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
     };
   }
 
-  const strongMetrics = [avgKd !== null && avgKd > 0.6, avgAcs !== null && avgAcs > 150, avgHs !== null && avgHs > 10].filter(Boolean).length;
-  const hasMeaningfulImpact = jointMatches >= 5 && strongMetrics >= 2;
+  // Umbrales CONCLUYENTES: una conclusión favorable exige evidencia claramente
+  // por encima del piso de validez, no un epsilon sobre el umbral. KD>0.9,
+  // ACS>225 y HS>15 con ≥2 señales; en frontera exacta, igual o apenas-sobre,
+  // solo se describe lo observado (sin conclusión específica sin evidencia).
+  const conclusiveSignals = [avgKd !== null && avgKd > 0.9, avgAcs !== null && avgAcs > 225, avgHs !== null && avgHs > 15].filter(Boolean).length;
+  const hasMeaningfulImpact = jointMatches >= 5 && conclusiveSignals >= 2;
   if (!hasMeaningfulImpact) {
     const observed = [`KD ${avgKd === null ? 'n/d' : avgKd}`, `ACS ${avgAcs === null ? 'n/d' : avgAcs}`, `DDΔ ${avgDd === null ? 'n/d' : avgDd}`, `HS ${avgHs === null ? 'n/d' : avgHs + '%'}`].join(', ');
     return {
@@ -252,10 +283,13 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
       trueDeservedRank: 'Indeterminado (evidencia límite)',
       sampleSize: jointMatches,
       confidence: 'baja',
-      formula: 'Clasificación favorable requiere ≥5 partidas CONJUNTAS y ≥2 métricas decisivas (KD>0.6, ACS>150, HS>10); bajo ese umbral solo se describe lo observado',
+      formula: 'Clasificación favorable exige evidencia CONCLUYENTE (≥2 de KD>0.9, ACS>225, HS>15) sobre ≥5 partidas CONJUNTAS; en pisos de validez (KD>0.3, ACS>100, DD>-300) o apenas-sobre-umbral solo se describe lo observado',
       metricsPresent,
       jointMatches,
       duplicatesSkipped,
+      identityUncertain,
+      conflictingSnapshots,
+      unidentifiedRecords,
       telemetrySummary: {
         averageKd: avgKd,
         averageAcs: avgAcs,
@@ -317,6 +351,8 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
     jointMatches,
     duplicatesSkipped,
     identityUncertain,
+    conflictingSnapshots,
+    unidentifiedRecords,
     telemetrySummary: {
       averageKd: avgKd,
       averageAcs: avgAcs,

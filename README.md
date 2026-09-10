@@ -7,7 +7,7 @@
 [![Versión](https://img.shields.io/badge/versión-4.5_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
 [![Runtime](https://img.shields.io/badge/runtime-Node.js_18%2B_Nativo-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Dependencias](https://img.shields.io/badge/dependencias-0_npm_(Core)-38BDF8.svg?style=for-the-badge&logo=codeforces&logoColor=white)](package.json)
-[![Pruebas](https://img.shields.io/badge/tests-93%2F93_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
+[![Pruebas](https://img.shields.io/badge/tests-96%2F96_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
 [![Auditoría](https://img.shields.io/badge/auditoría-100%2F100_Verificado-8B5CF6.svg?style=for-the-badge&logo=codereview&logoColor=white)](opencode_tester.js)
 [![Licencia](https://img.shields.io/badge/licencia-MIT-6B7280.svg?style=for-the-badge)](LICENSE)
 
@@ -89,7 +89,7 @@ Diseñado para adaptarse a cualquier flujo de trabajo sin fricciones:
 3. Pega el enlace de Tracker.gg, el texto de tu marcador o una captura de pantalla para recibir el reporte 360° instantáneo.
 
 ### ⚡ Opción 2: Modo Local en Terminal (Despachador Maestro `cli.js`)
-> **Ideal para jugadores competitivos que buscan velocidad (<100ms), privacidad total y funcionamiento sin red.**
+> **Ideal para jugadores competitivos que buscan velocidad (<100ms), privacidad total y análisis 100% local. El análisis de archivos y scoreboards locales es íntegramente offline; los comandos `fetch_profile` / `fetch_match` y las URLs remotas son la única superficie de red (ver Privacidad).**
 
 ```bash
 # 1. Clona el repositorio
@@ -202,7 +202,7 @@ Si utilizas **Google Gemini (Gems)** o **OpenAI (Custom GPTs)**, el archivo [`st
 - **Red solo bajo demanda explícita:** los comandos `fetch_profile` / `fetch_match` (y URLs remotas en `match`) consultan la API pública de Tracker.gg con reintento y backoff; todo lo demás (JSON local, scoreboards, caché) es 100% offline. Un perfil privado devuelve error instructivo, jamás datos inventados.
 - **Zero Dependencias NPM:** Diseñado exclusivamente sobre las librerías estándar de Node.js (`fs`, `path`, `zlib`, `crypto`, `child_process`). Cero descargas externas.
 - **Compatibilidad Multiplataforma:** Probado y garantizado en Windows 11 (PowerShell/CMD), macOS (zsh) y Linux (bash).
-- **Garantía Determinista:** 93 pruebas automatizadas verificadas con Exit Code 0 (`node test_suite.js`) y puntuación perfecta de 100/100 en auditorías de código agéntico (`node opencode_tester.js`).
+- **Garantía Determinista:** 96 pruebas automatizadas verificadas con Exit Code 0 (`node test_suite.js`) y puntuación perfecta de 100/100 en auditorías de código agéntico (`node opencode_tester.js`).
 
 ---
 

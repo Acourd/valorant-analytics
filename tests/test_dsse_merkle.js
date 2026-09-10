@@ -35,8 +35,8 @@ assert(Array.isArray(envelope.signatures) && envelope.signatures.length > 0);
 
 const os = require('os');
 const fs = require('fs');
-const ksPath = path.join(os.tmpdir(), 'dsse-test-keystore.json');
-try { fs.unlinkSync(ksPath); } catch (e) { /* continuar */ }
+const ksDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-merkle-'));
+const ksPath = path.join(ksDir, 'keystore.json');
 registerTrustedKey(ksPath, envelope.publicKeyPem, 'test-local');
 const trusted = loadOrCreateKeystore(ksPath).keys;
 
@@ -55,7 +55,7 @@ assert.ok(foreignRes.error.includes('no es confiable') || foreignRes.error.inclu
 registerTrustedKey(ksPath, foreignEnvelope.publicKeyPem, 'test-rotated');
 const rotated = verifyTelemetryAttestation(foreignEnvelope, null, { trustedKeystore: loadOrCreateKeystore(ksPath).keys });
 assert.strictEqual(rotated.verified, true, 'Clave rotada registrada debe verificar');
-try { fs.unlinkSync(ksPath); } catch (e) { /* continuar */ }
+try { fs.rmSync(ksDir, { recursive: true, force: true }); } catch (e) { /* continuar */ }
 
 // 2. Tamper resistance
 const tamperedEnvelope = JSON.parse(JSON.stringify(envelope));

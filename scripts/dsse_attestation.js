@@ -158,62 +158,43 @@ function verifyWithPem(envelope, pem) {
 }
 
 /**
- * AlmacÃ©n externo de claves confiables (formato: { "keys": [{ keyid, publicKeyPem, label, created }] }).
- * La verificaciÃ³n segura EXIGE que el firmante estÃ© registrado aquÃ­.
+ * Almacén externo de claves confiables (formato: { keys: [...], generation: N }).
+ * La verificación segura EXIGE que el firmante esté registrado aquí.
+ *
+ * PROTOCOLO DE PUBLICACIÓN POR GENERACIONES (commit-record, sin locks):
+ *
+ * Reemplaza el diseño anterior de lock de exclusión mutua + fencing
+ * check-then-rename, cuya validación e instalación podían separarse (TOCTOU).
+ * Aquí la instalación de cada generación es UNA SOLA operación atómica: la
+ * creación exclusiva (wx) del marcador de commit. Validar e instalar no
+ * pueden separarse porque son la misma operación.
+ *
+ * Archivos junto a keystorePath (K):
+ *   K.g<N>.<nonce> : contenido inmutable de la generación N. Se crea con wx
+ *                    y se sincroniza (fsync) ANTES de tocar ningún marcador.
+ *   K.commit.<N>    : marcador de la generación N = verdad canónica. Se crea
+ *                    con wx (contenido pid:tid:nonce) y NUNCA se elimina: la
+ *                    numeración es estrictamente monótona para siempre, entre
+ *                    procesos e hilos, sin relojes ni mtime.
+ *   K               : keystore legado del formato anterior (single-file).
+ *                    Solo lectura; se elimina tras la primera publicación.
+ *
+ * Propiedades:
+ *   - Sin TOCTOU: quien gana el marcador publica; quien pierde (EEXIST)
+ *     relee el estado del ganador y reintenta re-aplicando su mutación.
+ *     Las mutaciones son conmutativas/idempotentes, por lo que el estado
+ *     converge conteniendo todos los commits ganados (sin lost-update).
+ *   - Sin relojes: ninguna decisión depende de Date.now() ni de mtime; los
+ *     saltos de reloj y mtimes arbitrarios no alteran el protocolo.
+ *   - Hilos/workers terminados: dejan a lo sumo contenido huérfano SIN
+ *     marcador: estado inerte que no bloquea a nadie ni requiere reinicio.
+ *   - Durabilidad ordenada: contenido completo y sincronizado antes del
+ *     marcador; un marcador legítimo siempre referencia contenido íntegro.
+ *   - Fail-closed: marcador ilegible con candidatos ambiguos, contenido
+ *     ausente o generación inconsistente abortan con estado intacto.
  */
-function loadOrCreateKeystore(keystorePath) {
-  try {
-    const raw = fs.readFileSync(keystorePath, 'utf8');
-    const parsed = JSON.parse(raw);
-    if (parsed && Array.isArray(parsed.keys)) return parsed;
-  } catch (e) { /* crear nuevo */ }
-  return { keys: [] };
-}
 
-function writeKeystoreAtomic(keystorePath, keystore, fence) {
-  try {
-    const lst = fs.lstatSync(keystorePath);
-    if (lst.isSymbolicLink()) {
-      throw new Error(`El keystore es un enlace simbólico. Nunca se instala sobre un symlink.`);
-    }
-  } catch (e) {
-    if (e.code !== 'ENOENT') throw e;
-  }
-  const nonce = crypto.randomBytes(8).toString('hex');
-  const tmp = `${keystorePath}.tmp-${process.pid}-${nonce}`;
-  let fd = null;
-  try {
-    fd = fs.openSync(tmp, 'wx', 0o600);
-    fs.writeFileSync(fd, JSON.stringify(keystore, null, 2));
-    fs.fsyncSync(fd);
-    fs.closeSync(fd);
-    fd = null;
-    try { fs.chmodSync(tmp, 0o600); } catch (e) { /* Windows: mejor esfuerzo */ }
-    if (fence && fence.lockPath && typeof fence.owner === 'string') {
-      let cur = null;
-      try { cur = fs.readFileSync(fence.lockPath, 'utf8'); } catch (_) {}
-      if (cur !== fence.owner) {
-        try { fs.unlinkSync(tmp); } catch (_) {}
-        throw new Error('Fencing: lock perdido antes del commit; se aborta la escritura sin tocar el destino.');
-      }
-    }
-    fs.renameSync(tmp, keystorePath);
-    try {
-      const dirFd = fs.openSync(path.dirname(keystorePath), 'r');
-      try { fs.fsyncSync(dirFd); } finally { try { fs.closeSync(dirFd); } catch (e) {} }
-    } catch (e) { /* filesystems sin fsync de directorio */ }
-  } catch (e) {
-    if (fd !== null) { try { fs.closeSync(fd); } catch (_) {} }
-    try { fs.unlinkSync(tmp); } catch (_) {}
-    throw new Error(`No se pudo instalar el keystore (${e.message}). Estado anterior intacto.`);
-  }
-}
-
-function saveKeystore(keystorePath, keystore) {
-  fs.mkdirSync(path.dirname(keystorePath), { recursive: true });
-  const lockPath = `${keystorePath}.lock`;
-  return withFileLock(lockPath, (owner) => writeKeystoreAtomic(keystorePath, keystore, { lockPath, owner }));
-}
+const MARKER_RE = /^(\d+):([A-Za-z0-9_-]+):([0-9a-f]+)$/;
 
 function currentThreadId() {
   try {
@@ -223,141 +204,183 @@ function currentThreadId() {
   return 'm';
 }
 
-// Inicio del proceso (ms epoch) para la prueba de nacimiento: un lock con
-// mtime anterior al arranque de ESTE proceso no pudo crearlo ningún hilo vivo
-// nuestro. Margen de 1s por skew de reloj.
-function processStartMs() {
-  return Date.now() - Math.floor(process.uptime() * 1000);
+function listKeystoreGenerationFiles(keystorePath) {
+  const dir = path.dirname(keystorePath);
+  const base = path.basename(keystorePath);
+  const markers = [];
+  const contents = new Map();
+  let entries;
+  try { entries = fs.readdirSync(dir); } catch (e) { return { markers, contents }; }
+  for (const name of entries) {
+    if (!name.startsWith(base + '.')) continue;
+    const rest = name.slice(base.length + 1);
+    let m = rest.match(/^commit\.(\d+)$/);
+    if (m) { markers.push(parseInt(m[1], 10)); continue; }
+    m = rest.match(/^g(\d+)\.([0-9a-f]+)$/);
+    if (m) {
+      const g = parseInt(m[1], 10);
+      if (!contents.has(g)) contents.set(g, []);
+      contents.get(g).push(m[2]);
+    }
+  }
+  return { markers, contents };
 }
 
-// Reentrancia serial por hilo/isolate: si ESTE hilo ya posee el lock (marco
-// exterior), un marco interior lo adopta sin tocar el archivo. Serial = seguro.
-// Otros hilos tienen su propio mapa (isolates separados) y jamás adoptan.
-const activeLocks = new Map();
+function readLegacyKeystore(keystorePath) {
+  let st;
+  try { st = fs.lstatSync(keystorePath); }
+  catch (e) { return null; } // sin estado previo: keystore nuevo
+  if (st.isSymbolicLink()) {
+    throw new Error(`El keystore es un enlace simbólico (${keystorePath}): elimínalo manualmente. Nunca se escribe ni se sigue un symlink.`);
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(keystorePath, 'utf8'));
+    if (parsed && Array.isArray(parsed.keys)) return { keystore: parsed, generation: 0 };
+  } catch (e) { /* ilegible: fail-closed abajo */ }
+  throw new Error(`El keystore legado (${keystorePath}) existe pero es ilegible: inspecciónalo manualmente (fail-closed; jamás se sobrescribe estado potencialmente recuperable).`);
+}
 
-function withFileLock(lockPath, fn, options = {}) {
-  const retries = options.retries || 100;
-  const waitMs = options.waitMs || 50;
-  // Política de recuperación documentada (liveness-only, sin TTL):
-  // - Proceso distinto: solo se recupera ante muerte probada (kill ESRCH).
-  // - Mismo proceso: solo ante lock anterior al nacimiento propio (mtime).
-  // - Nunca se desaloja por tiempo transcurrido: un holder vivo, aunque
-  //   exceda cualquier TTL, jamás pierde el lock. Falla controlada en su lugar.
-  const transient = new Set(['EEXIST', 'EPERM', 'EACCES', 'EBUSY']);
-  const owner = `${process.pid}:${currentThreadId()}:${Date.now()}:${crypto.randomBytes(4).toString('hex')}`;
-  const inspectLock = () => {
-    let st;
-    try {
-      st = fs.lstatSync(lockPath);
-    } catch (e) {
-      return e.code === 'ENOENT' ? { state: 'missing' } : { state: 'unreadable' };
-    }
-    if (st.isSymbolicLink()) return { state: 'suspicious', reason: 'symlink' };
-    let raw = '';
-    try { raw = fs.readFileSync(lockPath, 'utf8'); } catch (e) { return { state: 'unreadable' }; }
-    const m = raw.trim().match(/^(\d+):([A-Za-z0-9_-]+):(\d+):([0-9a-f]+)$/);
-    if (!m) return { state: 'malformed', mtimeMs: st.mtimeMs };
-    const ownerPid = parseInt(m[1], 10);
-    const ownerTid = m[2];
-    const ownerStamp = parseInt(m[3], 10);
-    let alive = null;
-    try { process.kill(ownerPid, 0); alive = true; }
-    catch (e) { alive = e.code === 'ESRCH' ? false : null; }
-    return { state: 'held', pid: ownerPid, tid: ownerTid, stamp: ownerStamp, alive, mtimeMs: st.mtimeMs };
-  };
-  let acquired = false;
-  let adoptedOwner = null;
-  for (let i = 0; i < retries; i++) {
-    try {
-      // Creación atómica CON contenido: jamás existe un lock vacío observable.
-      fs.writeFileSync(lockPath, owner, { flag: 'wx', mode: 0o600 });
-      const back = fs.readFileSync(lockPath, 'utf8');
-      if (back !== owner) {
-        throw new Error('contención: el lock cambió durante la adquisición');
-      }
-      acquired = true;
-      break;
-    } catch (e) {
-      if (e.code !== undefined && !transient.has(e.code)) throw e;
-      if (/contención/.test(e.message)) { execSleep(waitMs); continue; }
-      const info = inspectLock();
-      if (info.state === 'missing') continue;
-      if (info.state === 'held') {
-        let cur = null;
-        try { cur = fs.readFileSync(lockPath, 'utf8'); } catch (_) {}
-        if (cur === owner) { acquired = true; break; }
-        if (activeLocks.has(lockPath)) {
-          // Reentrancia del MISMO hilo: el marco exterior (serial, sin
-          // concurrencia real) conserva la propiedad. Se adopta su token
-          // para fencing; el marco exterior conserva la limpieza.
-          adoptedOwner = activeLocks.get(lockPath);
-          acquired = true;
-          break;
-        }
-        if (info.pid === process.pid) {
-          // Mismo proceso, OTRO hilo/worker (o hilo muerto): la identidad es el
-          // TOKEN COMPLETO, jamás el PID solo. Un holder vivo JAMÁS se desaloja
-          // por mtime (ni siquiera con TTL corto): la única recuperación segura
-          // es un lock anterior al nacimiento de ESTE proceso, prueba concluyente
-          // de abandono (ningún hilo vivo nuestro pudo crearlo).
-          try {
-            const st = fs.lstatSync(lockPath);
-            if (st.mtimeMs < processStartMs() - 1000) {
-              try { fs.unlinkSync(lockPath); } catch (_) {}
-              continue;
-            }
-          } catch (_) {}
-          execSleep(waitMs);
-          continue;
-        }
-        if (info.alive === false) {
-          try { fs.unlinkSync(lockPath); } catch (_) {}
-          continue;
-        }
-        execSleep(waitMs);
-        continue;
-      }
-      // Malformed/suspicious/unreadable: recuperar solo por mtime del kernel,
-      // nunca por contenido. Ningún holder legítimo crea symlinks ni contenido
-      // malformado (creación atómica con contenido), así que lo anómalo más
-      // antiguo que la quiescencia es residuo o sabotaje inerte: se elimina.
-      const quiesceLimit = options.quiesceMs || 2000;
-      try {
-        const st = fs.lstatSync(lockPath);
-        if ((Date.now() - st.mtimeMs) > quiesceLimit) {
-          try { fs.unlinkSync(lockPath); } catch (_) {}
-          continue;
-        }
-      } catch (_) {}
-      execSleep(waitMs);
-    }
-  }
-  if (!acquired) {
-    throw new Error(`No se pudo adquirir el lock ${lockPath} tras ${retries} intentos.`);
-  }
-  const effectiveOwner = adoptedOwner || owner;
-  if (!adoptedOwner) activeLocks.set(lockPath, owner);
-  // Verificación de propiedad antes de entrar a la sección crítica (fencing).
+function readGenerationContent(keystorePath, gen, nonce) {
+  const contentPath = `${keystorePath}.g${gen}.${nonce}`;
+  let parsed;
   try {
-    if (fs.readFileSync(lockPath, 'utf8') !== effectiveOwner) {
-      if (!adoptedOwner) activeLocks.delete(lockPath);
-      throw new Error(`Lock perdido antes de entrar a sección crítica (${lockPath}).`);
-    }
+    parsed = JSON.parse(fs.readFileSync(contentPath, 'utf8'));
   } catch (e) {
-    if (/Lock perdido/.test(e.message)) throw e;
-    if (!adoptedOwner) activeLocks.delete(lockPath);
-    throw new Error(`No se pudo verificar propiedad del lock ${lockPath}.`);
+    throw new Error(`Contenido de la generación ${gen} ausente o ilegible (${contentPath}) pese a existir su marcador: posible sabotaje o corrupción de disco (fail-closed).`);
   }
-  try {
-    return fn(effectiveOwner);
-  } finally {
-    if (!adoptedOwner) {
-      activeLocks.delete(lockPath);
-      try {
-        if (fs.readFileSync(lockPath, 'utf8') === effectiveOwner) fs.unlinkSync(lockPath);
-      } catch (e) { /* otro dueño o ya liberado */ }
+  if (!parsed || !Array.isArray(parsed.keys)) {
+    throw new Error(`Contenido de la generación ${gen} sin estructura válida { keys: [] } (${contentPath}): fail-closed.`);
+  }
+  if (parsed.generation !== gen) {
+    throw new Error(`La generación del contenido (${parsed.generation}) no coincide con su marcador (${gen}): posible mezcla de estados (fail-closed).`);
+  }
+  return parsed;
+}
+
+function adoptOrphanGeneration(keystorePath, gen, nonces) {
+  if (nonces.length === 1) {
+    // Recuperación documentada: el único candidato fue escrito y sincronizado
+    // completo antes de un marcador que quedó ilegible (caída a mitad de una
+    // escritura de ~30 bytes). Se adopta como verdad de esa generación.
+    return { keystore: readGenerationContent(keystorePath, gen, nonces[0]), generation: gen };
+  }
+  throw new Error(`Marcador de commit de la generación ${gen} ilegible con ${nonces.length} candidatos de contenido (${keystorePath}): inspecciónalo y elimina manualmente el marcador defectuoso (fail-closed; el estado de la generación anterior permanece intacto).`);
+}
+
+function readCommittedKeystore(keystorePath) {
+  for (let probe = 0; probe < 5; probe++) {
+    const { markers, contents } = listKeystoreGenerationFiles(keystorePath);
+    if (markers.length === 0) return readLegacyKeystore(keystorePath);
+    const gen = Math.max(...markers);
+    const markerPath = `${keystorePath}.commit.${gen}`;
+    let raw = null;
+    try { raw = fs.readFileSync(markerPath, 'utf8'); }
+    catch (e) { execSleep(20); continue; } // desapareció entre readdir y read: reintentar
+    const m = raw.trim().match(MARKER_RE);
+    if (!m) {
+      // Escritura parcial (caída) o sabotaje: reintentar antes de concluir.
+      if (probe < 4) { execSleep(20); continue; }
+      return adoptOrphanGeneration(keystorePath, gen, contents.get(gen) || []);
+    }
+    return { keystore: readGenerationContent(keystorePath, gen, m[3]), generation: gen };
+  }
+  throw new Error(`No se pudo leer el estado del keystore (${keystorePath}) de forma consistente tras 5 intentos.`);
+}
+
+function loadOrCreateKeystore(keystorePath) {
+  const state = readCommittedKeystore(keystorePath);
+  return state ? state.keystore : { keys: [] };
+}
+
+function gcSupersededContent(keystorePath, currentGen) {
+  // Solo contenido de generaciones ESTRICTAMENTE anteriores: sus marcadores
+  // existen (jamás se eliminan), así que nadie puede reinstalarlas y ningún
+  // escritor vivo puede estar a punto de ganarlas.
+  const dir = path.dirname(keystorePath);
+  const base = path.basename(keystorePath);
+  let entries;
+  try { entries = fs.readdirSync(dir); } catch (e) { return; }
+  for (const name of entries) {
+    if (!name.startsWith(base + '.')) continue;
+    const m = name.slice(base.length + 1).match(/^g(\d+)\.[0-9a-f]+$/);
+    if (!m) continue;
+    if (parseInt(m[1], 10) < currentGen) {
+      try { fs.unlinkSync(path.join(dir, name)); } catch (e) { /* mejor esfuerzo */ }
     }
   }
+}
+
+function commitKeystore(keystorePath, mutate, options = {}) {
+  const maxAttempts = options.maxAttempts || 50;
+  const waitMs = options.waitMs || 25;
+  if (typeof mutate !== 'function') throw new Error('commitKeystore requiere una función de mutación (current => candidate).');
+  fs.mkdirSync(path.dirname(keystorePath), { recursive: true });
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const state = readCommittedKeystore(keystorePath);
+    const base = state ? state.keystore : { keys: [] };
+    const baseGen = state ? state.generation : 0;
+    const candidate = mutate(structuredClone(base));
+    if (candidate === null || candidate === undefined) return base; // no-op explícito (idempotencia)
+    if (!candidate || !Array.isArray(candidate.keys)) {
+      throw new Error(`La mutación del keystore debe producir { keys: [] }; recibido: ${typeof candidate}`);
+    }
+    const nextGen = baseGen + 1;
+    const nonce = crypto.randomBytes(8).toString('hex');
+    candidate.generation = nextGen;
+    candidate.writer = `${process.pid}:${currentThreadId()}:${nonce}`;
+    const contentPath = `${keystorePath}.g${nextGen}.${nonce}`;
+    const markerPath = `${keystorePath}.commit.${nextGen}`;
+    // 1) Contenido durable ANTES del marcador (wx: creación y contenido son
+    //    una sola operación; jamás se sigue un symlink preexistente).
+    let fd = fs.openSync(contentPath, 'wx', 0o600);
+    try {
+      fs.writeFileSync(fd, JSON.stringify(candidate, null, 2));
+      fs.fsyncSync(fd);
+    } finally {
+      try { fs.closeSync(fd); } catch (e) {}
+    }
+    try { fs.chmodSync(contentPath, 0o600); } catch (e) { /* Windows: mejor esfuerzo */ }
+    // 2) Marcador: LA operación atómica de validación+instalación.
+    let committed = false;
+    try {
+      const mfd = fs.openSync(markerPath, 'wx', 0o600);
+      try {
+        fs.writeFileSync(mfd, `${process.pid}:${currentThreadId()}:${nonce}`);
+        fs.fsyncSync(mfd);
+      } finally {
+        try { fs.closeSync(mfd); } catch (e) {}
+      }
+      committed = true;
+    } catch (e) {
+      if (e.code !== 'EEXIST') {
+        try { fs.unlinkSync(contentPath); } catch (_) {}
+        throw new Error(`No se pudo publicar la generación ${nextGen} del keystore (${e.message}). Estado anterior intacto.`);
+      }
+      // Perdimos esta generación: el contenido del ganador (ya durable) es
+      // la nueva base. Se retira el huérfano propio y se reintenta
+      // re-aplicando la mutación sobre el estado ganador.
+      try { fs.unlinkSync(contentPath); } catch (_) {}
+      execSleep(waitMs);
+      continue;
+    }
+    // 3) Durabilidad del directorio y recolección de contenido superseded.
+    try {
+      const dirFd = fs.openSync(path.dirname(keystorePath), 'r');
+      try { fs.fsyncSync(dirFd); } finally { try { fs.closeSync(dirFd); } catch (e) {} }
+    } catch (e) { /* filesystems sin fsync de directorio */ }
+    gcSupersededContent(keystorePath, nextGen);
+    // El formato legado queda obsoleto: los marcadores son la única verdad.
+    try {
+      if (fs.lstatSync(keystorePath).isFile()) fs.unlinkSync(keystorePath);
+    } catch (e) { /* ya ausente: los marcadores mandan */ }
+    return candidate;
+  }
+  throw new Error(`No se pudo publicar el keystore tras ${maxAttempts} generaciones (contención persistente). Estado anterior intacto.`);
+}
+
+function saveKeystore(keystorePath, keystore) {
+  if (!keystore || !Array.isArray(keystore.keys)) throw new Error('saveKeystore requiere un keystore { keys: [] }.');
+  return commitKeystore(keystorePath, () => structuredClone(keystore));
 }
 
 function execSleep(ms) {
@@ -366,24 +389,13 @@ function execSleep(ms) {
 }
 
 function registerTrustedKey(keystorePath, publicKeyPem, label) {
-  const lockPath = `${keystorePath}.lock`;
-  return withFileLock(lockPath, (owner) => {
-    try {
-      const lst = fs.lstatSync(keystorePath);
-      if (lst.isSymbolicLink()) {
-        throw new Error(`El keystore es un enlace simbólico (${keystorePath}): elimínalo manualmente. Nunca se instala sobre un symlink.`);
-      }
-    } catch (e) {
-      if (e.code !== 'ENOENT') throw e;
-    }
-    const ks = loadOrCreateKeystore(keystorePath);
-    const keyid = crypto.createHash('sha256').update(publicKeyPem).digest('hex').slice(0, 16);
-    if (!ks.keys.some(k => k.keyid === keyid)) {
-      ks.keys.push({ keyid, publicKeyPem, label: label || 'sin etiqueta', created: new Date().toISOString() });
-      writeKeystoreAtomic(keystorePath, ks, { lockPath, owner });
-    }
-    return keyid;
+  const keyid = crypto.createHash('sha256').update(publicKeyPem).digest('hex').slice(0, 16);
+  commitKeystore(keystorePath, (current) => {
+    if (current.keys.some(k => k.keyid === keyid)) return null; // ya registrado: idempotente
+    current.keys.push({ keyid, publicKeyPem, label: label || 'sin etiqueta', created: new Date().toISOString() });
+    return current;
   });
+  return keyid;
 }
 
 module.exports = {
@@ -395,8 +407,7 @@ module.exports = {
   loadOrCreateKeystore,
   saveKeystore,
   registerTrustedKey,
-  withFileLock,
-  writeKeystoreAtomic
+  commitKeystore
 };
 
 if (require.main === module) {
@@ -413,16 +424,17 @@ if (require.main === module) {
   console.log('Sobre DSSE generado y firmado con Ed25519: keyid', envelope.signatures[0].keyid);
 
   const os = require('os');
-  const demoKeystore = path.join(os.tmpdir(), 'dsse-demo-keystore.json');
-  try { fs.unlinkSync(demoKeystore); } catch (e) { /* continuar */ }
+  const demoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-demo-'));
+  const demoKeystore = path.join(demoDir, 'keystore.json');
   registerTrustedKey(demoKeystore, envelope.publicKeyPem, 'demo-local');
   const res = verifyTelemetryAttestation(envelope, null, { trustedKeystore: loadOrCreateKeystore(demoKeystore).keys });
-  try { fs.unlinkSync(demoKeystore); } catch (e) { /* continuar */ }
+  try { fs.rmSync(demoDir, { recursive: true, force: true }); } catch (e) { /* continuar */ }
   if (res.verified) {
-    console.log('AtestaciÃ³n in-toto v1 verificada contra almacÃ©n confiable (Exit 0)');
+    console.log('Atestación in-toto v1 verificada contra almacén confiable (Exit 0)');
     process.exit(0);
   } else {
-    console.error('Fallo en verificaciÃ³n:', res.error);
+    console.error('Fallo en verificación:', res.error);
     process.exit(1);
   }
 }
+

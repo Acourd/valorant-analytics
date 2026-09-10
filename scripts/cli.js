@@ -107,21 +107,62 @@ function loadAttestIdentity() {
     created: new Date().toISOString()
   };
   fs.mkdirSync(path.dirname(idPath), { recursive: true });
-  const { writeKeystoreAtomic, withFileLock } = require('./dsse_attestation');
-  const idLock = `${idPath}.lock`;
-  return withFileLock(idLock, (lockOwner) => {
+  // Creación atómica SIN lock: el contenido completo se escribe a un archivo
+  // temporal exclusivo (wx, fsync) y el destino se reclama con un hard link
+  // (falla si ya existe). Jamás existe una identidad parcial ni se sobrescribe
+  // la del ganador; quien pierde la carrera relee la identidad instalada.
+  const tmp = `${idPath}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
+  let fd = fs.openSync(tmp, 'wx', 0o600);
+  try {
+    fs.writeFileSync(fd, JSON.stringify(persisted, null, 2));
+    fs.fsyncSync(fd);
+  } finally {
+    try { fs.closeSync(fd); } catch (e) {}
+  }
+  try { fs.chmodSync(tmp, 0o600); } catch (e) { /* Windows: mejor esfuerzo */ }
+  let installed = false;
+  try {
     try {
-      const existing = JSON.parse(fs.readFileSync(idPath, 'utf8'));
-      if (existing && existing.privateKey && existing.publicKey) {
-        return {
-          privateKey: crypto.createPrivateKey(existing.privateKey),
-          publicKey: crypto.createPublicKey(existing.publicKey)
-        };
+      fs.linkSync(tmp, idPath);
+      installed = true;
+    } catch (e) {
+      if (!fs.existsSync(idPath)) {
+        throw new Error(`No se pudo reclamar la identidad persistente (${e.message}).`);
       }
-    } catch (e) { /* crear: ausente o corrupto */ }
-    writeKeystoreAtomic(idPath, persisted, { lockPath: idLock, owner: lockOwner });
-    return kp;
-  });
+      // Perdimos la carrera: la identidad del ganador ya está instalada
+      // completa (mismo protocolo); se lee y se usa la suya.
+    }
+  } finally {
+    try { fs.unlinkSync(tmp); } catch (e) { /* ya limpio */ }
+  }
+  if (!installed) {
+    let existing = null;
+    try {
+      existing = JSON.parse(fs.readFileSync(idPath, 'utf8'));
+    } catch (e) { /* legado corrupto: regenerar de forma segura abajo */ }
+    if (existing && existing.privateKey && existing.publicKey) {
+      return {
+        privateKey: crypto.createPrivateKey(existing.privateKey),
+        publicKey: crypto.createPublicKey(existing.publicKey)
+      };
+    }
+    // El archivo instalado no contiene un par de claves válido: un legado
+    // corrupto se regenera (jamás se sigue un symlink: lstat antes de unlink).
+    const lst = fs.lstatSync(idPath);
+    if (lst.isSymbolicLink()) {
+      throw new Error(`Identidad es un enlace simbólico (${idPath}): elimínalo manualmente y re-ejecuta.`);
+    }
+    if (!lst.isFile()) {
+      throw new Error(`Identidad persistente con tipo inesperado (${idPath}): elimínala manualmente y re-ejecuta.`);
+    }
+    fs.unlinkSync(idPath);
+    return loadAttestIdentity();
+  }
+  try {
+    const dirFd = fs.openSync(path.dirname(idPath), 'r');
+    try { fs.fsyncSync(dirFd); } finally { try { fs.closeSync(dirFd); } catch (e) {} }
+  } catch (e) { /* filesystems sin fsync de directorio */ }
+  return kp;
 }
 
 function printProvenance(source, matchData) {

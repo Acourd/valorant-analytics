@@ -58,7 +58,8 @@ function check(name, fn) {
     console.log('PASS (Exit 0)');
     passed++;
   } catch (e) {
-    console.log('FAIL:', e.message.split('\n')[0]);
+    const detail = (e.stderr ? String(e.stderr).split('\n').filter(l => l.trim()).slice(0, 3).join(' | ') : '');
+    console.log('FAIL:', e.message.split('\n')[0] + (detail ? ` [hijo: ${detail}]` : ''));
   }
 }
 
@@ -444,6 +445,7 @@ check('38. autodiagnostic_engine: diagnóstico de MMR drag, verdadero rango mere
     assert.strictEqual(drag.mmrDragDetected, true);
     const agg = {
       accounts: [{
+        handle: 'Test#0001',
         isExcluded: false,
         competitive: { matches: 18, kd: '1.53', acs: '277', dd: '52', hs: '23.8%' },
         peakRank: 'Diamond 1'
@@ -883,9 +885,13 @@ const DSSE = ${JSON.stringify(dssePath)};
   const results = await Promise.all(procs);
   const bad = results.filter(r => r.code !== 0);
   if (bad.length) { console.error('CHILD_FAIL ' + JSON.stringify(bad)); process.exit(1); }
-  const ks = JSON.parse(fs.readFileSync(${JSON.stringify(path.join(tmp, 'ks.json'))}, 'utf8'));
+  const dsse = require(${JSON.stringify(dssePath)});
+  const ks = dsse.loadOrCreateKeystore(${JSON.stringify(path.join(tmp, 'ks.json'))});
   if (ks.keys.length !== 6) { console.error('KEYS_LOST ' + ks.keys.length); process.exit(1); }
-  if (fs.existsSync(${JSON.stringify(path.join(tmp, 'ks.json.lock'))})) { console.error('ORPHAN_LOCK'); process.exit(1); }
+  if (typeof ks.generation !== 'number' || ks.generation < 6) { console.error('GEN=' + ks.generation); process.exit(1); }
+  const fs2 = require('fs');
+  const markers = fs2.readdirSync(${JSON.stringify(tmp)}).filter(f => /^ks\\.json\\.commit\\.\\d+$/.test(f));
+  if (markers.length !== ks.generation) { console.error('MARKERS=' + markers.length + ' GEN=' + ks.generation); process.exit(1); }
   console.log('CONCURRENT_MERGE_OK 6/6');
 })();
 `);
@@ -987,23 +993,29 @@ check('70. autodiagnostic: perfil parcial (matches sin métricas) no clasifica',
     assert.ok(m.diagnosis.includes('DATOS INSUFICIENTES'), 'MMR sin métricas de impacto debe declararse insuficiente');
   });
 
-check('75. dsse: lock rancio se recupera y lock malformado no bloquea',
+check('75. dsse: writer muerto pre-marcador no bloquea; el protocolo recupera sin reinicio',
   () => {
     const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-lock-'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-dead-'));
     try {
       const ksPath = path.join(tmp, 'ks.json');
-      fs.writeFileSync(ksPath + '.lock', `999999:${Date.now() - 120000}:deadbeef`);
+      // Simula un worker/hilo que escribió contenido de la generación 1 y
+      // murió ANTES de crear el marcador: queda contenido huérfano sin commit.
+      const orphan = { keys: [{ keyid: 'dead', publicKeyPem: 'X', label: 'dead', created: 'never' }], generation: 1, writer: '9999:1:dead' };
+      fs.writeFileSync(`${ksPath}.g1.dead`, JSON.stringify(orphan), 'utf8');
       const k = dsse.generateAttestationKeyPair();
-      const keyid = dsse.registerTrustedKey(ksPath, k.publicKey.export({ type: 'spki', format: 'pem' }), 'stale-test');
-      assert.ok(keyid, 'registro tras lock rancio debe funcionar');
-      assert.ok(!fs.existsSync(ksPath + '.lock'), 'lock rancio debe liberarse');
-      fs.writeFileSync(ksPath + '.lock', 'basura-sin-formato');
+      const keyid = dsse.registerTrustedKey(ksPath, k.publicKey.export({ type: 'spki', format: 'pem' }), 'after-dead');
+      assert.ok(keyid, 'registro tras writer muerto debe funcionar');
+      const ks = dsse.loadOrCreateKeystore(ksPath);
+      assert.strictEqual(ks.keys.length, 1, 'el huérfano sin marcador JAMÁS se instala como verdad');
+      assert.ok(!ks.keys.some(x => x.keyid === 'dead'), 'contenido no commiteado no puede filtrarse');
+      assert.ok(fs.existsSync(`${ksPath}.commit.1`), 'el marcador de la generación 1 debe existir');
+      // Un segundo commit recoge el contenido superseded (huérfano en gen 1).
       const k2 = dsse.generateAttestationKeyPair();
-      dsse.registerTrustedKey(ksPath, k2.publicKey.export({ type: 'spki', format: 'pem' }), 'spoof-test');
-      const ks = JSON.parse(fs.readFileSync(ksPath, 'utf8'));
-      assert.strictEqual(ks.keys.length, 2, 'locks malformados no deben bloquear ni perder claves');
-      assert.ok(!fs.existsSync(ksPath + '.lock'), 'lock malformado debe liberarse');
+      dsse.registerTrustedKey(ksPath, k2.publicKey.export({ type: 'spki', format: 'pem' }), 'second');
+      assert.strictEqual(dsse.loadOrCreateKeystore(ksPath).keys.length, 2);
+      assert.strictEqual(dsse.loadOrCreateKeystore(ksPath).generation, 2, 'generación estrictamente monótona');
+      assert.ok(!fs.existsSync(`${ksPath}.g1.dead`), 'GC recoge contenido superseded tras avanzar la generación');
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -1062,7 +1074,8 @@ check('79. dsse saveKeystore público: rechaza symlink y escribe atómicamente b
       }
       dsse.saveKeystore(ksPath, { keys: [{ keyid: 'ab', publicKeyPem: 'X', label: 't', created: 'now' }] });
       assert.strictEqual(dsse.loadOrCreateKeystore(ksPath).keys.length, 1);
-      assert.ok(!fs.existsSync(ksPath + '.lock'), 'lock liberado tras escritura');
+      assert.ok(fs.existsSync(`${ksPath}.commit.1`), 'la generación 1 debe quedar commiteada');
+      assert.ok(!fs.existsSync(ksPath), 'el formato legado queda obsoleto tras publicar');
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -1106,7 +1119,7 @@ check('82. dsse saveKeystore público: rechaza symlink y escribe bajo lock',
       }
       dsse.saveKeystore(ksPath, { keys: [{ keyid: 'zz', publicKeyPem: 'X', label: 't', created: 'now' }] });
       assert.strictEqual(dsse.loadOrCreateKeystore(ksPath).keys.length, 1);
-      assert.ok(!fs.existsSync(ksPath + '.lock'), 'lock liberado tras escritura pública');
+      assert.ok(fs.existsSync(`${ksPath}.commit.1`), 'la escritura pública debe commitear generación 1');
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -1137,46 +1150,35 @@ check('84. talento: valores límite exactos (kd 0.3/acs 100) no clasifican',
     assert.strictEqual(r.talentRatio, 'N/A');
   });
 
-check('85. dsse: holder vivo nunca es desalojado (sin overlap)',
+check('85. dsse: carrera de marcador determinística — validar e instalar son una sola operación (sin TOCTOU)',
   () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-live-'));
+    const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-race-'));
     try {
       const ksPath = path.join(tmp, 'ks.json');
-      const lockPath = ksPath + '.lock';
-      const heldFile = path.join(tmp, 'held.txt');
-      const holderScript = path.join(tmp, 'holder.js');
-      const coordScript = path.join(tmp, 'coord.js');
-      fs.writeFileSync(holderScript, `
-const dsse = require(${JSON.stringify(path.join(scriptsDir, 'dsse_attestation.js'))});
-dsse.withFileLock(${JSON.stringify(lockPath)}, () => {
-  require('fs').writeFileSync(${JSON.stringify(heldFile)}, 'held');
-  const end = Date.now() + 3000;
-  while (Date.now() < end) {}
-  return 'held-ok';
-}, { retries: 200, waitMs: 50 });
-`);
-      fs.writeFileSync(coordScript, `
-const { spawn } = require('child_process');
-const fs = require('fs');
-const dsse = require(${JSON.stringify(path.join(scriptsDir, 'dsse_attestation.js'))});
-(async () => {
-  const holder = spawn(process.execPath, [${JSON.stringify(holderScript)}], { stdio: ['ignore', 'pipe', 'pipe'] });
-  let herr = '';
-  holder.stderr.on('data', d => { herr += d; });
-  await new Promise(r => setTimeout(r, 800));
-  const k = dsse.generateAttestationKeyPair();
-  dsse.registerTrustedKey(${JSON.stringify(ksPath)}, k.publicKey.export({ type: 'spki', format: 'pem' }), 'after-live');
-  const code = await new Promise((res) => holder.on('close', res));
-  if (code !== 0) { console.error('HOLDER_FAIL ' + herr.slice(0, 300)); process.exit(1); }
-  if (!fs.existsSync(${JSON.stringify(heldFile)})) { console.error('HOLDER_NO_HELD'); process.exit(1); }
-  const ks = dsse.loadOrCreateKeystore(${JSON.stringify(ksPath)});
-  if (ks.keys.length !== 1) { console.error('KEYS=' + ks.keys.length); process.exit(1); }
-  if (fs.existsSync(${JSON.stringify(lockPath)})) { console.error('ORPHAN_LOCK'); process.exit(1); }
-  console.log('LIVE_NO_OVERLAP_OK');
-})();
-`);
-      const out = execFileSync(process.execPath, [coordScript], { encoding: 'utf8', timeout: 60000 });
-      assert.ok(out.includes('LIVE_NO_OVERLAP_OK'), 'overlap o fallo en holder vivo');
+      dsse.saveKeystore(ksPath, { keys: [{ keyid: 'k0', publicKeyPem: 'P0', label: 'base', created: 'now' }] });
+      let mutateCalls = 0;
+      const result = dsse.commitKeystore(ksPath, (current) => {
+        mutateCalls++;
+        if (mutateCalls === 1) {
+          // Simula un corredor que gana la generación 2 entre nuestra lectura
+          // y nuestro intento de marcador: contenido durable + marcador wx.
+          const racerNonce = 'a11ce5';
+          const racer = { keys: current.keys.concat([{ keyid: 'racer', publicKeyPem: 'R', label: 'racer', created: 'now' }]), generation: 2, writer: `999:1:${racerNonce}` };
+          fs.writeFileSync(`${ksPath}.g2.${racerNonce}`, JSON.stringify(racer), { flag: 'wx' });
+          fs.writeFileSync(`${ksPath}.commit.2`, `999:1:${racerNonce}`, { flag: 'wx' });
+        }
+        return { keys: current.keys.concat([{ keyid: 'mine', publicKeyPem: 'M', label: 'mine', created: 'now' }]) };
+      });
+      assert.strictEqual(mutateCalls, 2, 'el perdedor debe re-aplicar su mutación sobre el ganador');
+      assert.strictEqual(result.generation, 3, 'la publicación final es la generación 3');
+      const ks = dsse.loadOrCreateKeystore(ksPath);
+      assert.ok(ks.keys.some(k => k.keyid === 'racer'), 'el estado del ganador es la nueva base');
+      assert.ok(ks.keys.some(k => k.keyid === 'mine'), 'la mutación del perdedor no se pierde');
+      assert.ok(ks.keys.every(k => ['k0', 'racer', 'mine'].includes(k.keyid)), 'sin claves fantasma');
+      assert.strictEqual(ks.generation, 3);
+      const orphans = fs.readdirSync(tmp).filter(f => /^ks\.json\.g2\./.test(f));
+      assert.strictEqual(orphans.length, 0, 'el huérfano del perdedor se retira (GC tras gen 3)');
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -1208,7 +1210,9 @@ check('87. talento: identidad incierta (vacíos/duplicados de handle) topa confi
     });
     assert.strictEqual(blanks.duplicatesSkipped, 0, 'handles vacíos jamás se fusionan');
     assert.strictEqual(blanks.identityUncertain, true);
-    assert.strictEqual(blanks.confidence, 'media', 'identidad incierta topa en media aunque joint>=100');
+    assert.strictEqual(blanks.unidentifiedRecords, 2, 'los registros sin ID se contabilizan');
+    assert.strictEqual(blanks.sampleSize, 0, 'los registros sin ID jamás participan en la muestra');
+    assert.strictEqual(blanks.confidence, 'nula', 'unidentified jamás soporta confianza');
     const sameHandle = evaluateTalentVsEffort({
       summary: { totalGeneral: { hours: 800 }, highestPeakRank: 'Gold 2' },
       accounts: [
@@ -1217,6 +1221,8 @@ check('87. talento: identidad incierta (vacíos/duplicados de handle) topa confi
       ]
     });
     assert.strictEqual(sameHandle.duplicatesSkipped, 0, 'datos distintos se preservan');
+    assert.strictEqual(sameHandle.conflictingSnapshots, 1, 'el snapshot cambiable se marca como conflicto');
+    assert.strictEqual(sameHandle.jointMatches, 60, 'el snapshot adicional JAMÁS infla la muestra');
     assert.strictEqual(sameHandle.identityUncertain, true);
     assert.strictEqual(sameHandle.confidence, 'media', 'mismo handle con datos distintos topa en media');
   });
@@ -1247,7 +1253,7 @@ dsse.registerTrustedKey(${JSON.stringify(ksPath)}, k.publicKey.export({ type: 's
       const coordScript = path.join(tmp, 'coordW.js');
       fs.writeFileSync(coordScript, `
 const { Worker } = require('worker_threads');
-const fs = require('fs');
+const dsse = require(${JSON.stringify(path.join(scriptsDir, 'dsse_attestation.js'))});
 (async () => {
   const workers = [];
   for (let i = 0; i < 8; i++) {
@@ -1258,9 +1264,10 @@ const fs = require('fs');
     }));
   }
   await Promise.all(workers);
-  const ks = JSON.parse(fs.readFileSync(${JSON.stringify(ksPath)}, 'utf8'));
+  const ks = dsse.loadOrCreateKeystore(${JSON.stringify(ksPath)});
   if (ks.keys.length !== 8) { console.error('KEYS=' + ks.keys.length); process.exit(1); }
-  console.log('WORKERS_OK 8/8');
+  if (ks.generation < 8) { console.error('GEN=' + ks.generation); process.exit(1); }
+  console.log('WORKERS_OK 8/8 gen ' + ks.generation);
 })();
 `);
       const out = execFileSync(process.execPath, [coordScript], { encoding: 'utf8', timeout: 120000 });
@@ -1278,19 +1285,27 @@ check('90. MMR límite (1 señal decisiva) es evidencia límite, no veredicto',
     assert.strictEqual(m.mmrDragDetected, false);
   });
 
-check('91. dsse: lock mismo-PID anterior al nacimiento se recupera; vivo jamás se desaloja',
+check('91. dsse: saltos de reloj y mtimes arbitrarios no alteran el protocolo (sin relojes)',
   () => {
     const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-birth-'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-clock-'));
     try {
       const ksPath = path.join(tmp, 'ks.json');
-      fs.writeFileSync(ksPath + '.lock', `${process.pid}:${Date.now() - 3600000}:deadbeef`);
-      const past = new Date(Date.now() - 3600000);
-      fs.utimesSync(ksPath + '.lock', past, past);
-      const k = dsse.generateAttestationKeyPair();
-      dsse.registerTrustedKey(ksPath, k.publicKey.export({ type: 'spki', format: 'pem' }), 'birth-test');
-      assert.strictEqual(dsse.loadOrCreateKeystore(ksPath).keys.length, 1, 'lock anterior al proceso debe recuperarse');
-      assert.ok(!fs.existsSync(ksPath + '.lock'), 'lock recuperado debe liberarse');
+      const k1 = dsse.generateAttestationKeyPair();
+      dsse.registerTrustedKey(ksPath, k1.publicKey.export({ type: 'spki', format: 'pem' }), 'before-jump');
+      // Simula un salto de reloj: TODOS los mtimes retroceden 2 horas.
+      const past = new Date(Date.now() - 2 * 3600 * 1000);
+      for (const name of fs.readdirSync(tmp)) {
+        try { fs.utimesSync(path.join(tmp, name), past, past); } catch (e) {}
+      }
+      const before = dsse.loadOrCreateKeystore(ksPath);
+      assert.strictEqual(before.keys.length, 1, 'el estado commiteado sobrevive mtimes arbitrarios');
+      assert.strictEqual(before.generation, 1);
+      const k2 = dsse.generateAttestationKeyPair();
+      dsse.registerTrustedKey(ksPath, k2.publicKey.export({ type: 'spki', format: 'pem' }), 'after-jump');
+      const after = dsse.loadOrCreateKeystore(ksPath);
+      assert.strictEqual(after.keys.length, 2, 'la publicación no depende de reloj alguno');
+      assert.strictEqual(after.generation, 2, 'la numeración es monótona pura, no temporal');
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -1328,6 +1343,72 @@ check('93. dedup: orden de campos y delimitadores no alteran identidad',
       ]
     });
     assert.strictEqual(tricky.duplicatesSkipped, 0, 'delimitadores no deben colisionar identidades distintas');
+  });
+
+check('94. dsse: marcador ilegible es fail-closed o adopción única documentada',
+  () => {
+    const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-malmarker-'));
+    try {
+      const ksPath = path.join(tmp, 'ks.json');
+      dsse.saveKeystore(ksPath, { keys: [{ keyid: 'k0', publicKeyPem: 'P0', label: 'base', created: 'now' }] });
+      // Caso ambiguo: marcador de gen 2 ilegible con DOS candidatos de contenido.
+      fs.writeFileSync(`${ksPath}.g2.aaaa`, JSON.stringify({ keys: [], generation: 2, writer: '1:1:aaaa' }));
+      fs.writeFileSync(`${ksPath}.g2.bbbb`, JSON.stringify({ keys: [], generation: 2, writer: '1:1:bbbb' }));
+      fs.writeFileSync(`${ksPath}.commit.2`, 'escritura-parcial-sin-formato');
+      assert.throws(() => dsse.loadOrCreateKeystore(ksPath), /candidatos|fail-closed/,
+        'la ambigüidad jamás se resuelve adivinando');
+      fs.rmSync(tmp, { recursive: true, force: true });
+      // Caso recuperable: un único candidato completo para el marcador ilegible.
+      const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-adopt-'));
+      try {
+        const ks2 = path.join(tmp2, 'ks.json');
+        dsse.saveKeystore(ks2, { keys: [{ keyid: 'k0', publicKeyPem: 'P0', label: 'base', created: 'now' }] });
+        fs.writeFileSync(`${ks2}.g2.c0de`, JSON.stringify({
+          keys: [{ keyid: 'k0', publicKeyPem: 'P0', label: 'base', created: 'now' }, { keyid: 'k1', publicKeyPem: 'P1', label: 'adopt', created: 'now' }],
+          generation: 2, writer: '999:1:c0de'
+        }));
+        fs.writeFileSync(`${ks2}.commit.2`, 'parcial');
+        const adopted = dsse.loadOrCreateKeystore(ks2);
+        assert.strictEqual(adopted.keys.length, 2, 'la adopción única documentada recupera el estado');
+        assert.strictEqual(adopted.generation, 2);
+        const k = dsse.generateAttestationKeyPair();
+        dsse.registerTrustedKey(ks2, k.publicKey.export({ type: 'spki', format: 'pem' }), 'post-adopt');
+        assert.strictEqual(dsse.loadOrCreateKeystore(ks2).generation, 3, 'la publicación continúa tras la adopción');
+      } finally {
+        fs.rmSync(tmp2, { recursive: true, force: true });
+      }
+    } finally {
+      try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+    }
+  });
+
+check('95. MMR: apenas-sobre-umbral (KD 0.6001/ACS 200.01/DD -300) es evidencia límite',
+  () => {
+    const m = evaluateMmrDrag({ competitive: { matches: 400, kd: '0.6001', acs: '200.01', dd: '-300' }, currentRank: 'Gold 2' });
+    assert.ok(m.diagnosis.includes('EVIDENCIA L'), 'epsilon-sobre-umbral no es evidencia decisiva');
+    assert.strictEqual(m.confidence, 'baja', 'jamás alta confianza con epsilon');
+    assert.strictEqual(m.mmrDragDetected, false);
+    assert.ok(!m.diagnosis.includes('Varianza Normal'), 'sin conclusión favorable específica');
+    // Contrario extremo: DD en el piso impide confianza alta en normalidad.
+    const contra = evaluateMmrDrag({ competitive: { matches: 400, kd: '1.5', acs: '260', dd: '-280' }, currentRank: 'Diamond 1' });
+    assert.notStrictEqual(contra.confidence, 'alta', 'evidencia contraria acota la confianza');
+    assert.ok(contra.diagnosis.includes('Indeterminada'), 'no se afirma normalidad contra evidencia contraria');
+  });
+
+check('96. identidad: equivalentes Unicode son la misma cuenta; formas no inflan muestra',
+  () => {
+    const comp = { matches: 40, kd: '1.2', acs: '240', dd: '20', hs: '25' };
+    const r = evaluateTalentVsEffort({
+      summary: { totalGeneral: { hours: 500 }, highestPeakRank: 'Gold 2' },
+      accounts: [
+        { handle: 'Caf\u00e9#1', isExcluded: false, competitive: comp, peakRank: 'Gold 2' },
+        { handle: 'cafe\u0301#1', isExcluded: false, competitive: comp, peakRank: 'Gold 2' }
+      ]
+    });
+    assert.strictEqual(r.duplicatesSkipped, 1, 'NFC: compuesto y descompuesto son la MISMA cuenta');
+    assert.strictEqual(r.jointMatches, 40, 'la variante Unicode no infla la muestra');
+    assert.strictEqual(r.identityUncertain, false, 'equivalentes canónicos no generan incertidumbre');
   });
 
 if (passed !== total) process.exit(1);
