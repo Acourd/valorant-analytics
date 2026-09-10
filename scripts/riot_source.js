@@ -40,6 +40,18 @@ const REGION_HOSTS = {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Configuración del operador FIJADA una sola vez al cargar el módulo (arranque
+// controlado del proceso). La verificación NUNCA vuelve a leer `process.env`:
+// un cambio dinámico de las variables no puede redirigir la autoridad.
+const OPERATOR_CONFIG = Object.freeze({
+  trustPath: process.env.RIOT_ATTESTATION_TRUST ? path.resolve(process.env.RIOT_ATTESTATION_TRUST) : null,
+  signingKeyPath: process.env.RIOT_ATTESTATION_KEY ? path.resolve(process.env.RIOT_ATTESTATION_KEY) : null
+});
+
+function getOperatorConfig() {
+  return { trustPath: OPERATOR_CONFIG.trustPath, signingKeyPath: OPERATOR_CONFIG.signingKeyPath };
+}
+
 function canonicalStringify(value) {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonicalStringify).join(',')}]`;
@@ -147,9 +159,9 @@ function readProtectedFile(pathLike, what, options = {}) {
 }
 
 // Clave privada del ingestor autorizado: NO se acepta como argumento; se carga
-// del almacén del operador (RIOT_ATTESTATION_KEY, 0600 fuera del repo).
+// del almacén del operador FIJADO al arranque (RIOT_ATTESTATION_KEY, 0600).
 function loadSigningKey() {
-  const p = process.env.RIOT_ATTESTATION_KEY;
+  const p = OPERATOR_CONFIG.signingKeyPath;
   if (!p) {
     const err = new Error('Atestación no disponible: falta RIOT_ATTESTATION_KEY (clave privada del ingestor autorizado, 0600 fuera del repo).');
     err.code = 'ATTESTATION_KEY_MISSING';
@@ -208,11 +220,11 @@ function verifyAttestation(attestation, options = {}) {
   return { valid: false, reason: 'firma no verificada' };
 }
 
-// Trust store: fichero JSON con array de claves públicas SPKI (PEM). Se
-// valida perímetro (regular, no symlink, propietario, sin escritura de
-// grupo/otros) y se lee de forma resistente a TOCTOU.
-function loadTrustedKeys(filePath) {
-  const p = filePath || process.env.RIOT_ATTESTATION_TRUST;
+// Trust store: fichero JSON con array de claves públicas SPKI (PEM). La RUTA
+// se tomó una sola vez al arranque; no se acepta por argumento ni se re-lee de
+// `process.env`. Se valida perímetro y se lee de forma resistente a TOCTOU.
+function loadTrustedKeys() {
+  const p = OPERATOR_CONFIG.trustPath;
   if (!p) return [];
   const raw = readProtectedFile(p, 'trust store', { strict: false });
   let parsed;
@@ -234,6 +246,7 @@ module.exports = {
   createAttestation,
   verifyAttestation,
   loadTrustedKeys,
+  getOperatorConfig,
   trustStorePolicyViolation,
   readProtectedFile,
   payloadDigest,

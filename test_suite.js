@@ -17,6 +17,25 @@ const scriptsDir = path.join(__dirname, 'scripts');
 const cliPath = path.join(scriptsDir, 'cli.js');
 const sampleFile = path.join(__dirname, 'examples', 'sample_match.json');
 
+// --- Arranque controlado del frente #1: la configuración del operador se fija
+// ANTES de cargar riot_source (una sola vez). Las pruebas mutan el CONTENIDO de
+// los ficheros, nunca la ruta; cambiar la env después no debe surtir efecto.
+const RIOT_CFG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'riot-cfg-'));
+const RIOT_TRUST_PATH = path.join(RIOT_CFG_DIR, 'trust.json');
+const RIOT_KEY_PATH = path.join(RIOT_CFG_DIR, 'ingestor.key');
+function writeRiotTrust(keys) {
+  fs.writeFileSync(RIOT_TRUST_PATH, JSON.stringify(keys), { encoding: 'utf8', mode: 0o600 });
+  try { fs.chmodSync(RIOT_TRUST_PATH, 0o600); } catch (e) { /* Windows */ }
+}
+function writeRiotKey(privateKeyPem) {
+  fs.writeFileSync(RIOT_KEY_PATH, privateKeyPem, { encoding: 'utf8', mode: 0o600 });
+  try { fs.chmodSync(RIOT_KEY_PATH, 0o600); } catch (e) { /* Windows */ }
+}
+writeRiotTrust([]);
+writeRiotKey('');
+process.env.RIOT_ATTESTATION_TRUST = RIOT_TRUST_PATH;
+process.env.RIOT_ATTESTATION_KEY = RIOT_KEY_PATH;
+
 console.log('=== VALORANT ANALYTICS: SUITE DETERMINISTA v3.0 ===\n');
 
 assert.ok(fs.existsSync(sampleFile), 'sample_match.json no existe');
@@ -2124,115 +2143,83 @@ check('fuente Riot: validaciones, credenciales y atestación con trust del opera
     assert.strictEqual(rs.validateMatchId('00000000-0000-4000-8000-000000000001').length, 36);
     assert.strictEqual(rs.hostForRegion('americas'), 'americas.api.riotgames.com');
     assert.throws(() => rs.hostForRegion('marte'), /Regi/i);
-    const saved = {
-      key: process.env.RIOT_API_KEY,
-      rso: process.env.RIOT_RSO_TOKEN,
-      signKey: process.env.RIOT_ATTESTATION_KEY,
-      trust: process.env.RIOT_ATTESTATION_TRUST
-    };
-    const restore = () => {
-      if (saved.key === undefined) delete process.env.RIOT_API_KEY; else process.env.RIOT_API_KEY = saved.key;
-      if (saved.rso === undefined) delete process.env.RIOT_RSO_TOKEN; else process.env.RIOT_RSO_TOKEN = saved.rso;
-      if (saved.signKey === undefined) delete process.env.RIOT_ATTESTATION_KEY; else process.env.RIOT_ATTESTATION_KEY = saved.signKey;
-      if (saved.trust === undefined) delete process.env.RIOT_ATTESTATION_TRUST; else process.env.RIOT_ATTESTATION_TRUST = saved.trust;
-    };
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'riot-op-'));
+    // La configuración del operador quedó FIJADA al arranque (no se re-lee env).
+    assert.strictEqual(rs.getOperatorConfig().trustPath, RIOT_TRUST_PATH);
+    assert.strictEqual(rs.getOperatorConfig().signingKeyPath, RIOT_KEY_PATH);
+    const savedKey = process.env.RIOT_API_KEY;
+    const savedRso = process.env.RIOT_RSO_TOKEN;
+    delete process.env.RIOT_API_KEY;
+    delete process.env.RIOT_RSO_TOKEN;
     try {
-      // Sin credenciales Riot → fail-closed.
-      delete process.env.RIOT_API_KEY;
-      delete process.env.RIOT_RSO_TOKEN;
       assert.throws(() => rs.fetchRiotMatchById('00000000-0000-4000-8000-000000000001'), /credenciales|RIOT_API_KEY/i);
-      // Sin clave del operador → no se puede atestiguar.
-      delete process.env.RIOT_ATTESTATION_KEY;
-      const payload = JSON.parse(fs.readFileSync(path.join(__dirname, 'examples', 'riot_match_anonymized.json'), 'utf8'));
-      const matchId = payload.matchInfo.matchId;
-      const record = { matchId, host: 'americas.api.riotgames.com', endpoint: rs.matchEndpoint(matchId), fetchedAt: new Date().toISOString(), payload };
-      assert.throws(() => rs.createAttestation(record), /RIOT_ATTESTATION_KEY/);
-      // Con almacén del operador (clave 0600 + trust JSON) la firma verifica.
-      const kp = crypto.generateKeyPairSync('ed25519');
-      const keyPath = path.join(tmp, 'ingestor.key');
-      fs.writeFileSync(keyPath, kp.privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
-      const trustPath = path.join(tmp, 'trust.json');
-      fs.writeFileSync(trustPath, JSON.stringify([kp.publicKey.export({ type: 'spki', format: 'pem' })]), { encoding: 'utf8', mode: 0o600 });
-      process.env.RIOT_ATTESTATION_KEY = keyPath;
-      process.env.RIOT_ATTESTATION_TRUST = trustPath;
-      const att = rs.createAttestation(record);
-      assert.ok(rs.verifyAttestation(att, { payload }).valid, 'firma del ingestor verificada con trust del operador');
-      assert.ok(!rs.verifyAttestation(att, { payload: { tampered: true } }).valid, 'payload alterado no verifica');
-      assert.ok(!rs.verifyAttestation({ ...att, host: 'evil.example.com' }, { payload }).valid, 'host no permitido');
-      assert.ok(!rs.verifyAttestation({ ...att, fetchedAt: new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString() }, { payload, maxAgeMs: 24 * 3600 * 1000 }).valid, 'caducada no verifica');
-      // Credenciales: nunca se registran ni viajan por argv.
-      const riotSrc = fs.readFileSync(path.join(scriptsDir, 'riot_source.js'), 'utf8');
-      const httpSrc = fs.readFileSync(path.join(scriptsDir, 'http_fetch.js'), 'utf8');
-      assert.ok(!/console\.(log|error)\s*\(/.test(riotSrc), 'la fuente Riot no debe registrar nada');
-      assert.ok(!/console\.log/.test(httpSrc), 'el fetch no debe escribir logs de datos');
-      assert.ok(!/console\.[a-z]+\([^\n)]*headers/i.test(httpSrc), 'las cabeceras nunca se imprimen');
-      assert.ok(!/argv\[4\]/.test(httpSrc), 'las cabeceras no deben viajar por argv');
-      assert.ok(/VA_FETCH_HEADERS/.test(httpSrc), 'las cabeceras sensibles viajan por entorno');
     } finally {
-      restore();
-      fs.rmSync(tmp, { recursive: true, force: true });
+      if (savedKey === undefined) delete process.env.RIOT_API_KEY; else process.env.RIOT_API_KEY = savedKey;
+      if (savedRso === undefined) delete process.env.RIOT_RSO_TOKEN; else process.env.RIOT_RSO_TOKEN = savedRso;
     }
+    const kp = crypto.generateKeyPairSync('ed25519');
+    writeRiotKey(kp.privateKey.export({ type: 'pkcs8', format: 'pem' }));
+    writeRiotTrust([kp.publicKey.export({ type: 'spki', format: 'pem' })]);
+    const payload = JSON.parse(fs.readFileSync(path.join(__dirname, 'examples', 'riot_match_anonymized.json'), 'utf8'));
+    const matchId = payload.matchInfo.matchId;
+    const record = { matchId, host: 'americas.api.riotgames.com', endpoint: rs.matchEndpoint(matchId), fetchedAt: new Date().toISOString(), payload };
+    const att = rs.createAttestation(record);
+    assert.ok(rs.verifyAttestation(att, { payload }).valid, 'firma del ingestor verificada');
+    assert.ok(!rs.verifyAttestation(att, { payload: { tampered: true } }).valid, 'payload alterado no verifica');
+    assert.ok(!rs.verifyAttestation({ ...att, host: 'evil.example.com' }, { payload }).valid, 'host no permitido');
+    assert.ok(!rs.verifyAttestation({ ...att, fetchedAt: new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString() }, { payload, maxAgeMs: 24 * 3600 * 1000 }).valid, 'caducada no verifica');
+    const riotSrc = fs.readFileSync(path.join(scriptsDir, 'riot_source.js'), 'utf8');
+    const httpSrc = fs.readFileSync(path.join(scriptsDir, 'http_fetch.js'), 'utf8');
+    assert.ok(!/console\.(log|error)\s*\(/.test(riotSrc), 'la fuente Riot no debe registrar nada');
+    assert.ok(!/console\.log/.test(httpSrc), 'el fetch no debe escribir logs de datos');
+    assert.ok(!/console\.[a-z]+\([^\n)]*headers/i.test(httpSrc), 'las cabeceras nunca se imprimen');
+    assert.ok(!/argv\[4\]/.test(httpSrc), 'las cabeceras no deben viajar por argv');
+    assert.ok(/VA_FETCH_HEADERS/.test(httpSrc), 'las cabeceras sensibles viajan por entorno');
   });
 
-check('fuente Riot: trust no inyectable; autofirma de consumidor falla cerrada',
+check('fuente Riot: trust no inyectable; autofirma y cambio de env fallan cerrados',
   () => {
     const ep = require(path.join(scriptsDir, 'evidence_policy.js'));
     const rs = require(path.join(scriptsDir, 'riot_source.js'));
     const payload = JSON.parse(fs.readFileSync(path.join(__dirname, 'examples', 'riot_match_anonymized.json'), 'utf8'));
     const matchId = payload.matchInfo.matchId;
-    const saved = { signKey: process.env.RIOT_ATTESTATION_KEY, trust: process.env.RIOT_ATTESTATION_TRUST };
-    const restore = () => {
-      if (saved.signKey === undefined) delete process.env.RIOT_ATTESTATION_KEY; else process.env.RIOT_ATTESTATION_KEY = saved.signKey;
-      if (saved.trust === undefined) delete process.env.RIOT_ATTESTATION_TRUST; else process.env.RIOT_ATTESTATION_TRUST = saved.trust;
-    };
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'riot-evil-'));
+    const opKp = crypto.generateKeyPairSync('ed25519');
+    writeRiotKey(opKp.privateKey.export({ type: 'pkcs8', format: 'pem' }));
+    writeRiotTrust([opKp.publicKey.export({ type: 'spki', format: 'pem' })]);
+    const evil = crypto.generateKeyPairSync('ed25519');
+    const evilPub = evil.publicKey.export({ type: 'spki', format: 'pem' });
+    const core = { v: 1, matchId, host: 'americas.api.riotgames.com', endpoint: rs.matchEndpoint(matchId), fetchedAt: new Date().toISOString(), payloadDigest: rs.payloadDigest(payload) };
+    const forged = { ...core, signerKeyId: rs.keyIdOf(evilPub), signature: crypto.sign(null, Buffer.from(rs.canonicalStringify(core), 'utf8'), evil.privateKey).toString('base64') };
+    // Inyectar trustedKeys por argumento se ignora.
+    assert.throws(() => ep.observeVerifiedMatch(payload, 'anon-puuid-focus', { attestation: forged, trustedKeys: [evilPub] }), /rechazado/);
+    // Cambiar la env del trust DESPUÉS del arranque NO redirige la autoridad.
+    const attackerTrust = path.join(RIOT_CFG_DIR, 'attacker-trust.json');
+    fs.writeFileSync(attackerTrust, JSON.stringify([evilPub]), { encoding: 'utf8', mode: 0o600 });
+    const savedTrustEnv = process.env.RIOT_ATTESTATION_TRUST;
+    process.env.RIOT_ATTESTATION_TRUST = attackerTrust;
     try {
-      // Consumidor: genera su clave y fabrica una atestación equivalente.
-      const evil = crypto.generateKeyPairSync('ed25519');
-      const evilPub = evil.publicKey.export({ type: 'spki', format: 'pem' });
-      const core = { v: 1, matchId, host: 'americas.api.riotgames.com', endpoint: rs.matchEndpoint(matchId), fetchedAt: new Date().toISOString(), payloadDigest: rs.payloadDigest(payload) };
-      const forged = { ...core, signerKeyId: rs.keyIdOf(evilPub), signature: crypto.sign(null, Buffer.from(rs.canonicalStringify(core), 'utf8'), evil.privateKey).toString('base64') };
-      // Trust store del operador VACÍO: inyectar trustedKeys por argumento se ignora.
-      delete process.env.RIOT_ATTESTATION_TRUST;
-      assert.throws(
-        () => ep.observeVerifiedMatch(payload, 'anon-puuid-focus', { attestation: forged, trustedKeys: [evilPub] }),
-        /rechazado/,
-        'una firma de consumidor + trustedKeys inyectado NO debe verificar'
-      );
-      // Trust del operador con OTRA clave: la autofirma sigue fallando.
-      const opKp = crypto.generateKeyPairSync('ed25519');
-      const keyPath = path.join(tmp, 'ingestor.key');
-      fs.writeFileSync(keyPath, opKp.privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
-      const trustPath = path.join(tmp, 'trust.json');
-      fs.writeFileSync(trustPath, JSON.stringify([opKp.publicKey.export({ type: 'spki', format: 'pem' })]), { encoding: 'utf8', mode: 0o600 });
-      process.env.RIOT_ATTESTATION_KEY = keyPath;
-      process.env.RIOT_ATTESTATION_TRUST = trustPath;
-      assert.throws(() => ep.observeVerifiedMatch(payload, 'anon-puuid-focus', { attestation: forged }), /rechazado/);
-      assert.throws(() => ep.observeVerifiedMatch(payload, 'anon-puuid-focus', { attestation: null }), /rechazado/);
-      assert.throws(() => ep.observeVerifiedMatch({ ...payload, extra: 1 }, 'anon-puuid-focus', { attestation: rs.createAttestation({ matchId, host: 'americas.api.riotgames.com', endpoint: rs.matchEndpoint(matchId), fetchedAt: new Date().toISOString(), payload }) }), /rechazado/);
-      // El camino legítimo (ingestor del operador) sí acredita verified_source.
-      const att = rs.createAttestation({ matchId, host: 'americas.api.riotgames.com', endpoint: rs.matchEndpoint(matchId), fetchedAt: new Date().toISOString(), payload });
-      const verified = ep.observeVerifiedMatch(payload, 'anon-puuid-focus', { attestation: att });
-      const policy = ep.classifyEvidence(verified);
-      assert.strictEqual(verified.provenance, 'verified_source');
-      assert.strictEqual(policy.provenanceStatus, 'verified_source');
-      assert.strictEqual(policy.level, 'complete');
-      assert.strictEqual(policy.verifiedSource, true);
-      assert.ok(policy.verifiedRoundCount > 0, 'debe haber rondas verificadas');
-      assert.ok(policy.allowedSections.includes('round_observations'));
-      assert.ok(!policy.allowedSections.includes('round_leaks'), 'sin reglas verificables no hay fugas');
-      assert.strictEqual(ep.mintVerifiedEvent, undefined, 'mintVerifiedEvent no debe exportarse');
+      assert.throws(() => ep.observeVerifiedMatch(payload, 'anon-puuid-focus', { attestation: forged }), /rechazado/, 'un cambio dinámico de env no debe autorizar');
+      assert.strictEqual(rs.getOperatorConfig().trustPath, RIOT_TRUST_PATH, 'la ruta capturada no cambia');
     } finally {
-      restore();
-      fs.rmSync(tmp, { recursive: true, force: true });
+      process.env.RIOT_ATTESTATION_TRUST = savedTrustEnv;
     }
+    // El camino legítimo (ingestor del operador) sí acredita verified_source.
+    const att = rs.createAttestation({ matchId, host: 'americas.api.riotgames.com', endpoint: rs.matchEndpoint(matchId), fetchedAt: new Date().toISOString(), payload });
+    const verified = ep.observeVerifiedMatch(payload, 'anon-puuid-focus', { attestation: att });
+    const policy = ep.classifyEvidence(verified);
+    assert.strictEqual(verified.provenance, 'verified_source');
+    assert.strictEqual(policy.provenanceStatus, 'verified_source');
+    assert.strictEqual(policy.level, 'complete');
+    assert.strictEqual(policy.verifiedSource, true);
+    assert.ok(policy.verifiedRoundCount > 0, 'debe haber rondas verificadas');
+    assert.ok(policy.allowedSections.includes('round_observations'));
+    assert.ok(!policy.allowedSections.includes('round_leaks'), 'sin reglas verificables no hay fugas');
+    assert.strictEqual(ep.mintVerifiedEvent, undefined, 'mintVerifiedEvent no debe exportarse');
   });
+
 check('fuente Riot: el trust store exige perímetro (0666, propietario, symlink) y falla cerrado',
   () => {
     const rs = require(path.join(scriptsDir, 'riot_source.js'));
     const ep = require(path.join(scriptsDir, 'evidence_policy.js'));
-    // Predicado puro (determinista en toda plataforma).
     assert.ok(rs.trustStorePolicyViolation(0o666, 1000, 1000), '0666 debe violar');
     assert.ok(rs.trustStorePolicyViolation(0o622, 1000, 1000), 'escritura de otros debe violar');
     assert.ok(rs.trustStorePolicyViolation(0o626, 1000, 1000), 'escritura de grupo debe violar');
@@ -2240,54 +2227,37 @@ check('fuente Riot: el trust store exige perímetro (0666, propietario, symlink)
     assert.strictEqual(rs.trustStorePolicyViolation(0o600, 1000, 1000), null, '0600 del propietario es válido');
     assert.ok(rs.trustStorePolicyViolation(0o600, 1001, 1000), 'propietario ajeno debe violar');
     assert.ok(rs.trustStorePolicyViolation(0o644, 1000, 1000, { strict: true }), 'clave privada exige 0600 (modo estricto)');
-    const saved = { signKey: process.env.RIOT_ATTESTATION_KEY, trust: process.env.RIOT_ATTESTATION_TRUST };
-    const restore = () => {
-      if (saved.signKey === undefined) delete process.env.RIOT_ATTESTATION_KEY; else process.env.RIOT_ATTESTATION_KEY = saved.signKey;
-      if (saved.trust === undefined) delete process.env.RIOT_ATTESTATION_TRUST; else process.env.RIOT_ATTESTATION_TRUST = saved.trust;
-    };
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'riot-perim-'));
-    try {
-      const payload = JSON.parse(fs.readFileSync(path.join(__dirname, 'examples', 'riot_match_anonymized.json'), 'utf8'));
-      const matchId = payload.matchInfo.matchId;
-      const kp = crypto.generateKeyPairSync('ed25519');
-      const pub = kp.publicKey.export({ type: 'spki', format: 'pem' });
-      const keyPath = path.join(tmp, 'ingestor.key');
-      fs.writeFileSync(keyPath, kp.privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
-      process.env.RIOT_ATTESTATION_KEY = keyPath;
-      const record = { matchId, host: 'americas.api.riotgames.com', endpoint: rs.matchEndpoint(matchId), fetchedAt: new Date().toISOString(), payload };
-      if (process.platform !== 'win32') {
-        // Trust store 0666 → fail-closed aunque contenga la clave correcta.
-        const trust666 = path.join(tmp, 'trust-666.json');
-        fs.writeFileSync(trust666, JSON.stringify([pub]), 'utf8');
-        fs.chmodSync(trust666, 0o666);
-        process.env.RIOT_ATTESTATION_TRUST = trust666;
-        const att = rs.createAttestation(record);
-        assert.throws(() => ep.observeVerifiedMatch(payload, 'anon-puuid-focus', { attestation: att }), /rechazado|trust store/i, 'trust 0666 no debe autorizar');
-        assert.ok(!rs.verifyAttestation(att, { payload }).valid, 'verificación falla con trust 0666');
-        // Symlink del trust store → fail-closed.
-        const realTrust = path.join(tmp, 'trust-ok.json');
-        fs.writeFileSync(realTrust, JSON.stringify([pub]), { mode: 0o600 });
-        const linkTrust = path.join(tmp, 'trust-link.json');
-        try {
-          fs.symlinkSync(realTrust, linkTrust, 'file');
-          process.env.RIOT_ATTESTATION_TRUST = linkTrust;
-          assert.ok(!rs.verifyAttestation(att, { payload }).valid, 'symlink de trust store no debe autorizar');
-          assert.throws(() => ep.observeVerifiedMatch(payload, 'anon-puuid-focus', { attestation: att }), /rechazado|symb/i);
-        } catch (e) {
-          if (!/EEXIST|EPERM|privileg/i.test(e.message)) throw e;
-        }
-        // Clave privada 0666 → no se puede atestiguar.
-        const badKey = path.join(tmp, 'bad.key');
-        fs.writeFileSync(badKey, kp.privateKey.export({ type: 'pkcs8', format: 'pem' }), 'utf8');
-        fs.chmodSync(badKey, 0o666);
-        process.env.RIOT_ATTESTATION_KEY = badKey;
-        assert.throws(() => rs.createAttestation(record), /perímetro|0600|inseguro/i);
-      } else {
-        assert.ok(true, 'win32: integración chmod/symlink no aplicable; predicado puro cubierto arriba');
+    const payload = JSON.parse(fs.readFileSync(path.join(__dirname, 'examples', 'riot_match_anonymized.json'), 'utf8'));
+    const matchId = payload.matchInfo.matchId;
+    const kp = crypto.generateKeyPairSync('ed25519');
+    const pubPem = kp.publicKey.export({ type: 'spki', format: 'pem' });
+    const privPem = kp.privateKey.export({ type: 'pkcs8', format: 'pem' });
+    writeRiotKey(privPem);
+    writeRiotTrust([pubPem]);
+    const record = { matchId, host: 'americas.api.riotgames.com', endpoint: rs.matchEndpoint(matchId), fetchedAt: new Date().toISOString(), payload };
+    if (process.platform !== 'win32') {
+      const att = rs.createAttestation(record);
+      fs.chmodSync(RIOT_TRUST_PATH, 0o666);
+      try {
+        assert.ok(!rs.verifyAttestation(att, { payload }).valid, 'trust 0666 no autoriza');
+        assert.throws(() => ep.observeVerifiedMatch(payload, 'anon-puuid-focus', { attestation: att }), /rechazado|trust store/i);
+      } finally {
+        writeRiotTrust([pubPem]);
       }
-    } finally {
-      restore();
-      fs.rmSync(tmp, { recursive: true, force: true });
+      const link = path.join(RIOT_CFG_DIR, 'trust-link.json');
+      try {
+        if (fs.existsSync(link)) fs.unlinkSync(link);
+        fs.symlinkSync(RIOT_TRUST_PATH, link, 'file');
+        assert.throws(() => rs.readProtectedFile(link, 'trust store'), /simb|symlink|enlace/i);
+      } catch (e) {
+        if (!/EEXIST|EPERM|privileg/i.test(e.message)) throw e;
+      }
+      writeRiotKey(privPem);
+      fs.chmodSync(RIOT_KEY_PATH, 0o666);
+      assert.throws(() => rs.createAttestation(record), /perímetro|0600|inseguro/i);
+      writeRiotKey(privPem);
+    } else {
+      assert.ok(true, 'win32: integración chmod/symlink no aplicable; predicado puro cubierto');
     }
   });
 
@@ -2311,5 +2281,6 @@ if (manifestMismatches.length > 0) {
 }
 
 if (passed !== total) process.exit(1);
+try { fs.rmSync(RIOT_CFG_DIR, { recursive: true, force: true }); } catch (e) { /* limpieza best-effort */ }
 console.log(`Resultados: ${passed}/${total} checks registrados y ejecutados; manifiesto README trazable (${total}/${total}). Exit Code: 0`);
 console.log('All valorant-analytics deterministic tests passed with Exit Code: 0');
