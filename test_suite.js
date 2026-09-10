@@ -1632,6 +1632,49 @@ check('dsse: symlink en marcador, contenido o directorio jamás se sigue (perím
     }
   });
 
+check('dsse: política de directorio privado — grupo/otros escribible o dueño ajeno fallan cerrados',
+  () => {
+    const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
+    // Predicado puro: determinista en toda plataforma (alcance del hallazgo v19).
+    assert.ok(dsse.storageDirPolicyViolation(0o770, 1000, 1000), '0770 (grupo escribe) debe violar');
+    assert.ok(dsse.storageDirPolicyViolation(0o775, 1000, 1000), '0775 debe violar');
+    assert.ok(dsse.storageDirPolicyViolation(0o757, 1000, 1000), '0757 debe violar');
+    assert.ok(dsse.storageDirPolicyViolation(0o777, 1000, 1000), '0777 debe violar');
+    assert.ok(dsse.storageDirPolicyViolation(0o702, 1000, 1000), '0702 (otros escribe) debe violar');
+    assert.strictEqual(dsse.storageDirPolicyViolation(0o700, 1000, 1000), null, '0700 privado del dueño es válido');
+    assert.strictEqual(dsse.storageDirPolicyViolation(0o750, 1000, 1000), null, '0750 sin escritura compartida es válido');
+    assert.strictEqual(dsse.storageDirPolicyViolation(0o755, 1000, 1000), null, '0755 sin escritura compartida es válido');
+    assert.ok(dsse.storageDirPolicyViolation(0o700, 1001, 1000), 'directorio de otro uid debe violar');
+    assert.strictEqual(dsse.storageDirPolicyViolation(0o770, 1001, 1000, false), null, 'Windows: política delegada a la ACL');
+    // Integración POSIX real: chmod 0770 rechazado; 0700 aceptado.
+    if (process.platform !== 'win32') {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-perm-'));
+      try {
+        const ksPath = path.join(tmp, 'ks.json');
+        fs.chmodSync(tmp, 0o770);
+        const kp0 = crypto.generateKeyPairSync('ed25519');
+        assert.throws(
+          () => dsse.registerTrustedKey(ksPath, kp0.publicKey.export({ type: 'spki', format: 'pem' }), 'grupo'),
+          /grupo|privado|perímetro/,
+          'directorio 0770 debe fallar cerrado'
+        );
+        assert.ok(!fs.existsSync(ksPath) && fs.readdirSync(tmp).length === 0, 'no debe publicarse nada en directorio no privado');
+        fs.chmodSync(tmp, 0o700);
+        const kp1 = crypto.generateKeyPairSync('ed25519');
+        assert.ok(
+          dsse.registerTrustedKey(ksPath, kp1.publicKey.export({ type: 'spki', format: 'pem' }), 'privado'),
+          'directorio 0700 debe aceptarse'
+        );
+        assert.strictEqual(dsse.loadOrCreateKeystore(ksPath).keys.length, 1);
+      } finally {
+        try { fs.chmodSync(tmp, 0o700); } catch (e) {}
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    } else {
+      assert.ok(true, 'win32: integración chmod no aplicable; predicado puro cubierto arriba');
+    }
+  });
+
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben
 // reflejar EXACTAMENTE el número de casos registrados y ejecutados. Un
 // manifiesto desincronizado hace fallar la suite (imposible sobre-declarar

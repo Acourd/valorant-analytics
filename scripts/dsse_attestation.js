@@ -203,9 +203,10 @@ function verifyWithPem(envelope, pem) {
  *     marcador más nuevo, el contenido faltante es fail-closed. Nunca se
  *     pierde la generación vigente ni sus claves.
  *   - Perímetro de archivos: directorio, marcador y contenido se inspeccionan
- *     con lstat ANTES de leerse; un symlink jamás se sigue (fail-closed). El
- *     directorio no puede ser un symlink ni un directorio compartido
- *     escribible por todos sin sticky bit (POSIX).
+ *     con lstat ANTES de leerse; un symlink jamás se sigue (fail-closed). En
+ *     POSIX el directorio debe ser privado del usuario actual: sin escritura
+ *     de grupo ni de otros (0700; 0770/0775/0757/0777 fallan cerrados) y con
+ *     propiedad del usuario en curso.
  *   - Fail-closed: marcador ilegible (parcial o manipulado) SIEMPRE aborta:
  *     el contenido huérfano sin marcador VÁLIDO es inerte y jamás se adopta
  *     como estado. La recuperación exige intervención manual explícita.
@@ -259,6 +260,27 @@ function lstatRegularOrAbsent(p) {
   }
 }
 
+/**
+ * Política de directorio privado (PURO y determinista, testeable en cualquier
+ * plataforma). Devuelve null si el directorio puede alojar claves, o el
+ * motivo de la violación.
+ *
+ * POSIX estricto: el directorio debe ser del usuario actual y NO tener
+ * permisos de escritura para grupo ni para otros (grupo/otros 0o022 = 0).
+ * Así 0770, 0775, 0757, 0777 y cualquier directorio compartido escribible
+ * fallan cerrados; solo 0700 (o equivalente sin escritura compartida, p. ej.
+ * 0750/0755) es admisible. En Windows (`mode` no representa ACLs) la política
+ * se delega a la ACL de la plataforma: `applyPlatformPolicy=false`.
+ */
+function storageDirPolicyViolation(mode, uid, currentUid, applyPlatformPolicy = true) {
+  if (!applyPlatformPolicy) return null;
+  if ((mode & 0o022) !== 0) return 'permite escritura al grupo o a otros';
+  if (typeof uid === 'number' && typeof currentUid === 'number' && uid !== currentUid) {
+    return `pertenece a otro usuario (uid ${uid} ≠ ${currentUid})`;
+  }
+  return null;
+}
+
 function assertStorageDirSafe(dirPath) {
   const st = lstatRegularOrAbsent(dirPath);
   if (st === null) return; // mkdirSync lo crea; la creación valida
@@ -268,8 +290,17 @@ function assertStorageDirSafe(dirPath) {
   if (!st.isDirectory()) {
     throw new Error(`La ruta del keystore no es un directorio (${dirPath}): fail-closed.`);
   }
-  if (process.platform !== 'win32' && (st.mode & 0o002) && !(st.mode & 0o1000)) {
-    throw new Error(`El directorio del keystore (${dirPath}) es escribible por todos sin sticky bit: perímetro inseguro (fail-closed).`);
+  if (process.platform !== 'win32') {
+    const currentUid = typeof process.getuid === 'function' ? process.getuid() : null;
+    const violation = storageDirPolicyViolation(
+      st.mode & 0o7777,
+      typeof st.uid === 'number' ? st.uid : null,
+      currentUid,
+      true
+    );
+    if (violation) {
+      throw new Error(`El directorio del keystore (${dirPath}, modo ${(st.mode & 0o7777).toString(8)}) ${violation}: perímetro no privado (fail-closed; exige 0700 propiedad del usuario actual).`);
+    }
   }
 }
 
@@ -537,7 +568,8 @@ module.exports = {
   loadOrCreateKeystore,
   registerTrustedKey,
   commitKeystore,
-  compactKeystore
+  compactKeystore,
+  storageDirPolicyViolation
 };
 
 if (require.main === module) {
