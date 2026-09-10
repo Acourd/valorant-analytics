@@ -13,9 +13,10 @@
     "fd": 1
   },
   "rounds": [
-    { "n": 7, "side": "attack", "event": "post_plant_5v3", "detail": "Sobre-asomo buscando la baja final con ventaja numérica." },
-    { "n": 11, "side": "defense", "event": "long_range_burst", "detail": "Ráfaga prolongada a >30m contra Vandal." },
-    { "n": 14, "side": "attack", "event": "post_plant_5v3", "detail": "Repetición del patrón de la ronda 7." }
+    { "n": 7, "source": "observed_event", "event": "position", "detail": "Post-plant 5v3: sobre-asomo con ventaja numÃ©rica (telemetrÃa de posiciÃ³n)." },
+    { "n": 11, "source": "observed_event", "event": "damage", "detail": "RÃ¡faga larga a >30m contra Vandal (damage event)." },
+    { "n": 14, "source": "observed_event", "event": "position", "detail": "RepeticiÃ³n del patrÃ³n de la ronda 7." },
+    { "n": 15, "source": "user_claim", "event": "note", "detail": "El jugador afirma que se distrajo (declaraciÃ³n, no verificable)." }
   ],
   "duels": [
     { "opponent": "rival_1#LATAM", "agent": "Jett", "kills": 3, "deaths": 1 },

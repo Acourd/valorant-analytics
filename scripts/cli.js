@@ -55,7 +55,8 @@ const { analyzeEconomy } = require('./economy_analyzer');
 const { generateCoachingReport } = require('./coaching_engine');
 
 // Deriva la evidencia de una partida para la política compartida. No crea
-// secciones: solo decide cuáles están permitidas por los datos disponibles.
+// secciones ni eventos sintéticos: solo clasifica campos REALES de la
+// telemetría (daño, kills/muertes, economía) y adjunta su procedencia.
 function extractMatchEvidence(matchData, playerHandle) {
   const segments = (matchData && matchData.data && matchData.data.segments) || (matchData && matchData.segments) || [];
   const summaries = segments.filter(s => s.type === 'player-summary');
@@ -65,10 +66,34 @@ function extractMatchEvidence(matchData, playerHandle) {
   ) || summaries[0];
   const st = (pick && pick.stats) || {};
   const val = k => (st[k] && (st[k].value !== undefined ? st[k].value : st[k].displayValue));
-  const observed = { kd: val('kdRatio'), acs: val('scorePerRound'), hs: val('hsAccuracy'), fk: val('firstKills'), fd: val('firstDeaths') };
-  const rounds = segments
-    .filter(s => s.type === 'player-round')
-    .map(s => ({ n: s.attributes && s.attributes.round, event: 'player_round', detail: `${(s.metadata && s.metadata.agentName) || ''} r${s.attributes && s.attributes.round}` }));
+  const observed = {
+    kd: val('kdRatio'), acs: val('scorePerRound'), hs: val('hsAccuracy'),
+    kast: val('kast'), fk: val('firstKills'), fd: val('firstDeaths'),
+    econRating: val('econRating'), winPct: val('roundsWinPct'), clutches: val('clutches')
+  };
+  const cell = (obj, k) => (obj && obj[k] && (obj[k].value !== undefined ? obj[k].value : obj[k].displayValue));
+  const rounds = [];
+  segments.forEach(s => {
+    const attrs = s.attributes || {};
+    if (s.type === 'player-round-damage') {
+      const dmg = cell(s.stats, 'damage');
+      if (dmg !== undefined && dmg !== null && Number(dmg) > 0) {
+        const hs = cell(s.stats, 'headshots');
+        const bs = cell(s.stats, 'bodyshots');
+        const ls = cell(s.stats, 'legshots');
+        rounds.push({ n: attrs.round, source: 'observed_event', event: 'damage', detail: `dmg ${dmg} (H${hs}/B${bs}/L${ls})` });
+      }
+    } else if (s.type === 'player-round') {
+      const kills = cell(s.stats, 'kills');
+      const deaths = cell(s.stats, 'deaths');
+      const spent = cell(s.stats, 'spentCredits');
+      if (kills !== undefined && deaths !== undefined && (Number(kills) > 0 || Number(deaths) > 0)) {
+        rounds.push({ n: attrs.round, source: 'observed_event', event: 'kill', detail: `${kills}K/${deaths}D` });
+      } else if (spent !== undefined && Number(spent) > 0) {
+        rounds.push({ n: attrs.round, source: 'observed_event', event: 'economy', detail: `spent ${spent}` });
+      }
+    }
+  });
   return { observed, rounds };
 }
 
@@ -329,14 +354,20 @@ try {
     printEvidenceLimits(evidence);
     console.log(`------------------------------------------------------------------------`);
     if (evidence.allowedSections.includes('aggregate_radar')) {
-      console.log(`📊 RADAR DE DOMINIO (5 PILARES):`);
-      console.log(`  • Precisión Mecánica:        ${res.radar.precisionMecanica}`);
-      console.log(`  • Macrogame y Espacio:       ${res.radar.macrogamePosicionamiento}`);
-      console.log(`  • Duelos de Apertura:        ${res.radar.duelosDeApertura}`);
-      console.log(`  • Disciplina Económica:      ${res.radar.disciplinaEconomica}`);
-      console.log(`  • Compostura en Clutch:      ${res.radar.composturaClutch}`);
+      console.log(`📊 RADAR DE DOMINIO (DIMENSIONAL: solo dimensiones con métrica+benchmark):`);
+      const radarRows = [
+        ['Precisión Mecánica', 'precision', res.radar.precisionMecanica],
+        ['Macrogame y Espacio', 'macro', res.radar.macrogamePosicionamiento],
+        ['Duelos de Apertura', 'openings', res.radar.duelosDeApertura],
+        ['Disciplina Económica', 'economy', res.radar.disciplinaEconomica],
+        ['Compostura en Clutch', 'clutch', res.radar.composturaClutch]
+      ];
+      radarRows.forEach(([label, key, value]) => {
+        const d = evidence.dimensions[key];
+        console.log(`  • ${label}: ${d && d.available ? value : 'n/d (sin métrica+benchmark)'}`);
+      });
     } else {
-      console.log(`📊 Radar omitido: sin métricas agregadas validadas.`);
+      console.log(`📊 Radar omitido: sin dimensiones evaluables (métrica+benchmark).`);
     }
     if (evidence.allowedSections.includes('round_leaks')) {
       console.log(`\n🚨 TOP FUGAS DE ELO (CAUSAS DE DERROTA):`);

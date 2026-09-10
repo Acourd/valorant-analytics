@@ -1895,7 +1895,7 @@ check('honestidad: la política de evidencia no fuerza coaching ni diagnósticos
       assert.ok(minimal.forbiddenSections.includes(s), `${s} debe estar prohibido en mínimo`);
     }
     assert.strictEqual(minimal.maxLeaks, 0, 'sin evidencia por ronda no hay fugas');
-    assert.ok(minimal.missing.some(m => m.startsWith('eventos_por_ronda')), 'debe declarar la falta de evidencia por ronda');
+    assert.ok(minimal.missing.some(m => m.startsWith('eventos_observados_por_ronda')), 'debe declarar la falta de evidencia por ronda');
     const partial = classifyEvidence(fixture('telemetry_partial.json'));
     assert.strictEqual(partial.level, 'aggregate', 'un marcador agregado sigue siendo evidencia agregada');
     assert.ok(!partial.allowedSections.includes('round_leaks'), 'sin rondas no se atribuyen fugas');
@@ -1908,6 +1908,9 @@ check('honestidad: la política de evidencia no fuerza coaching ni diagnósticos
       assert.ok(complete.allowedSections.includes(s), `completo debe permitir ${s}`);
     }
     assert.strictEqual(complete.maxLeaks, 3);
+    assert.strictEqual(complete.observedRoundCount, 3, 'solo los eventos observados cuentan');
+    assert.strictEqual(complete.declaredObservations, 1, 'user_claim se conserva como observación declarada');
+    assert.ok(complete.dimensions.precision.available, 'con HS% la precisión es evaluable');
     const none = classifyEvidence({ observed: {} });
     assert.strictEqual(none.level, 'insufficient');
     assert.ok(!none.allowedSections.includes('aggregate_radar'), 'sin métricas no hay radar');
@@ -1952,7 +1955,7 @@ check('honestidad: la política exige evidencia válida (rondas/duelos/zonas/por
     assert.ok(!fake.allowedSections.includes('round_leaks'), 'no debe habilitar fugas');
     assert.ok(!fake.allowedSections.includes('aim_routine'), 'no debe habilitar rutina');
     // Rondas válidas sin telemetría mecánica: fugas sí, rutina/zonas no.
-    const roundsOnly = ep.classifyEvidence({ rounds: [{ n: 3, event: 'post_plant' }], weaponZones: {} });
+    const roundsOnly = ep.classifyEvidence({ rounds: [{ n: 3, source: 'observed_event', event: 'plant' }], weaponZones: {} });
     assert.strictEqual(roundsOnly.level, 'complete');
     assert.ok(roundsOnly.allowedSections.includes('round_leaks'));
     assert.ok(!roundsOnly.allowedSections.includes('aim_routine'));
@@ -2011,6 +2014,54 @@ check('honestidad: rutas CLI con evidencia mínima/parcial omiten secciones no p
       const emptyOut = cliOk(['diagnose', emptyFile, 'Empty#1']);
       assert.ok(/Nivel de evidencia: insufficient/i.test(emptyOut), 'perfil vacío es insuficiente');
       assert.ok(!/CUELLO DE BOTELLA/.test(emptyOut), 'sin evidencia no se prescribe');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+check('honestidad: la política distingue procedencia y expone dimensiones evaluables',
+  () => {
+    const ep = require(path.join(scriptsDir, 'evidence_policy.js'));
+    const base = { observed: { hs: '25%', acs: '240', kd: '1.2' } };
+    const claim = ep.classifyEvidence({ ...base, rounds: [{ n: 4, source: 'user_claim', event: 'kill', detail: 'dice que falló' }] });
+    assert.strictEqual(claim.level, 'aggregate', 'una afirmación del usuario NO habilita fugas');
+    assert.ok(!claim.allowedSections.includes('round_leaks'));
+    assert.strictEqual(claim.declaredObservations, 1);
+    const inferred = ep.classifyEvidence({ ...base, rounds: [{ n: 4, source: 'inference', event: 'position', detail: 'suposición' }] });
+    assert.strictEqual(inferred.level, 'aggregate', 'una inferencia NO habilita fugas');
+    const unknownEvent = ep.classifyEvidence({ ...base, rounds: [{ n: 4, source: 'observed_event', event: 'texto_libre' }] });
+    assert.ok(!unknownEvent.allowedSections.includes('round_leaks'), 'evento fuera de taxonomía no habilita fugas');
+    const observedRound = ep.classifyEvidence({ ...base, rounds: [{ n: 4, source: 'observed_event', event: 'kill', detail: '1K' }] });
+    assert.strictEqual(observedRound.level, 'complete', 'solo observed_event habilita complete');
+    assert.ok(observedRound.allowedSections.includes('round_leaks'));
+    // Dimensiones: disponibles solo con métrica+benchmark.
+    const dims = ep.classifyEvidence({ observed: { hs: '25%' } }).dimensions;
+    assert.ok(dims.precision.available);
+    assert.ok(!dims.macro.available && !dims.openings.available && !dims.economy.available && !dims.clutch.available);
+    const acsOnly = ep.classifyEvidence({ observed: { acs: '220' } });
+    assert.ok(!acsOnly.allowedSections.includes('aggregate_radar'), 'solo ACS no habilita radar');
+    assert.ok(!acsOnly.allowedSections.includes('mmr_signal'), 'MMR requiere KD y ACS');
+  });
+
+check('honestidad: el radar del CLI es dimensional (n/d sin score cuando falta la métrica)',
+  () => {
+    const sampleFull = JSON.parse(fs.readFileSync(sampleFile, 'utf8'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-radar-'));
+    try {
+      const segs = sampleFull.data.segments;
+      const summary = JSON.parse(JSON.stringify(
+        segs.find(s => s.type === 'player-summary' && (s.metadata.platformUserHandle || s.attributes.platformUserIdentifier) === 'TenZ#0001')
+      ));
+      ['kast', 'econRating', 'clutches', 'roundsWinPct', 'firstKills', 'firstDeaths'].forEach(k => delete summary.stats[k]);
+      const mod = { data: { segments: [summary, ...segs.filter(s => s.type === 'player-round-damage').slice(0, 40)] } };
+      const file = path.join(tmp, 'radar.json');
+      fs.writeFileSync(file, JSON.stringify(mod), 'utf8');
+      const out = cliOk(['match', file, 'TenZ#0001']);
+      assert.ok(/Precisión Mecánica: \d+ \/ 100/.test(out), 'la dimensión con HS% debe puntuar');
+      assert.ok(/Macrogame y Espacio: n\/d/.test(out), 'KAST sin métrica debe ser n/d');
+      assert.ok(/Disciplina Económica: n\/d/.test(out), 'economía sin métrica debe ser n/d');
+      const econLine = out.split(/\r?\n/).find(l => l.includes('Disciplina Económica')) || '';
+      assert.ok(!/\d+ \/ 100/.test(econLine), 'una dimensión n/d no debe llevar score');
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
