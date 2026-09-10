@@ -260,6 +260,54 @@ function lstatRegularOrAbsent(p) {
   }
 }
 
+// O_NOFOLLOW evita seguir un symlink en la apertura (POSIX). En Windows no
+// existe; allí la sustitución se detecta comparando dev/ino del descriptor
+// abierto contra la inspección previa (NTFS expone file-id estable).
+const NOFOLLOW_FLAG = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0;
+const DIRECTORY_FLAG = typeof fs.constants.O_DIRECTORY === 'number' ? fs.constants.O_DIRECTORY : 0;
+
+function nofollowSupported() {
+  return NOFOLLOW_FLAG !== 0;
+}
+
+/**
+ * Lectura SIN carrera TOCTOU: abre por DESCRIPTOR con O_NOFOLLOW (donde la
+ * plataforma lo permite), valida el descriptor con fstat y, además, compara
+ * dev/ino contra la inspección previa (expectedStat). Si entre el lstat y la
+ * apertura un actor sustituyó el objeto, la comparación falla cerrada. Devuelve
+ * null solo si el archivo no existe (ENOENT).
+ */
+function readFileNoFollow(p, what, expectedStat) {
+  let fd = null;
+  try {
+    fd = fs.openSync(p, fs.constants.O_RDONLY | NOFOLLOW_FLAG);
+  } catch (e) {
+    if (e.code === 'ELOOP') {
+      throw new Error(`El ${what} es un enlace simbólico (${p}): perímetro de archivos violado; jamás se sigue (fail-closed).`);
+    }
+    if (e.code === 'ENOENT') return null;
+    throw new Error(`No se pudo abrir ${what} (${p}): ${e.message} (fail-closed).`);
+  }
+  try {
+    const opened = fs.fstatSync(fd);
+    if (!opened.isFile()) {
+      throw new Error(`El ${what} (${p}) no es un archivo regular: fail-closed.`);
+    }
+    if (expectedStat && (opened.dev !== expectedStat.dev || opened.ino !== expectedStat.ino)) {
+      throw new Error(`Sustitución detectada en ${what} (${p}) entre la inspección y la apertura: fail-closed (dev/ino cambiaron).`);
+    }
+    return fs.readFileSync(fd);
+  } finally {
+    try { fs.closeSync(fd); } catch (e) {}
+  }
+}
+
+function openDirNoFollow(dirPath) {
+  // Apertura de directorio con O_NOFOLLOW/O_DIRECTORY donde existan. Windows
+  // no soporta abrir directorios así: el llamador lo trata como best-effort.
+  return fs.openSync(dirPath, fs.constants.O_RDONLY | NOFOLLOW_FLAG | DIRECTORY_FLAG);
+}
+
 /**
  * Política de directorio privado (PURO y determinista, testeable en cualquier
  * plataforma). Devuelve null si el directorio puede alojar claves, o el
@@ -312,12 +360,12 @@ function readLegacyKeystore(keystorePath) {
     throw new Error(`El keystore es un enlace simbólico (${keystorePath}): elimínalo manualmente. Nunca se escribe ni se sigue un symlink.`);
   }
   let raw;
-  try { raw = fs.readFileSync(keystorePath, 'utf8'); }
-  catch (e) {
-    // Desapareció entre lstat y read (migración concurrente): no es ilegible,
-    // es ausente; el sondeo exterior re-lista los marcadores.
-    if (e.code === 'ENOENT') return null;
-    throw new Error(`El keystore legado (${keystorePath}) existe pero es ilegible: inspecciónalo manualmente (fail-closed; jamás se sobrescribe estado potencialmente recuperable).`);
+  try {
+    const buf = readFileNoFollow(keystorePath, 'keystore legado', st);
+    if (buf === null) return null; // desapareció (migración concurrente)
+    raw = buf.toString('utf8');
+  } catch (e) {
+    throw new Error(`El keystore legado (${keystorePath}) existe pero es ilegible: ${e.message} (fail-closed; jamás se sobrescribe estado potencialmente recuperable).`);
   }
   try {
     const parsed = JSON.parse(raw);
@@ -338,16 +386,11 @@ function readGenerationContent(keystorePath, gen, nonce, expectedDigest) {
   if (st.isSymbolicLink()) {
     throw new Error(`El contenido de la generación ${gen} es un enlace simbólico (${contentPath}): perímetro de archivos violado; jamás se sigue (fail-closed).`);
   }
-  let raw;
-  try {
-    raw = fs.readFileSync(contentPath);
-  } catch (e) {
-    if (e.code === 'ENOENT') {
-      const absent = new Error(`Contenido de la generación ${gen} ausente (${contentPath}) pese a existir su marcador: posible compactación concurrente o sabotaje (fail-closed).`);
-      absent.code = 'KS_CONTENT_ABSENT';
-      throw absent;
-    }
-    throw new Error(`Contenido de la generación ${gen} ilegible (${contentPath}): ${e.message} (fail-closed).`);
+  const raw = readFileNoFollow(contentPath, `contenido de la generación ${gen}`, st);
+  if (raw === null) {
+    const absent = new Error(`Contenido de la generación ${gen} ausente (${contentPath}) pese a existir su marcador: posible compactación concurrente o sabotaje (fail-closed).`);
+    absent.code = 'KS_CONTENT_ABSENT';
+    throw absent;
   }
   if (expectedDigest) {
     // Vínculo criptográfico marcador→contenido: el digest grabado en el
@@ -395,9 +438,8 @@ function readCommittedKeystore(keystorePath) {
     if (markerSt.isSymbolicLink()) {
       throw new Error(`El marcador de commit de la generación ${gen} es un enlace simbólico (${markerPath}): perímetro de archivos violado; jamás se sigue (fail-closed).`);
     }
-    let raw = null;
-    try { raw = fs.readFileSync(markerPath); }
-    catch (e) { execSleep(20); continue; } // desapareció entre lstat y read: reintentar
+    const raw = readFileNoFollow(markerPath, `marcador de commit de la generación ${gen}`, markerSt);
+    if (raw === null) { execSleep(20); continue; } // desapareció entre lstat y open: reintentar
     const m = raw.toString('utf8').trim().match(MARKER_RE);
     if (!m) {
       // Escritura parcial (caída) o sabotaje: reintentar antes de concluir;
@@ -491,7 +533,7 @@ function commitKeystore(keystorePath, mutate, options = {}) {
     //    compactación es una operación explícita futura, jamás automática
     //    (un GC aquí competiría con lectores activos de generaciones previas).
     try {
-      const dirFd = fs.openSync(path.dirname(keystorePath), 'r');
+      const dirFd = openDirNoFollow(path.dirname(keystorePath));
       try { fs.fsyncSync(dirFd); } finally { try { fs.closeSync(dirFd); } catch (e) {} }
     } catch (e) { /* filesystems sin fsync de directorio */ }
     // El formato legado queda obsoleto: los marcadores son la única verdad.
@@ -569,7 +611,8 @@ module.exports = {
   registerTrustedKey,
   commitKeystore,
   compactKeystore,
-  storageDirPolicyViolation
+  storageDirPolicyViolation,
+  nofollowSupported
 };
 
 if (require.main === module) {

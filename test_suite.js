@@ -1675,6 +1675,93 @@ check('dsse: política de directorio privado — grupo/otros escribible o dueño
     }
   });
 
+check('dsse: sustitución entre inspección y apertura no redirige la lectura (anti-TOCTOU)',
+  () => {
+    const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
+    // Caso A (universal, sin symlinks): tras el lstat se reemplaza el contenido
+    // por OTRO archivo regular (inodo distinto, traído con rename) → el
+    // detector dev/ino del descriptor abierto debe fallar cerrado.
+    const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-swapA-'));
+    try {
+      const ksPath = path.join(tmpA, 'ks.json');
+      const kp = crypto.generateKeyPairSync('ed25519');
+      dsse.registerTrustedKey(ksPath, kp.publicKey.export({ type: 'spki', format: 'pem' }), 'base');
+      const contentName = fs.readdirSync(tmpA).find(f => /^ks\.json\.g1\./.test(f));
+      const contentPath = path.join(tmpA, contentName);
+      const originalBytes = fs.readFileSync(contentPath);
+      const decoy = path.join(tmpA, 'decoy.bin');
+      fs.writeFileSync(decoy, Buffer.concat([originalBytes, Buffer.from(' ')]));
+      const realLstat = fs.lstatSync;
+      let swapped = false;
+      fs.lstatSync = function (p, ...rest) {
+        const st = realLstat.call(fs, p, ...rest);
+        if (!swapped && String(p) === contentPath) {
+          swapped = true;
+          fs.unlinkSync(contentPath);
+          fs.renameSync(decoy, contentPath); // inodo distinto al inspeccionado
+        }
+        return st;
+      };
+      let threw = false;
+      let errMsg = '';
+      try { dsse.loadOrCreateKeystore(ksPath); }
+      catch (e) { threw = true; errMsg = e.message; }
+      finally { fs.lstatSync = realLstat; }
+      assert.ok(swapped, 'la sustitución debe haberse ejecutado');
+      assert.ok(threw && /Sustitución|enlace simbólico|digest|fail-closed/.test(errMsg),
+        `la sustitución entre lstat y apertura debe fallar cerrada: ${errMsg}`);
+      fs.unlinkSync(contentPath);
+      fs.writeFileSync(contentPath, originalBytes);
+      const kp2 = crypto.generateKeyPairSync('ed25519');
+      dsse.registerTrustedKey(ksPath, kp2.publicKey.export({ type: 'spki', format: 'pem' }), 'restaurado');
+      assert.strictEqual(dsse.loadOrCreateKeystore(ksPath).keys.length, 2, 'el protocolo sigue sano tras el intento de sustitución');
+    } finally {
+      fs.rmSync(tmpA, { recursive: true, force: true });
+    }
+    // Caso B (POSIX): sustitución por symlink → O_NOFOLLOW corta la apertura.
+    const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-swapB-'));
+    try {
+      const ksPath = path.join(tmpB, 'ks.json');
+      const kp = crypto.generateKeyPairSync('ed25519');
+      dsse.registerTrustedKey(ksPath, kp.publicKey.export({ type: 'spki', format: 'pem' }), 'base');
+      const contentName = fs.readdirSync(tmpB).find(f => /^ks\.json\.g1\./.test(f));
+      const contentPath = path.join(tmpB, contentName);
+      const originalBytes = fs.readFileSync(contentPath);
+      const outside = path.join(tmpB, 'outside-secret.txt');
+      fs.writeFileSync(outside, 'CONTENIDO-EXTERNO-SECRETO');
+      let symlinkOk = true;
+      try { fs.symlinkSync(outside, path.join(tmpB, 'probe-link'), 'file'); fs.unlinkSync(path.join(tmpB, 'probe-link')); }
+      catch (e) { symlinkOk = false; }
+      if (symlinkOk) {
+        const realLstat = fs.lstatSync;
+        let swapped = false;
+        fs.lstatSync = function (p, ...rest) {
+          const st = realLstat.call(fs, p, ...rest);
+          if (!swapped && String(p) === contentPath) {
+            swapped = true;
+            fs.unlinkSync(contentPath);
+            fs.symlinkSync(outside, contentPath, 'file');
+          }
+          return st;
+        };
+        let threw = false;
+        let errMsg = '';
+        try { dsse.loadOrCreateKeystore(ksPath); }
+        catch (e) { threw = true; errMsg = e.message; }
+        finally { fs.lstatSync = realLstat; }
+        assert.ok(threw && /enlace simbólico|Sustitución|fail-closed/.test(errMsg),
+          `el symlink sustituido debe fallar cerrada: ${errMsg}`);
+        assert.strictEqual(fs.readFileSync(outside, 'utf8'), 'CONTENIDO-EXTERNO-SECRETO', 'el objetivo externo fue alterado');
+        if (fs.existsSync(contentPath)) fs.unlinkSync(contentPath);
+        fs.writeFileSync(contentPath, originalBytes);
+      } else {
+        assert.ok(true, 'entorno sin privilegios de symlink: caso B no aplicable');
+      }
+    } finally {
+      fs.rmSync(tmpB, { recursive: true, force: true });
+    }
+  });
+
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben
 // reflejar EXACTAMENTE el número de casos registrados y ejecutados. Un
 // manifiesto desincronizado hace fallar la suite (imposible sobre-declarar
