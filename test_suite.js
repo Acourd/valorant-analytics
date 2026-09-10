@@ -1513,6 +1513,125 @@ const dsse = require(${JSON.stringify(path.join(scriptsDir, 'dsse_attestation.js
     }
   });
 
+check('dsse: compactación explícita acota almacenamiento sin perder lectores concurrentes',
+  () => {
+    const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-compact-'));
+    try {
+      const ksPath = path.join(tmp, 'ks.json');
+      // 10 registros secuenciales → 10 generaciones (10 contenidos + marcadores).
+      for (let i = 0; i < 10; i++) {
+        const kp = crypto.generateKeyPairSync('ed25519');
+        dsse.registerTrustedKey(ksPath, kp.publicKey.export({ type: 'spki', format: 'pem' }), `c${i}`);
+      }
+      const readerScript = path.join(tmp, 'reader.js');
+      fs.writeFileSync(readerScript, `
+const dsse = require(${JSON.stringify(path.join(scriptsDir, 'dsse_attestation.js'))});
+for (let i = 0; i < 250; i++) {
+  let ks;
+  try { ks = dsse.loadOrCreateKeystore(${JSON.stringify(ksPath)}); }
+  catch (e) { console.error('READ_FAIL ' + i + ': ' + e.message); process.exit(1); }
+  if (!ks || !Array.isArray(ks.keys) || ks.keys.length < 10) {
+    console.error('READ_BAD ' + i + ' keys=' + (ks ? ks.keys.length : 'null')); process.exit(1);
+  }
+}
+console.log('READER_OK');
+`);
+      const coordScript = path.join(tmp, 'coordC.js');
+      fs.writeFileSync(coordScript, `
+const { Worker } = require('worker_threads');
+const fs = require('fs');
+const crypto = require('crypto');
+const dsse = require(${JSON.stringify(path.join(scriptsDir, 'dsse_attestation.js'))});
+(async () => {
+  const readers = [];
+  for (let i = 0; i < 3; i++) {
+    readers.push(new Promise((resolve, reject) => {
+      const w = new Worker(${JSON.stringify(readerScript)});
+      w.on('error', (e) => reject(new Error('reader ' + i + ': ' + e.message)));
+      w.on('exit', (code) => code === 0 ? resolve(i) : reject(new Error('reader ' + i + ' exit ' + code)));
+    }));
+  }
+  // Compactaciones y registros bajo presión de lectores concurrentes.
+  dsse.compactKeystore(${JSON.stringify(ksPath)}, { retain: 2 });
+  for (let i = 0; i < 2; i++) {
+    dsse.registerTrustedKey(${JSON.stringify(ksPath)}, crypto.generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' }), 'late-' + i);
+  }
+  dsse.compactKeystore(${JSON.stringify(ksPath)}, { retain: 2 });
+  await Promise.all(readers);
+  const ks = dsse.loadOrCreateKeystore(${JSON.stringify(ksPath)});
+  if (ks.keys.length !== 12) { console.error('KEYS=' + ks.keys.length); process.exit(1); }
+  const dir = ${JSON.stringify(tmp)};
+  const markers = fs.readdirSync(dir).filter(f => /^ks\\.json\\.commit\\.\\d+$/.test(f)).length;
+  const contents = fs.readdirSync(dir).filter(f => /^ks\\.json\\.g\\d+\\./.test(f)).length;
+  if (markers > 2 || contents > 2) { console.error('BOUND markers=' + markers + ' contents=' + contents); process.exit(1); }
+  console.log('COMPACT_OK 12/12 markers=' + markers + ' contents=' + contents + ' gen=' + ks.generation);
+})();
+`);
+      const out = execFileSync(process.execPath, [coordScript], { encoding: 'utf8', timeout: 180000 });
+      assert.ok(out.includes('COMPACT_OK'), 'compactación perdió claves o excedió límites');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+check('dsse: symlink en marcador, contenido o directorio jamás se sigue (perímetro de archivos)',
+  () => {
+    const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-perim-'));
+    try {
+      const ksPath = path.join(tmp, 'ks.json');
+      const outside = path.join(tmp, 'outside.txt');
+      fs.writeFileSync(outside, 'ORIGINAL-EXTERNO');
+      // Caso 1: marcador como symlink. Estado manual: contenido g1 + marcador
+      // symlink; la lectura debe abortar por lstat sin abrir el objetivo.
+      fs.writeFileSync(`${ksPath}.g1.cafe`, JSON.stringify({ keys: [], generation: 1, writer: '1:1:cafe' }));
+      let linkOk = true;
+      try { fs.symlinkSync(outside, `${ksPath}.commit.1`, 'file'); } catch (e) { linkOk = false; }
+      if (linkOk) {
+        assert.throws(() => dsse.loadOrCreateKeystore(ksPath), /enlace simbólico/,
+          'marcador symlink debe abortar por lstat, sin seguirlo');
+        assert.strictEqual(fs.readFileSync(outside, 'utf8'), 'ORIGINAL-EXTERNO', 'el objetivo externo fue accedido');
+        fs.unlinkSync(`${ksPath}.commit.1`);
+        // Caso 2: marcador válido cuyo contenido es un symlink.
+        const fake = JSON.stringify({ keys: [], generation: 1, writer: '1:1:cafe' });
+        const fakeDigest = crypto.createHash('sha256').update(Buffer.from(fake, 'utf8')).digest('hex');
+        fs.writeFileSync(`${ksPath}.commit.1`, `1:m:cafe:${fakeDigest}`);
+        try { fs.symlinkSync(outside, `${ksPath}.g1.cafe`, 'file'); } catch (e) { linkOk = false; }
+        if (linkOk) {
+          assert.throws(() => dsse.loadOrCreateKeystore(ksPath), /enlace simbólico/,
+            'contenido symlink debe abortar por lstat, sin abrir el objetivo');
+          assert.strictEqual(fs.readFileSync(outside, 'utf8'), 'ORIGINAL-EXTERNO', 'el objetivo externo fue leído');
+          fs.unlinkSync(`${ksPath}.g1.cafe`);
+          // Sin el symlink el protocolo verifica el digest y falla cerrado.
+          assert.throws(() => dsse.loadOrCreateKeystore(ksPath), /ausente|digest|manipulación/,
+            'el contenido faltante con marcador válido es fail-closed');
+        }
+        fs.unlinkSync(`${ksPath}.commit.1`);
+      }
+      // Caso 3: directorio del keystore como symlink (requiere privilegio).
+      let dirLinkOk = true;
+      const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-perim2-'));
+      try {
+        const realDir = path.join(tmp2, 'real');
+        fs.mkdirSync(realDir);
+        const linkDir = path.join(tmp2, 'link');
+        try { fs.symlinkSync(realDir, linkDir, 'dir'); } catch (e) { dirLinkOk = false; }
+        if (dirLinkOk) {
+          assert.throws(() => dsse.loadOrCreateKeystore(path.join(linkDir, 'ks.json')), /enlace simbólico/,
+            'directorio symlink jamás se sigue');
+        }
+      } finally {
+        fs.rmSync(tmp2, { recursive: true, force: true });
+      }
+      if (!linkOk) {
+        assert.ok(true, 'entorno sin privilegios de symlink: casos de symlink no aplicables');
+      }
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben
 // reflejar EXACTAMENTE el número de casos registrados y ejecutados. Un
 // manifiesto desincronizado hace fallar la suite (imposible sobre-declarar

@@ -173,9 +173,12 @@ function verifyWithPem(envelope, pem) {
  *   K.g<N>.<nonce> : contenido inmutable de la generación N. Se crea con wx
  *                    y se sincroniza (fsync) ANTES de tocar ningún marcador.
  *   K.commit.<N>    : marcador de la generación N = verdad canónica. Se crea
- *                    con wx (contenido pid:tid:nonce) y NUNCA se elimina: la
- *                    numeración es estrictamente monótona para siempre, entre
- *                    procesos e hilos, sin relojes ni mtime.
+ *                    con wx (contenido pid:tid:nonce:digest). La numeración
+ *                    es estrictamente monótona entre procesos e hilos, sin
+ *                    relojes ni mtime; los marcadores por debajo del piso de
+ *                    retención SOLO los elimina compactKeystore de forma
+ *                    explícita (una resurrección por debajo del piso queda
+ *                    siempre por debajo del máximo y es ignorada).
  *   K               : keystore legado del formato anterior (single-file).
  *                    Solo lectura; se elimina tras la primera publicación.
  *
@@ -190,11 +193,19 @@ function verifyWithPem(envelope, pem) {
  *     marcador: estado inerte que no bloquea a nadie ni requiere reinicio.
  *   - Durabilidad ordenada: contenido completo y sincronizado antes del
  *     marcador; un marcador legítimo siempre referencia contenido íntegro.
- *   - Retención histórica (sin GC automático): el contenido commiteado JAMÁS
- *     se elimina automáticamente. La compactación es una operación explícita,
- *     separada y futura. Solo cada perdedor retira su PROPIO contenido no
- *     referenciable por marcador alguno. Así toda lectura de un marcador
- *     encuentra siempre su contenido: no existe carrera lector-GC.
+ *   - Retención definida y compactación EXPLÍCITA: jamás existe GC automático.
+ *     El almacenamiento crece una copia por commit; compactKeystore(ks,
+ *     { retain }) re-publica el estado actual como nueva generación (por el
+ *     mismo protocolo, coordinada por marcadores) y elimina contenido y
+ *     marcadores por DEBAJO del piso (se conservan las últimas `retain`
+ *     generaciones, default 2). Un lector que linealizó más atrás que el
+ *     piso recupera: ve un marcador más nuevo y re-sondea; si no hay
+ *     marcador más nuevo, el contenido faltante es fail-closed. Nunca se
+ *     pierde la generación vigente ni sus claves.
+ *   - Perímetro de archivos: directorio, marcador y contenido se inspeccionan
+ *     con lstat ANTES de leerse; un symlink jamás se sigue (fail-closed). El
+ *     directorio no puede ser un symlink ni un directorio compartido
+ *     escribible por todos sin sticky bit (POSIX).
  *   - Fail-closed: marcador ilegible (parcial o manipulado) SIEMPRE aborta:
  *     el contenido huérfano sin marcador VÁLIDO es inerte y jamás se adopta
  *     como estado. La recuperación exige intervención manual explícita.
@@ -240,6 +251,28 @@ function listKeystoreGenerationFiles(keystorePath) {
   return { markers, contents };
 }
 
+function lstatRegularOrAbsent(p) {
+  try { return fs.lstatSync(p); }
+  catch (e) {
+    if (e.code === 'ENOENT') return null;
+    throw new Error(`No se pudo inspeccionar ${p}: ${e.message} (fail-closed).`);
+  }
+}
+
+function assertStorageDirSafe(dirPath) {
+  const st = lstatRegularOrAbsent(dirPath);
+  if (st === null) return; // mkdirSync lo crea; la creación valida
+  if (st.isSymbolicLink()) {
+    throw new Error(`El directorio del keystore es un enlace simbólico (${dirPath}): perímetro de archivos violado; jamás se sigue (fail-closed).`);
+  }
+  if (!st.isDirectory()) {
+    throw new Error(`La ruta del keystore no es un directorio (${dirPath}): fail-closed.`);
+  }
+  if (process.platform !== 'win32' && (st.mode & 0o002) && !(st.mode & 0o1000)) {
+    throw new Error(`El directorio del keystore (${dirPath}) es escribible por todos sin sticky bit: perímetro inseguro (fail-closed).`);
+  }
+}
+
 function readLegacyKeystore(keystorePath) {
   let st;
   try { st = fs.lstatSync(keystorePath); }
@@ -264,11 +297,26 @@ function readLegacyKeystore(keystorePath) {
 
 function readGenerationContent(keystorePath, gen, nonce, expectedDigest) {
   const contentPath = `${keystorePath}.g${gen}.${nonce}`;
+  // Perímetro: lstat ANTES de leer; un symlink jamás se sigue.
+  const st = lstatRegularOrAbsent(contentPath);
+  if (st === null) {
+    const absent = new Error(`Contenido de la generación ${gen} ausente (${contentPath}) pese a existir su marcador: posible compactación concurrente o sabotaje (fail-closed).`);
+    absent.code = 'KS_CONTENT_ABSENT';
+    throw absent;
+  }
+  if (st.isSymbolicLink()) {
+    throw new Error(`El contenido de la generación ${gen} es un enlace simbólico (${contentPath}): perímetro de archivos violado; jamás se sigue (fail-closed).`);
+  }
   let raw;
   try {
     raw = fs.readFileSync(contentPath);
   } catch (e) {
-    throw new Error(`Contenido de la generación ${gen} ausente o ilegible (${contentPath}) pese a existir su marcador: posible sabotaje o corrupción de disco (fail-closed).`);
+    if (e.code === 'ENOENT') {
+      const absent = new Error(`Contenido de la generación ${gen} ausente (${contentPath}) pese a existir su marcador: posible compactación concurrente o sabotaje (fail-closed).`);
+      absent.code = 'KS_CONTENT_ABSENT';
+      throw absent;
+    }
+    throw new Error(`Contenido de la generación ${gen} ilegible (${contentPath}): ${e.message} (fail-closed).`);
   }
   if (expectedDigest) {
     // Vínculo criptográfico marcador→contenido: el digest grabado en el
@@ -295,6 +343,7 @@ function readGenerationContent(keystorePath, gen, nonce, expectedDigest) {
 
 function readCommittedKeystore(keystorePath) {
   for (let probe = 0; probe < 5; probe++) {
+    assertStorageDirSafe(path.dirname(keystorePath));
     const { markers, contents } = listKeystoreGenerationFiles(keystorePath);
     if (markers.length === 0) {
       const legacy = readLegacyKeystore(keystorePath);
@@ -309,9 +358,15 @@ function readCommittedKeystore(keystorePath) {
     }
     const gen = Math.max(...markers);
     const markerPath = `${keystorePath}.commit.${gen}`;
+    // Perímetro: lstat ANTES de leer; un symlink jamás se sigue.
+    const markerSt = lstatRegularOrAbsent(markerPath);
+    if (markerSt === null) { execSleep(20); continue; } // desapareció (compactación): reintentar
+    if (markerSt.isSymbolicLink()) {
+      throw new Error(`El marcador de commit de la generación ${gen} es un enlace simbólico (${markerPath}): perímetro de archivos violado; jamás se sigue (fail-closed).`);
+    }
     let raw = null;
     try { raw = fs.readFileSync(markerPath); }
-    catch (e) { execSleep(20); continue; } // desapareció entre readdir y read: reintentar
+    catch (e) { execSleep(20); continue; } // desapareció entre lstat y read: reintentar
     const m = raw.toString('utf8').trim().match(MARKER_RE);
     if (!m) {
       // Escritura parcial (caída) o sabotaje: reintentar antes de concluir;
@@ -321,7 +376,18 @@ function readCommittedKeystore(keystorePath) {
       if (probe < 4) { execSleep(20); continue; }
       throw new Error(`Marcador de commit de la generación ${gen} ilegible (${markerPath}): fail-closed; jamás se publica contenido huérfano (${(contents.get(gen) || []).length} candidato(s) retenido(s) como inerte(s)). Estado de la generación anterior intacto; inspecciónalo manualmente.`);
     }
-    return { keystore: readGenerationContent(keystorePath, gen, m[3], m[4]), generation: gen };
+    try {
+      return { keystore: readGenerationContent(keystorePath, gen, m[3], m[4]), generation: gen };
+    } catch (e) {
+      // Compactación concurrente: el lector linealizó atrás del piso. Si hay
+      // un marcador MÁS NUEVO, el protocolo avanzó y el sondeo se re-arma;
+      // si no, el contenido faltante es sabotaje y queda fail-closed.
+      if (e && e.code === 'KS_CONTENT_ABSENT' && probe < 4) {
+        const re = listKeystoreGenerationFiles(keystorePath);
+        if (re.markers.some(g2 => g2 > gen)) { execSleep(10); continue; }
+      }
+      throw e;
+    }
   }
   throw new Error(`No se pudo leer el estado del keystore (${keystorePath}) de forma consistente tras 5 intentos.`);
 }
@@ -335,7 +401,8 @@ function commitKeystore(keystorePath, mutate, options = {}) {
   const maxAttempts = options.maxAttempts || 50;
   const waitMs = options.waitMs || 25;
   if (typeof mutate !== 'function') throw new Error('commitKeystore requiere una función de mutación (current => candidate).');
-  fs.mkdirSync(path.dirname(keystorePath), { recursive: true });
+  fs.mkdirSync(path.dirname(keystorePath), { recursive: true, mode: 0o700 });
+  assertStorageDirSafe(path.dirname(keystorePath));
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const state = readCommittedKeystore(keystorePath);
     const base = state ? state.keystore : { keys: [] };
@@ -420,6 +487,47 @@ function registerTrustedKey(keystorePath, publicKeyPem, label) {
   return keyid;
 }
 
+/**
+ * Compactación EXPLÍCITA y coordinada del keystore (jamás automática).
+ *
+ * Fase 1: re-publica el estado actual como nueva generación mediante el
+ *         protocolo normal de marcadores (las compactaciones concurrentes se
+ *         serializan solas; el snapshot queda versionado por generación y
+ *         vinculado por digest SHA-256 en su marcador).
+ * Fase 2: retención definida — elimina contenido y marcadores ESTRICTAMENTE
+ *         anteriores al piso (floor = generación - retain + 1; default
+ *         retain = 2). Los lectores que linealizaron dentro de la ventana
+ *         encuentran su contenido; los que linealizaron más atrás recuperan
+ *         (veen un marcador más nuevo y re-sondean) o fallan cerrados.
+ *
+ * Devuelve { generation, keys, removed } con el estado compactado.
+ */
+function compactKeystore(keystorePath, options = {}) {
+  const retain = Math.max(1, options.retain || 2);
+  const committed = commitKeystore(keystorePath, (cur) => cur);
+  const dir = path.dirname(keystorePath);
+  const base = path.basename(keystorePath);
+  const floor = committed.generation - retain + 1;
+  let removed = 0;
+  let entries;
+  try { entries = fs.readdirSync(dir); } catch (e) { entries = []; }
+  for (const name of entries) {
+    if (!name.startsWith(base + '.')) continue;
+    const rest = name.slice(base.length + 1);
+    let m = rest.match(/^commit\.(\d+)$/);
+    const isMarker = Boolean(m);
+    if (!m) m = rest.match(/^g(\d+)\.[0-9a-f]+$/);
+    if (!m) continue;
+    const gen = parseInt(m[1], 10);
+    if (gen >= floor) continue;
+    // Los marcadores se retiran ANTES que su contenido: un lector atrasado
+    // que intente un marcador eliminado obtiene ENOENT y re-sondea (recupera)
+    // en lugar de leer contenido ya retirado.
+    try { fs.unlinkSync(path.join(dir, name)); removed++; } catch (e) { /* mejor esfuerzo */ }
+  }
+  return { generation: committed.generation, keys: committed.keys.length, removed, retain, floor };
+}
+
 module.exports = {
   generateAttestationKeyPair,
   sha256Digest,
@@ -428,7 +536,8 @@ module.exports = {
   verifyTelemetryAttestation,
   loadOrCreateKeystore,
   registerTrustedKey,
-  commitKeystore
+  commitKeystore,
+  compactKeystore
 };
 
 if (require.main === module) {
