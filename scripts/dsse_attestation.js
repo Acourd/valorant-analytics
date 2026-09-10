@@ -190,8 +190,18 @@ function verifyWithPem(envelope, pem) {
  *     marcador: estado inerte que no bloquea a nadie ni requiere reinicio.
  *   - Durabilidad ordenada: contenido completo y sincronizado antes del
  *     marcador; un marcador legítimo siempre referencia contenido íntegro.
+ *   - Retención histórica (sin GC automático): el contenido commiteado JAMÁS
+ *     se elimina automáticamente. La compactación es una operación explícita,
+ *     separada y futura. Solo cada perdedor retira su PROPIO contenido no
+ *     referenciable por marcador alguno. Así toda lectura de un marcador
+ *     encuentra siempre su contenido: no existe carrera lector-GC.
  *   - Fail-closed: marcador ilegible con candidatos ambiguos, contenido
  *     ausente o generación inconsistente abortan con estado intacto.
+ *
+ * Convergencia: commitKeystore converge sin pérdida para mutaciones
+ * conmutativas/idempotentes (p. ej., añadir una clave). Un REEMPLAZO total
+ * del estado es responsabilidad de la función de mutación y exige
+ * coordinación externa del llamador: la API no expone escritura ciega.
  */
 
 const MARKER_RE = /^(\d+):([A-Za-z0-9_-]+):([0-9a-f]+)$/;
@@ -233,8 +243,16 @@ function readLegacyKeystore(keystorePath) {
   if (st.isSymbolicLink()) {
     throw new Error(`El keystore es un enlace simbólico (${keystorePath}): elimínalo manualmente. Nunca se escribe ni se sigue un symlink.`);
   }
+  let raw;
+  try { raw = fs.readFileSync(keystorePath, 'utf8'); }
+  catch (e) {
+    // Desapareció entre lstat y read (migración concurrente): no es ilegible,
+    // es ausente; el sondeo exterior re-lista los marcadores.
+    if (e.code === 'ENOENT') return null;
+    throw new Error(`El keystore legado (${keystorePath}) existe pero es ilegible: inspecciónalo manualmente (fail-closed; jamás se sobrescribe estado potencialmente recuperable).`);
+  }
   try {
-    const parsed = JSON.parse(fs.readFileSync(keystorePath, 'utf8'));
+    const parsed = JSON.parse(raw);
     if (parsed && Array.isArray(parsed.keys)) return { keystore: parsed, generation: 0 };
   } catch (e) { /* ilegible: fail-closed abajo */ }
   throw new Error(`El keystore legado (${keystorePath}) existe pero es ilegible: inspecciónalo manualmente (fail-closed; jamás se sobrescribe estado potencialmente recuperable).`);
@@ -270,7 +288,17 @@ function adoptOrphanGeneration(keystorePath, gen, nonces) {
 function readCommittedKeystore(keystorePath) {
   for (let probe = 0; probe < 5; probe++) {
     const { markers, contents } = listKeystoreGenerationFiles(keystorePath);
-    if (markers.length === 0) return readLegacyKeystore(keystorePath);
+    if (markers.length === 0) {
+      const legacy = readLegacyKeystore(keystorePath);
+      if (legacy === null) {
+        // Sin legado: o el keystore es genuinamente nuevo, o una primera
+        // migración concurrente acaba de commitear. Re-listar una vez antes
+        // de concluir "nuevo" evita leer un vacío rancio.
+        const re = listKeystoreGenerationFiles(keystorePath);
+        if (re.markers.length > 0) continue;
+      }
+      return legacy;
+    }
     const gen = Math.max(...markers);
     const markerPath = `${keystorePath}.commit.${gen}`;
     let raw = null;
@@ -290,24 +318,6 @@ function readCommittedKeystore(keystorePath) {
 function loadOrCreateKeystore(keystorePath) {
   const state = readCommittedKeystore(keystorePath);
   return state ? state.keystore : { keys: [] };
-}
-
-function gcSupersededContent(keystorePath, currentGen) {
-  // Solo contenido de generaciones ESTRICTAMENTE anteriores: sus marcadores
-  // existen (jamás se eliminan), así que nadie puede reinstalarlas y ningún
-  // escritor vivo puede estar a punto de ganarlas.
-  const dir = path.dirname(keystorePath);
-  const base = path.basename(keystorePath);
-  let entries;
-  try { entries = fs.readdirSync(dir); } catch (e) { return; }
-  for (const name of entries) {
-    if (!name.startsWith(base + '.')) continue;
-    const m = name.slice(base.length + 1).match(/^g(\d+)\.[0-9a-f]+$/);
-    if (!m) continue;
-    if (parseInt(m[1], 10) < currentGen) {
-      try { fs.unlinkSync(path.join(dir, name)); } catch (e) { /* mejor esfuerzo */ }
-    }
-  }
 }
 
 function commitKeystore(keystorePath, mutate, options = {}) {
@@ -363,12 +373,13 @@ function commitKeystore(keystorePath, mutate, options = {}) {
       execSleep(waitMs);
       continue;
     }
-    // 3) Durabilidad del directorio y recolección de contenido superseded.
+    // 3) Durabilidad del directorio. El contenido histórico se RETIENE: la
+    //    compactación es una operación explícita futura, jamás automática
+    //    (un GC aquí competiría con lectores activos de generaciones previas).
     try {
       const dirFd = fs.openSync(path.dirname(keystorePath), 'r');
       try { fs.fsyncSync(dirFd); } finally { try { fs.closeSync(dirFd); } catch (e) {} }
     } catch (e) { /* filesystems sin fsync de directorio */ }
-    gcSupersededContent(keystorePath, nextGen);
     // El formato legado queda obsoleto: los marcadores son la única verdad.
     try {
       if (fs.lstatSync(keystorePath).isFile()) fs.unlinkSync(keystorePath);
@@ -376,11 +387,6 @@ function commitKeystore(keystorePath, mutate, options = {}) {
     return candidate;
   }
   throw new Error(`No se pudo publicar el keystore tras ${maxAttempts} generaciones (contención persistente). Estado anterior intacto.`);
-}
-
-function saveKeystore(keystorePath, keystore) {
-  if (!keystore || !Array.isArray(keystore.keys)) throw new Error('saveKeystore requiere un keystore { keys: [] }.');
-  return commitKeystore(keystorePath, () => structuredClone(keystore));
 }
 
 function execSleep(ms) {
@@ -405,7 +411,6 @@ module.exports = {
   signTelemetryReport,
   verifyTelemetryAttestation,
   loadOrCreateKeystore,
-  saveKeystore,
   registerTrustedKey,
   commitKeystore
 };

@@ -1015,7 +1015,7 @@ check('75. dsse: writer muerto pre-marcador no bloquea; el protocolo recupera si
       dsse.registerTrustedKey(ksPath, k2.publicKey.export({ type: 'spki', format: 'pem' }), 'second');
       assert.strictEqual(dsse.loadOrCreateKeystore(ksPath).keys.length, 2);
       assert.strictEqual(dsse.loadOrCreateKeystore(ksPath).generation, 2, 'generación estrictamente monótona');
-      assert.ok(!fs.existsSync(`${ksPath}.g1.dead`), 'GC recoge contenido superseded tras avanzar la generación');
+      assert.ok(fs.existsSync(`${ksPath}.g1.dead`), 'contenido histórico se RETIENE (sin GC automático: el huérfano queda inerte y la compactación es explícita)');
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -1057,7 +1057,7 @@ check('78. MMR: pisos significativos (KD≥0.3 o ACS≥100) para evaluar',
     assert.ok(!solid.diagnosis.includes('DATOS INSUFICIENTES'), 'sobre umbral debe evaluarse');
   });
 
-check('79. dsse saveKeystore público: rechaza symlink y escribe atómicamente bajo lock',
+check('79. dsse commitKeystore: rechaza symlink y publica por generaciones (sin escritura ciega)',
   () => {
     const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-save-'));
@@ -1068,14 +1068,17 @@ check('79. dsse saveKeystore público: rechaza symlink y escribe atómicamente b
       let linkOk = true;
       try { fs.symlinkSync(outside, ksPath, 'file'); } catch (e) { linkOk = false; }
       if (linkOk) {
-        assert.throws(() => dsse.saveKeystore(ksPath, { keys: [] }), /enlace simbólico/);
+        assert.throws(() => dsse.commitKeystore(ksPath, () => ({ keys: [] })), /enlace simbólico/);
         assert.strictEqual(fs.readFileSync(outside, 'utf8'), 'ORIGINAL-EXTERNO', 'symlink no debe redirigir escritura');
         fs.unlinkSync(ksPath);
       }
-      dsse.saveKeystore(ksPath, { keys: [{ keyid: 'ab', publicKeyPem: 'X', label: 't', created: 'now' }] });
+      // Reemplazo total solo como mutación EXPLÍCITA del llamador (monousuario).
+      dsse.commitKeystore(ksPath, () => ({ keys: [{ keyid: 'ab', publicKeyPem: 'X', label: 't', created: 'now' }] }));
       assert.strictEqual(dsse.loadOrCreateKeystore(ksPath).keys.length, 1);
       assert.ok(fs.existsSync(`${ksPath}.commit.1`), 'la generación 1 debe quedar commiteada');
       assert.ok(!fs.existsSync(ksPath), 'el formato legado queda obsoleto tras publicar');
+      // La escritura ciega ya no existe en la API pública.
+      assert.strictEqual(dsse.saveKeystore, undefined, 'saveKeystore eliminado de la API pública');
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -1102,7 +1105,7 @@ check('81. MMR: una sola señal límite (kd 0.3 aislado) es insuficiencia',
     assert.strictEqual(r.confidence, 'nula');
   });
 
-check('82. dsse saveKeystore público: rechaza symlink y escribe bajo lock',
+check('82. dsse commitKeystore: rechaza symlink y publica con merge explícito',
   () => {
     const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-save-'));
@@ -1113,13 +1116,13 @@ check('82. dsse saveKeystore público: rechaza symlink y escribe bajo lock',
       let linkOk = true;
       try { fs.symlinkSync(outside, ksPath, 'file'); } catch (e) { linkOk = false; }
       if (linkOk) {
-        assert.throws(() => dsse.saveKeystore(ksPath, { keys: [] }), /enlace simbólico/);
+        assert.throws(() => dsse.commitKeystore(ksPath, () => ({ keys: [] })), /enlace simbólico/);
         assert.strictEqual(fs.readFileSync(outside, 'utf8'), 'ORIGINAL-EXTERNO', 'symlink no debe redirigir escritura');
         fs.unlinkSync(ksPath);
       }
-      dsse.saveKeystore(ksPath, { keys: [{ keyid: 'zz', publicKeyPem: 'X', label: 't', created: 'now' }] });
+      dsse.commitKeystore(ksPath, (cur) => ({ keys: cur.keys.concat([{ keyid: 'zz', publicKeyPem: 'X', label: 't', created: 'now' }]) }));
       assert.strictEqual(dsse.loadOrCreateKeystore(ksPath).keys.length, 1);
-      assert.ok(fs.existsSync(`${ksPath}.commit.1`), 'la escritura pública debe commitear generación 1');
+      assert.ok(fs.existsSync(`${ksPath}.commit.1`), 'la escritura debe commitear generación 1');
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -1156,7 +1159,7 @@ check('85. dsse: carrera de marcador determinística — validar e instalar son 
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-race-'));
     try {
       const ksPath = path.join(tmp, 'ks.json');
-      dsse.saveKeystore(ksPath, { keys: [{ keyid: 'k0', publicKeyPem: 'P0', label: 'base', created: 'now' }] });
+      dsse.commitKeystore(ksPath, () => ({ keys: [{ keyid: 'k0', publicKeyPem: 'P0', label: 'base', created: 'now' }] }));
       let mutateCalls = 0;
       const result = dsse.commitKeystore(ksPath, (current) => {
         mutateCalls++;
@@ -1177,8 +1180,7 @@ check('85. dsse: carrera de marcador determinística — validar e instalar son 
       assert.ok(ks.keys.some(k => k.keyid === 'mine'), 'la mutación del perdedor no se pierde');
       assert.ok(ks.keys.every(k => ['k0', 'racer', 'mine'].includes(k.keyid)), 'sin claves fantasma');
       assert.strictEqual(ks.generation, 3);
-      const orphans = fs.readdirSync(tmp).filter(f => /^ks\.json\.g2\./.test(f));
-      assert.strictEqual(orphans.length, 0, 'el huérfano del perdedor se retira (GC tras gen 3)');
+      assert.ok(fs.existsSync(`${ksPath}.g2.a11ce5`), 'el contenido del ganador se RETIENE (retención histórica: jamás GC que compita con lectores activos)');
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -1351,7 +1353,7 @@ check('94. dsse: marcador ilegible es fail-closed o adopción única documentada
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-malmarker-'));
     try {
       const ksPath = path.join(tmp, 'ks.json');
-      dsse.saveKeystore(ksPath, { keys: [{ keyid: 'k0', publicKeyPem: 'P0', label: 'base', created: 'now' }] });
+      dsse.commitKeystore(ksPath, () => ({ keys: [{ keyid: 'k0', publicKeyPem: 'P0', label: 'base', created: 'now' }] }));
       // Caso ambiguo: marcador de gen 2 ilegible con DOS candidatos de contenido.
       fs.writeFileSync(`${ksPath}.g2.aaaa`, JSON.stringify({ keys: [], generation: 2, writer: '1:1:aaaa' }));
       fs.writeFileSync(`${ksPath}.g2.bbbb`, JSON.stringify({ keys: [], generation: 2, writer: '1:1:bbbb' }));
@@ -1363,7 +1365,7 @@ check('94. dsse: marcador ilegible es fail-closed o adopción única documentada
       const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-adopt-'));
       try {
         const ks2 = path.join(tmp2, 'ks.json');
-        dsse.saveKeystore(ks2, { keys: [{ keyid: 'k0', publicKeyPem: 'P0', label: 'base', created: 'now' }] });
+        dsse.commitKeystore(ks2, () => ({ keys: [{ keyid: 'k0', publicKeyPem: 'P0', label: 'base', created: 'now' }] }));
         fs.writeFileSync(`${ks2}.g2.c0de`, JSON.stringify({
           keys: [{ keyid: 'k0', publicKeyPem: 'P0', label: 'base', created: 'now' }, { keyid: 'k1', publicKeyPem: 'P1', label: 'adopt', created: 'now' }],
           generation: 2, writer: '999:1:c0de'
@@ -1409,6 +1411,86 @@ check('96. identidad: equivalentes Unicode son la misma cuenta; formas no inflan
     assert.strictEqual(r.duplicatesSkipped, 1, 'NFC: compuesto y descompuesto son la MISMA cuenta');
     assert.strictEqual(r.jointMatches, 40, 'la variante Unicode no infla la muestra');
     assert.strictEqual(r.identityUncertain, false, 'equivalentes canónicos no generan incertidumbre');
+  });
+
+check('97. dsse: estrés concurrente (24 workers) conserva TODAS las claves sin errores de lectura',
+  () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-stress-'));
+    try {
+      const ksPath = path.join(tmp, 'ks.json');
+      const workerScript = path.join(tmp, 'reg.js');
+      fs.writeFileSync(workerScript, `
+const dsse = require(${JSON.stringify(path.join(scriptsDir, 'dsse_attestation.js'))});
+const tid = require('worker_threads').threadId;
+const k = dsse.generateAttestationKeyPair();
+dsse.registerTrustedKey(${JSON.stringify(ksPath)}, k.publicKey.export({ type: 'spki', format: 'pem' }), 'stress-' + tid);
+`);
+      const coordScript = path.join(tmp, 'coordS.js');
+      fs.writeFileSync(coordScript, `
+const { Worker } = require('worker_threads');
+const dsse = require(${JSON.stringify(path.join(scriptsDir, 'dsse_attestation.js'))});
+(async () => {
+  const workers = [];
+  for (let i = 0; i < 24; i++) {
+    workers.push(new Promise((resolve, reject) => {
+      const w = new Worker(${JSON.stringify(workerScript)});
+      w.on('error', (e) => reject(new Error('worker ' + i + ': ' + e.message)));
+      w.on('exit', (code) => code === 0 ? resolve(i) : reject(new Error('worker ' + i + ' exit ' + code)));
+    }));
+  }
+  await Promise.all(workers);
+  const ks = dsse.loadOrCreateKeystore(${JSON.stringify(ksPath)});
+  if (ks.keys.length !== 24) { console.error('KEYS=' + ks.keys.length); process.exit(1); }
+  if (ks.generation < 24) { console.error('GEN=' + ks.generation); process.exit(1); }
+  console.log('STRESS_OK 24/24 gen ' + ks.generation);
+})();
+`);
+      const out = execFileSync(process.execPath, [coordScript], { encoding: 'utf8', timeout: 180000 });
+      assert.ok(out.includes('STRESS_OK 24/24'), 'estrés concurrente perdió claves o leyó contenido ausente');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+check('98. dsse: merge concurrente puro (16 commitKeystore en workers) converge sin pérdida',
+  () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-merge-'));
+    try {
+      const ksPath = path.join(tmp, 'ks.json');
+      const workerScript = path.join(tmp, 'merge.js');
+      fs.writeFileSync(workerScript, `
+const dsse = require(${JSON.stringify(path.join(scriptsDir, 'dsse_attestation.js'))});
+const tid = require('worker_threads').threadId;
+const res = dsse.commitKeystore(${JSON.stringify(ksPath)}, (cur) => ({
+  keys: cur.keys.concat([{ keyid: 'm' + tid, publicKeyPem: 'P' + tid, label: 'merge-' + tid, created: 'now' }])
+}));
+if (!res.keys.some(k => k.keyid === 'm' + tid)) { console.error('MUTATION_LOST ' + tid); process.exit(1); }
+`);
+      const coordScript = path.join(tmp, 'coordM.js');
+      fs.writeFileSync(coordScript, `
+const { Worker } = require('worker_threads');
+const dsse = require(${JSON.stringify(path.join(scriptsDir, 'dsse_attestation.js'))});
+(async () => {
+  const workers = [];
+  for (let i = 0; i < 16; i++) {
+    workers.push(new Promise((resolve, reject) => {
+      const w = new Worker(${JSON.stringify(workerScript)});
+      w.on('error', (e) => reject(new Error('worker ' + i + ': ' + e.message)));
+      w.on('exit', (code) => code === 0 ? resolve(i) : reject(new Error('worker ' + i + ' exit ' + code)));
+    }));
+  }
+  await Promise.all(workers);
+  const ks = dsse.loadOrCreateKeystore(${JSON.stringify(ksPath)});
+  if (ks.keys.length !== 16) { console.error('KEYS=' + ks.keys.length); process.exit(1); }
+  if (ks.generation < 16) { console.error('GEN=' + ks.generation); process.exit(1); }
+  console.log('MERGE_OK 16/16 gen ' + ks.generation);
+})();
+`);
+      const out = execFileSync(process.execPath, [coordScript], { encoding: 'utf8', timeout: 180000 });
+      assert.ok(out.includes('MERGE_OK 16/16'), 'el merge concurrente no converge');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
 if (passed !== total) process.exit(1);
