@@ -7,7 +7,7 @@
 [![Version](https://img.shields.io/badge/version-4.5_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
 [![Runtime](https://img.shields.io/badge/runtime-Node.js_18%2B_Native-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-0_npm_(Core)-38BDF8.svg?style=for-the-badge&logo=codeforces&logoColor=white)](package.json)
-[![Tests](https://img.shields.io/badge/tests-112%2F112_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
+[![Tests](https://img.shields.io/badge/tests-114%2F114_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
 [![Audit](https://img.shields.io/badge/audit-100%2F100_Verified-8B5CF6.svg?style=for-the-badge&logo=codereview&logoColor=white)](opencode_tester.js)
 [![License](https://img.shields.io/badge/license-MIT-6B7280.svg?style=for-the-badge)](LICENSE)
 
@@ -202,7 +202,7 @@ If you use **Google Gemini (Gems)** or **OpenAI (Custom GPTs)**, [`standalone_pr
 - **Network only on explicit demand:** `fetch_profile` / `fetch_match` (and remote URLs in `match`) query the public Tracker.gg API with retry and backoff; everything else (local JSON, scoreboards, cache) is 100% offline. A private profile returns an instructive error, never invented data.
 - **Zero NPM Dependencies:** Built strictly on native Node.js core libraries (`fs`, `path`, `zlib`, `crypto`, `child_process`). Zero external downloads.
 - **Cross-Platform Compatibility:** Tested and verified on Windows 11 (PowerShell/CMD), macOS (zsh), and Linux (bash).
-- **Deterministic Reliability:** 112 automated tests passing with Exit Code 0 and a 100/100 score on agentic code audits.
+- **Deterministic Reliability:** 114 automated tests passing with Exit Code 0 and a 100/100 score on agentic code audits.
 
 ---
 
@@ -214,6 +214,7 @@ This project **describes** what local telemetry allows you to observe; it does n
 - **Talent vs effort:** a **descriptive label** for impact/volume patterns, not a measurement of talent. Aggregates do not separate talent from effort and prove no causality.
 - **Deserved rank:** the "rank estimate" is an **indicative bound** derived from heuristic thresholds, not a real rank.
 - **Validation pending:** the engine has not yet been validated against real telemetry or a player sample. Until then, no output should be presented as a conclusive diagnosis.
+- **`verified_source` (front #1):** the only authorized source for VALORANT is the **official Riot API (production key + Riot Sign-On)**; personal/developer keys have no access. The verified adapter (`scripts/riot_source.js`) requires a Riot token, an allowlisted host, a verifiable `matchId`, and an Ed25519 attestation checked against a trust store; **without approved credentials, `verified_source` is unreachable** and everything stays `normalized_input`. Riot credentials: **pending request**.
 - **ELO leaks (360° learning):** signals derived from the analyzed match's micro-events (fixture or data you provide), not a forensic audit of the account.
 
 ---

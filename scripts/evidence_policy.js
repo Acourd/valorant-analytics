@@ -3,6 +3,7 @@
 
 const crypto = require('crypto');
 const path = require('path');
+const riotSource = require('./riot_source');
 
 /**
  * evidence_policy.js - Política de evidencia COMPARTIDA por el motor, el CLI y
@@ -354,10 +355,89 @@ function observeDuelRows(rows, matchData, options = {}) {
   return duels;
 }
 
+// ---------------------------------------------------------------------------
+// ADAPTADOR VERIFICADO (Riot RSO + VAL-MATCH-V1). Solo acuña `verified_source`
+// si la atestación firmada VERIFICA contra el trust store y liga
+// matchId+host+endpoint+fetchedAt+digest del payload. Cualquier fallo es
+// fail-closed (throw), sin degradar silenciosamente a normalized.
+// ---------------------------------------------------------------------------
+function mintVerifiedEvent({ sourceRef, roundRef, event, detail, context }) {
+  if (typeof sourceRef !== 'string' || !sourceRef.trim()) throw new Error('mintVerifiedEvent requiere sourceRef.');
+  const n = toFiniteNum(roundRef);
+  if (n === null || n < 1 || !Number.isInteger(n)) throw new Error('mintVerifiedEvent requiere roundRef entero >= 1.');
+  const ev = typeof event === 'string' ? event.trim().toLowerCase() : '';
+  if (!ALLOWED_EVENTS.includes(ev)) throw new Error(`mintVerifiedEvent: evento "${event}" fuera de la taxonomía.`);
+  const entry = {};
+  Object.defineProperty(entry, VERIFIED_PROVENANCE, { value: true, enumerable: false });
+  entry.source = 'verified_source';
+  entry.sourceType = 'verified_source';
+  entry.sourceRef = sourceRef;
+  entry.n = n;
+  entry.roundRef = n;
+  entry.event = ev;
+  if (typeof detail === 'string' && detail.trim()) entry.detail = detail;
+  if (hasContext(context)) entry.context = context;
+  return entry;
+}
+
+function observeVerifiedMatch(matchData, playerPuuid, options = {}) {
+  const check = riotSource.verifyAttestation(options.attestation, {
+    payload: matchData,
+    trustedKeys: options.trustedKeys,
+    maxAgeMs: options.maxAgeMs
+  });
+  if (!check.valid) {
+    const err = new Error(`verified_source rechazado: ${check.reason}`);
+    err.code = 'VERIFIED_SOURCE_REJECTED';
+    throw err;
+  }
+  const matchId = String(options.attestation.matchId).trim().toLowerCase();
+  const sourceRef = `match:${matchId}`;
+  const players = Array.isArray(matchData && matchData.players) ? matchData.players : [];
+  const focus = players.find(p => p && p.puuid === playerPuuid) || players[0];
+  const stats = (focus && focus.stats) || {};
+  const num = v => (Number.isFinite(Number(v)) ? Number(v) : null);
+  const kills = num(stats.kills);
+  const deaths = num(stats.deaths);
+  const score = num(stats.score);
+  const roundsPlayed = num(stats.roundsPlayed);
+  const head = num(stats.headshots);
+  const body = num(stats.bodyshots);
+  const leg = num(stats.legshots);
+  const shots = (head || 0) + (body || 0) + (leg || 0);
+  const observed = {
+    kd: (kills !== null && deaths !== null) ? Number((kills / Math.max(1, deaths)).toFixed(2)) : undefined,
+    acs: (score !== null && roundsPlayed) ? Number((score / roundsPlayed).toFixed(1)) : undefined,
+    hs: shots > 0 ? Number(((head / shots) * 100).toFixed(1)) : undefined,
+    kast: undefined, fk: undefined, fd: undefined, econRating: undefined, winPct: undefined, clutches: undefined
+  };
+  const roundResults = Array.isArray(matchData && matchData.roundResults) ? matchData.roundResults : [];
+  const rounds = [];
+  roundResults.forEach((rr, idx) => {
+    const psList = Array.isArray(rr && rr.playerStats) ? rr.playerStats : [];
+    const ps = psList.find(p => p && p.puuid === (focus && focus.puuid)) || null;
+    if (!ps) return;
+    const roundRef = num(rr.roundNum) !== null ? num(rr.roundNum) + 1 : idx + 1;
+    const dmg = num(ps.damage);
+    const k = num(ps.kills);
+    const d = num(ps.deaths);
+    const spent = num(ps.economy && ps.economy.spent);
+    if (dmg !== null && dmg > 0) {
+      rounds.push(mintVerifiedEvent({ sourceRef, roundRef, event: 'damage', detail: `dmg ${dmg}`, context: { damage: dmg } }));
+    } else if (k !== null && d !== null && (k > 0 || d > 0)) {
+      rounds.push(mintVerifiedEvent({ sourceRef, roundRef, event: 'kill', detail: `${k}K/${d}D`, context: { kills: k, deaths: d } }));
+    } else if (spent !== null && spent > 0) {
+      rounds.push(mintVerifiedEvent({ sourceRef, roundRef, event: 'economy', detail: `spent ${spent}`, context: { spentCredits: spent } }));
+    }
+  });
+  return { observed, rounds, sourceRef, matchId, provenance: 'verified_source' };
+}
+
 module.exports = {
   classifyEvidence,
   observeMatchTelemetry,
   observeDuelRows,
+  observeVerifiedMatch,
   stableRef,
   canonicalStringify,
   toFiniteNum,

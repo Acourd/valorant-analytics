@@ -7,7 +7,7 @@
 [![Versión](https://img.shields.io/badge/versión-4.5_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
 [![Runtime](https://img.shields.io/badge/runtime-Node.js_18%2B_Nativo-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Dependencias](https://img.shields.io/badge/dependencias-0_npm_(Core)-38BDF8.svg?style=for-the-badge&logo=codeforces&logoColor=white)](package.json)
-[![Pruebas](https://img.shields.io/badge/tests-112%2F112_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
+[![Pruebas](https://img.shields.io/badge/tests-114%2F114_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
 [![Auditoría](https://img.shields.io/badge/auditoría-100%2F100_Verificado-8B5CF6.svg?style=for-the-badge&logo=codereview&logoColor=white)](opencode_tester.js)
 [![Licencia](https://img.shields.io/badge/licencia-MIT-6B7280.svg?style=for-the-badge)](LICENSE)
 
@@ -202,7 +202,7 @@ Si utilizas **Google Gemini (Gems)** o **OpenAI (Custom GPTs)**, el archivo [`st
 - **Red solo bajo demanda explícita:** los comandos `fetch_profile` / `fetch_match` (y URLs remotas en `match`) consultan la API pública de Tracker.gg con reintento y backoff; todo lo demás (JSON local, scoreboards, caché) es 100% offline. Un perfil privado devuelve error instructivo, jamás datos inventados.
 - **Zero Dependencias NPM:** Diseñado exclusivamente sobre las librerías estándar de Node.js (`fs`, `path`, `zlib`, `crypto`, `child_process`). Cero descargas externas.
 - **Compatibilidad Multiplataforma:** Probado y garantizado en Windows 11 (PowerShell/CMD), macOS (zsh) y Linux (bash).
-- **Garantía Determinista:** 112 pruebas automatizadas verificadas con Exit Code 0 (`node test_suite.js`) y puntuación perfecta de 100/100 en auditorías de código agéntico (`node opencode_tester.js`).
+- **Garantía Determinista:** 114 pruebas automatizadas verificadas con Exit Code 0 (`node test_suite.js`) y puntuación perfecta de 100/100 en auditorías de código agéntico (`node opencode_tester.js`).
 
 ---
 
@@ -214,6 +214,7 @@ Este proyecto **describe** lo que la telemetría local permite observar; no cert
 - **Talento vs esfuerzo:** es una **etiqueta descriptiva** de patrones de impacto/volumen, no una medición de talento. Los agregados no separan talento de esfuerzo ni prueban causalidad.
 - **Rango merecido:** la "estimación de rango" es una **cota orientativa** derivada de umbrales heurísticos, no un rango real.
 - **Validación pendiente:** el motor aún no se ha validado con telemetría real ni con una muestra de jugadores. Hasta entonces, ninguna salida debe presentarse como diagnóstico concluyente.
+- **`verified_source` (frente #1):** la única fuente autorizada para VALORANT es la **API oficial de Riot (production key + Riot Sign-On)**; las claves personales/developer no tienen acceso. El adaptador verificado (`scripts/riot_source.js`) exige un token Riot, host en allowlist, `matchId` verificable y una atestación Ed25519 comprobada contra un trust store; **sin credenciales aprobadas, `verified_source` es inalcanzable** y todo queda como `normalized_input`. Credenciales Riot: **pendientes de solicitud**.
 - **Fugas de ELO (aprendizaje 360°):** son señales derivadas de micro-eventos de la partida analizada (fixture o datos que aportes), no una auditoría forense de la cuenta.
 
 ---

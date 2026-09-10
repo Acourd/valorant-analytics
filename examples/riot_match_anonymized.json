@@ -1,0 +1,71 @@
+{
+  "_fixture": "Anonimizado, con forma de Riot VAL-MATCH-V1. Sin datos personales: puuids y nombres removidos/sustituidos.",
+  "matchInfo": {
+    "matchId": "00000000-0000-4000-8000-000000000001",
+    "mapId": "/Game/Maps/Ascent/Ascent",
+    "gameMode": "competitive",
+    "gameStartMillis": 1730000000000,
+    "isRanked": true,
+    "queueId": "competitive"
+  },
+  "players": [
+    {
+      "puuid": "anon-puuid-focus",
+      "characterId": "agent-iso",
+      "stats": {
+        "score": 4200,
+        "roundsPlayed": 15,
+        "kills": 18,
+        "deaths": 10,
+        "assists": 4,
+        "headshots": 30,
+        "bodyshots": 60,
+        "legshots": 10
+      }
+    },
+    {
+      "puuid": "anon-puuid-rival",
+      "characterId": "agent-jett",
+      "stats": {
+        "score": 3600,
+        "roundsPlayed": 15,
+        "kills": 14,
+        "deaths": 14,
+        "assists": 3,
+        "headshots": 20,
+        "bodyshots": 70,
+        "legshots": 10
+      }
+    }
+  ],
+  "roundResults": [
+    {
+      "roundNum": 0,
+      "roundResult": "AttackerWin",
+      "playerStats": [
+        { "puuid": "anon-puuid-focus", "kills": 2, "damage": 210, "headshots": 2, "bodyshots": 4, "legshots": 0, "economy": { "loadoutValue": 4200, "spent": 3900, "remaining": 300 } },
+        { "puuid": "anon-puuid-rival", "kills": 0, "damage": 40, "headshots": 0, "bodyshots": 1, "legshots": 0, "economy": { "loadoutValue": 800, "spent": 0, "remaining": 0 } }
+      ]
+    },
+    {
+      "roundNum": 1,
+      "roundResult": "DefenderWin",
+      "playerStats": [
+        { "puuid": "anon-puuid-focus", "kills": 0, "damage": 0, "headshots": 0, "bodyshots": 0, "legshots": 0, "economy": { "loadoutValue": 3900, "spent": 3900, "remaining": 0 } },
+        { "puuid": "anon-puuid-rival", "kills": 1, "damage": 150, "headshots": 1, "bodyshots": 2, "legshots": 0, "economy": { "loadoutValue": 4200, "spent": 4200, "remaining": 0 } }
+      ]
+    },
+    {
+      "roundNum": 2,
+      "roundResult": "AttackerWin",
+      "playerStats": [
+        { "puuid": "anon-puuid-focus", "kills": 1, "damage": 120, "headshots": 1, "bodyshots": 2, "legshots": 1, "economy": { "loadoutValue": 4700, "spent": 4700, "remaining": 0 } },
+        { "puuid": "anon-puuid-rival", "kills": 0, "damage": 0, "headshots": 0, "bodyshots": 0, "legshots": 0, "economy": { "loadoutValue": 0, "spent": 0, "remaining": 0 } }
+      ]
+    }
+  ],
+  "kills": [
+    { "round": 0, "killer": "anon-puuid-focus", "victim": "anon-puuid-rival", "weapon": "Vandal", "damageType": "Weapon" },
+    { "round": 2, "killer": "anon-puuid-focus", "victim": "anon-puuid-rival", "weapon": "Phantom", "damageType": "Weapon" }
+  ]
+}

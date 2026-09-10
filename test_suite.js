@@ -2117,6 +2117,65 @@ check('honestidad: el radar del CLI es dimensional (n/d sin score cuando falta l
     }
   });
 
+check('fuente Riot: validaciones, credenciales y atestación firmada',
+  () => {
+    const rs = require(path.join(scriptsDir, 'riot_source.js'));
+    assert.throws(() => rs.validateMatchId('no-uuid'), /matchId/i);
+    assert.strictEqual(rs.validateMatchId('00000000-0000-4000-8000-000000000001').length, 36);
+    assert.strictEqual(rs.hostForRegion('americas'), 'americas.api.riotgames.com');
+    assert.throws(() => rs.hostForRegion('marte'), /Regi/i);
+    // Sin credenciales → fail-closed (no se finge fuente verificada).
+    const savedKey = process.env.RIOT_API_KEY;
+    const savedRso = process.env.RIOT_RSO_TOKEN;
+    delete process.env.RIOT_API_KEY;
+    delete process.env.RIOT_RSO_TOKEN;
+    try {
+      assert.throws(() => rs.fetchRiotMatchById('00000000-0000-4000-8000-000000000001'), /credenciales|RIOT_API_KEY/i);
+    } finally {
+      if (savedKey === undefined) delete process.env.RIOT_API_KEY; else process.env.RIOT_API_KEY = savedKey;
+      if (savedRso === undefined) delete process.env.RIOT_RSO_TOKEN; else process.env.RIOT_RSO_TOKEN = savedRso;
+    }
+    // Atestación Ed25519 con clave de prueba (trust store explícito).
+    const kp = crypto.generateKeyPairSync('ed25519');
+    const priv = kp.privateKey.export({ type: 'pkcs8', format: 'pem' });
+    const pub = kp.publicKey.export({ type: 'spki', format: 'pem' });
+    const payload = JSON.parse(fs.readFileSync(path.join(__dirname, 'examples', 'riot_match_anonymized.json'), 'utf8'));
+    const matchId = payload.matchInfo.matchId;
+    const record = { matchId, host: 'americas.api.riotgames.com', endpoint: rs.matchEndpoint(matchId), fetchedAt: new Date().toISOString(), payload };
+    const att = rs.createAttestation(record, priv);
+    assert.ok(rs.verifyAttestation(att, { payload, trustedKeys: [pub] }).valid, 'firma válida debe verificar');
+    assert.ok(!rs.verifyAttestation(att, { payload, trustedKeys: [] }).valid, 'trust store vacío no verifica');
+    assert.ok(!rs.verifyAttestation(att, { payload: { tampered: true }, trustedKeys: [pub] }).valid, 'payload alterado no verifica');
+    assert.ok(!rs.verifyAttestation({ ...att, host: 'evil.example.com' }, { payload, trustedKeys: [pub] }).valid, 'host no permitido');
+    assert.ok(!rs.verifyAttestation({ ...att, fetchedAt: new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString() }, { payload, trustedKeys: [pub], maxAgeMs: 24 * 3600 * 1000 }).valid, 'caducada no verifica');
+  });
+
+check('fuente Riot: el adaptador solo emite verified_source con atestación válida',
+  () => {
+    const ep = require(path.join(scriptsDir, 'evidence_policy.js'));
+    const rs = require(path.join(scriptsDir, 'riot_source.js'));
+    const payload = JSON.parse(fs.readFileSync(path.join(__dirname, 'examples', 'riot_match_anonymized.json'), 'utf8'));
+    const kp = crypto.generateKeyPairSync('ed25519');
+    const priv = kp.privateKey.export({ type: 'pkcs8', format: 'pem' });
+    const pub = kp.publicKey.export({ type: 'spki', format: 'pem' });
+    const matchId = payload.matchInfo.matchId;
+    const att = rs.createAttestation({ matchId, host: 'americas.api.riotgames.com', endpoint: rs.matchEndpoint(matchId), fetchedAt: new Date().toISOString(), payload }, priv);
+    const verified = ep.observeVerifiedMatch(payload, 'anon-puuid-focus', { attestation: att, trustedKeys: [pub] });
+    const policy = ep.classifyEvidence(verified);
+    assert.strictEqual(verified.provenance, 'verified_source');
+    assert.strictEqual(policy.provenanceStatus, 'verified_source');
+    assert.strictEqual(policy.level, 'complete');
+    assert.strictEqual(policy.verifiedSource, true);
+    assert.ok(policy.verifiedRoundCount > 0, 'debe haber rondas verificadas');
+    assert.ok(policy.allowedSections.includes('round_observations'));
+    assert.ok(!policy.allowedSections.includes('round_leaks'), 'sin reglas verificables no hay fugas');
+    // Fail-closed ante atestación ausente, payload alterado o trust vacío.
+    assert.throws(() => ep.observeVerifiedMatch(payload, 'anon-puuid-focus', { attestation: null, trustedKeys: [pub] }), /rechazado/);
+    assert.throws(() => ep.observeVerifiedMatch({ ...payload, extra: 1 }, 'anon-puuid-focus', { attestation: att, trustedKeys: [pub] }), /rechazado/);
+    assert.throws(() => ep.observeVerifiedMatch(payload, 'anon-puuid-focus', { attestation: att, trustedKeys: [] }), /rechazado/);
+    assert.strictEqual(ep.mintVerifiedEvent, undefined, 'mintVerifiedEvent no debe exportarse');
+  });
+
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben
 // reflejar EXACTAMENTE el número de casos registrados y ejecutados. Un
 // manifiesto desincronizado hace fallar la suite (imposible sobre-declarar
