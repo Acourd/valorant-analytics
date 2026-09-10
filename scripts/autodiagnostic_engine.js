@@ -54,6 +54,13 @@ function inDomain(v, min, max) {
   return v !== null && v >= min && v <= max ? v : null;
 }
 
+function stableEncode(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableEncode).join(',')}]`;
+  const keys = Object.keys(value).sort();
+  return `{${keys.map(k => `${JSON.stringify(k)}:${stableEncode(value[k])}`).join(',')}}`;
+}
+
 function evaluateMmrDrag(accountTelemetry) {
   if (!accountTelemetry || typeof accountTelemetry !== 'object') {
     throw new Error('evaluateMmrDrag requiere telemetría de cuenta (objeto con competitive/currentRank). Entrada recibida: ' + String(accountTelemetry));
@@ -85,7 +92,7 @@ function evaluateMmrDrag(accountTelemetry) {
 
   const mmrDragDetected = isAgedAccount && hasHighCombatImpact && isRankConstrained;
   const severityScore = isAgedAccount ? Math.min(100, Math.round((matches / 600) * 80 + (dd !== null && dd > 25 ? 20 : 10))) : 20;
-  const decisiveSignals = [kd !== null && kd >= 0.6, acs !== null && acs >= 200, dd !== null && dd >= 0].filter(Boolean).length;
+  const decisiveSignals = [kd !== null && kd > 0.6, acs !== null && acs > 200, dd !== null && dd > 0].filter(Boolean).length;
   const calibratedConfidence = (matches >= 300 && decisiveSignals >= 2) ? 'alta' : ((matches >= 50 && decisiveSignals >= 1) ? 'media' : 'baja');
   if (decisiveSignals < 2) {
     return {
@@ -131,7 +138,7 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
       identityUncertain = true;
       return true;
     }
-    const key = `${handleKey}||${JSON.stringify(a.competitive || null)}||${String(a.peakRank || '')}`;
+    const key = JSON.stringify([handleKey, stableEncode(a.competitive || null), String(a.peakRank || '')]);
     if (seenAccounts.has(key)) { duplicatesSkipped++; return false; }
     if (seenHandles.has(handleKey)) identityUncertain = true;
     seenHandles.add(handleKey);

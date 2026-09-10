@@ -223,6 +223,13 @@ function currentThreadId() {
   return 'm';
 }
 
+// Inicio del proceso (ms epoch) para la prueba de nacimiento: un lock con
+// mtime anterior al arranque de ESTE proceso no pudo crearlo ningún hilo vivo
+// nuestro. Margen de 1s por skew de reloj.
+function processStartMs() {
+  return Date.now() - Math.floor(process.uptime() * 1000);
+}
+
 // Reentrancia serial por hilo/isolate: si ESTE hilo ya posee el lock (marco
 // exterior), un marco interior lo adopta sin tocar el archivo. Serial = seguro.
 // Otros hilos tienen su propio mapa (isolates separados) y jamás adoptan.
@@ -231,8 +238,11 @@ const activeLocks = new Map();
 function withFileLock(lockPath, fn, options = {}) {
   const retries = options.retries || 100;
   const waitMs = options.waitMs || 50;
-  const staleMs = options.staleMs || 30000;
-  const abandonFloorMs = Math.max(staleMs, 60000);
+  // Política de recuperación documentada (liveness-only, sin TTL):
+  // - Proceso distinto: solo se recupera ante muerte probada (kill ESRCH).
+  // - Mismo proceso: solo ante lock anterior al nacimiento propio (mtime).
+  // - Nunca se desaloja por tiempo transcurrido: un holder vivo, aunque
+  //   exceda cualquier TTL, jamás pierde el lock. Falla controlada en su lugar.
   const transient = new Set(['EEXIST', 'EPERM', 'EACCES', 'EBUSY']);
   const owner = `${process.pid}:${currentThreadId()}:${Date.now()}:${crypto.randomBytes(4).toString('hex')}`;
   const inspectLock = () => {
@@ -286,12 +296,13 @@ function withFileLock(lockPath, fn, options = {}) {
         }
         if (info.pid === process.pid) {
           // Mismo proceso, OTRO hilo/worker (o hilo muerto): la identidad es el
-          // TOKEN COMPLETO, jamás el PID solo. Un holder vivo jamás se desaloja
-          // por mtime. Solo se recupera un lock abandonado cuyo mtime supera el
-          // piso absoluto (ningún hold legítimo, de escala ms, lo alcanza).
+          // TOKEN COMPLETO, jamás el PID solo. Un holder vivo JAMÁS se desaloja
+          // por mtime (ni siquiera con TTL corto): la única recuperación segura
+          // es un lock anterior al nacimiento de ESTE proceso, prueba concluyente
+          // de abandono (ningún hilo vivo nuestro pudo crearlo).
           try {
             const st = fs.lstatSync(lockPath);
-            if ((Date.now() - st.mtimeMs) > Math.max(staleMs, 60000)) {
+            if (st.mtimeMs < processStartMs() - 1000) {
               try { fs.unlinkSync(lockPath); } catch (_) {}
               continue;
             }

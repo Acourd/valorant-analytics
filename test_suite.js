@@ -1278,5 +1278,57 @@ check('90. MMR límite (1 señal decisiva) es evidencia límite, no veredicto',
     assert.strictEqual(m.mmrDragDetected, false);
   });
 
+check('91. dsse: lock mismo-PID anterior al nacimiento se recupera; vivo jamás se desaloja',
+  () => {
+    const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-birth-'));
+    try {
+      const ksPath = path.join(tmp, 'ks.json');
+      fs.writeFileSync(ksPath + '.lock', `${process.pid}:${Date.now() - 3600000}:deadbeef`);
+      const past = new Date(Date.now() - 3600000);
+      fs.utimesSync(ksPath + '.lock', past, past);
+      const k = dsse.generateAttestationKeyPair();
+      dsse.registerTrustedKey(ksPath, k.publicKey.export({ type: 'spki', format: 'pem' }), 'birth-test');
+      assert.strictEqual(dsse.loadOrCreateKeystore(ksPath).keys.length, 1, 'lock anterior al proceso debe recuperarse');
+      assert.ok(!fs.existsSync(ksPath + '.lock'), 'lock recuperado debe liberarse');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+check('92. talento: epsilon apenas-sobre-umbral (0.306/100.06) es descriptivo',
+  () => {
+    const r = evaluateTalentVsEffort({
+      summary: { totalGeneral: { hours: 100 }, highestPeakRank: 'Gold 2' },
+      accounts: [{ handle: 'B#1', isExcluded: false, competitive: { matches: 5, kd: 0.306, acs: 100.06, dd: -299, hs: 0.05 }, peakRank: 'Gold 2' }]
+    });
+    assert.strictEqual(r.category, 'EVIDENCIA DESCRIPTIVA', 'apenas-sobre-umbral no clasifica favorablemente');
+    assert.strictEqual(r.talentRatio, 'N/A');
+    assert.ok(!r.trueDeservedRank.includes('Platino') || r.trueDeservedRank.includes('Indeterminado'), 'sin proyección de rango');
+  });
+
+check('93. dedup: orden de campos y delimitadores no alteran identidad',
+  () => {
+    const base = { matches: 10, kd: '1.1', acs: '220', dd: '15', hs: '22' };
+    const reordered = { hs: '22', dd: '15', acs: '220', kd: '1.1', matches: 10 };
+    const r = evaluateTalentVsEffort({
+      summary: { totalGeneral: { hours: 500 }, highestPeakRank: 'Gold 2' },
+      accounts: [
+        { handle: 'D#1', isExcluded: false, competitive: base, peakRank: 'Gold 2' },
+        { handle: 'D#1', isExcluded: false, competitive: reordered, peakRank: 'Gold 2' }
+      ]
+    });
+    assert.strictEqual(r.duplicatesSkipped, 1, 'orden de campos no debe bypasear dedup');
+    assert.strictEqual(r.sampleSize, 10);
+    const tricky = evaluateTalentVsEffort({
+      summary: { totalGeneral: { hours: 500 }, highestPeakRank: 'Gold 2' },
+      accounts: [
+        { handle: 'A||B#1', isExcluded: false, competitive: { matches: 10, kd: '1.1', acs: '220', dd: '15', hs: '22' }, peakRank: 'Gold 2' },
+        { handle: 'A', isExcluded: false, competitive: { matches: 10, kd: '1.1', acs: '220', dd: '15', hs: '22' }, peakRank: 'B#1||Gold 2' }
+      ]
+    });
+    assert.strictEqual(tricky.duplicatesSkipped, 0, 'delimitadores no deben colisionar identidades distintas');
+  });
+
 if (passed !== total) process.exit(1);
 console.log('All valorant-analytics deterministic tests passed with Exit Code: 0');
