@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 'use strict';
 
+const crypto = require('crypto');
+const path = require('path');
+
 /**
  * evidence_policy.js - Política de evidencia COMPARTIDA por el motor, el CLI y
  * el prompt standalone (Gem / Custom GPT).
@@ -30,8 +33,7 @@
  * aperturas, economía, clutch) con métrica y benchmark.
  */
 
-const BASE_SECTIONS = ['evidence_level', 'observations', 'limits', 'missing'];
-const AGGREGATE_SECTIONS = ['aggregate_radar', 'mmr_signal'];
+const BASE_SECTIONS = ['evidence_level', 'observations', 'limits', 'missing'];const AGGREGATE_SECTIONS = ['aggregate_radar', 'mmr_signal'];
 const ROUND_OBSERVATION_SECTIONS = ['round_observations'];
 const LEAK_SECTIONS = ['round_leaks'];
 const DUEL_SECTIONS = ['duel_matrix'];
@@ -266,10 +268,91 @@ function classifyEvidence(input) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// ADAPTADOR CONFIABLE (única vía a la procedencia observada).
+// Los constructores `mintObservedEvent`/`mintObservedDuel` NO se exportan: solo
+// este adaptador puede acuñar observado, y lo hace a partir de CAMPOS REALES
+// de la telemetría (no de afirmaciones ya formadas). Un consumidor externo no
+// puede fabricar eventos observados ni fugas: como mucho, puede alimentar
+// telemetría cruda al adaptador, que nunca emite `leakRule`.
+// ---------------------------------------------------------------------------
+
+function stableRef(matchData, originPath) {
+  const matchId = (matchData && matchData.data && matchData.data.metadata && matchData.data.metadata.matchId) ||
+    (matchData && matchData.metadata && matchData.metadata.matchId);
+  if (typeof matchId === 'string' && matchId.trim().length > 0) return `match:${matchId.trim()}`;
+  let digest;
+  try {
+    digest = crypto.createHash('sha256').update(JSON.stringify(matchData === undefined ? null : matchData)).digest('hex').slice(0, 16);
+  } catch (e) {
+    digest = crypto.createHash('sha256').update(String(matchData)).digest('hex').slice(0, 16);
+  }
+  const base = originPath ? path.basename(path.resolve(originPath)) : 'inline';
+  return `sha256:${digest}@${base}`;
+}
+
+function observeMatchTelemetry(matchData, playerHandle, options = {}) {
+  const segments = (matchData && matchData.data && matchData.data.segments) || (matchData && matchData.segments) || [];
+  const summaries = segments.filter(s => s.type === 'player-summary');
+  const pick = summaries.find(s =>
+    s.metadata?.platformUserHandle === playerHandle ||
+    s.attributes?.platformUserIdentifier === playerHandle
+  ) || summaries[0];
+  const st = (pick && pick.stats) || {};
+  const val = k => (st[k] && (st[k].value !== undefined ? st[k].value : st[k].displayValue));
+  const observed = {
+    kd: val('kdRatio'), acs: val('scorePerRound'), hs: val('hsAccuracy'),
+    kast: val('kast'), fk: val('firstKills'), fd: val('firstDeaths'),
+    econRating: val('econRating'), winPct: val('roundsWinPct'), clutches: val('clutches')
+  };
+  const cell = (obj, k) => (obj && obj[k] && (obj[k].value !== undefined ? obj[k].value : obj[k].displayValue));
+  const sourceRef = stableRef(matchData, options.originPath);
+  const rounds = [];
+  segments.forEach(s => {
+    const roundRef = s.attributes && s.attributes.round;
+    if (!Number.isInteger(roundRef) || roundRef < 1) return;
+    if (s.type === 'player-round-damage') {
+      const dmg = Number(cell(s.stats, 'damage'));
+      if (Number.isFinite(dmg) && dmg > 0) {
+        rounds.push(mintObservedEvent({
+          sourceRef, roundRef, event: 'damage',
+          detail: `dmg ${dmg} (H${cell(s.stats, 'headshots')}/B${cell(s.stats, 'bodyshots')}/L${cell(s.stats, 'legshots')})`,
+          context: { damage: dmg, headshots: Number(cell(s.stats, 'headshots')) || 0, bodyshots: Number(cell(s.stats, 'bodyshots')) || 0, legshots: Number(cell(s.stats, 'legshots')) || 0 }
+        }));
+      }
+    } else if (s.type === 'player-round') {
+      const kills = Number(cell(s.stats, 'kills'));
+      const deaths = Number(cell(s.stats, 'deaths'));
+      const spent = Number(cell(s.stats, 'spentCredits'));
+      if (Number.isFinite(kills) && Number.isFinite(deaths) && (kills > 0 || deaths > 0)) {
+        rounds.push(mintObservedEvent({ sourceRef, roundRef, event: 'kill', detail: `${kills}K/${deaths}D`, context: { kills, deaths } }));
+      } else if (Number.isFinite(spent) && spent > 0) {
+        rounds.push(mintObservedEvent({ sourceRef, roundRef, event: 'economy', detail: `spent ${spent}`, context: { spentCredits: spent } }));
+      }
+    }
+  });
+  return { observed, rounds, sourceRef };
+}
+
+function observeDuelRows(rows, matchData, options = {}) {
+  const sourceRef = stableRef(matchData, options.originPath);
+  const duels = [];
+  (Array.isArray(rows) ? rows : []).forEach(r => {
+    const opponent = r && typeof r.opponent === 'string' ? r.opponent.trim() : '';
+    if (!opponent) return;
+    const kills = Number(r && r.kills);
+    const deaths = Number(r && r.deaths);
+    if (!Number.isFinite(kills) || !Number.isFinite(deaths) || (kills + deaths) <= 0) return;
+    duels.push(mintObservedDuel({ sourceRef, opponent, kills, deaths, agent: r.opponentAgent }));
+  });
+  return duels;
+}
+
 module.exports = {
   classifyEvidence,
-  mintObservedEvent,
-  mintObservedDuel,
+  observeMatchTelemetry,
+  observeDuelRows,
+  stableRef,
   toFiniteNum,
   isPercent,
   isObservedRound,

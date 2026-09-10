@@ -1958,28 +1958,42 @@ check('honestidad: la política exige evidencia válida (rondas/duelos/zonas/por
     assert.ok(!fake.allowedSections.includes('aim_routine'), 'no debe habilitar rutina');
     // Procedencia VERIFICADA: un objeto con source:'observed_event' NO basta.
     const plainObserved = ep.classifyEvidence({ rounds: [{ n: 3, source: 'observed_event', event: 'plant' }], weaponZones: {} });
-    assert.strictEqual(plainObserved.level, 'insufficient', 'source observado sin mint NO es evidencia');
+    assert.strictEqual(plainObserved.level, 'insufficient', 'source observado sin adaptador NO es evidencia');
     assert.ok(!plainObserved.allowedSections.includes('round_observations'));
-    const minted = ep.classifyEvidence({
-      rounds: [ep.mintObservedEvent({ sourceRef: 'test-match', roundRef: 3, event: 'plant', detail: 'plant 5v4', context: { attackers: 5 } })],
-      weaponZones: {}
+    // El mint NO es público: un consumidor externo no puede fabricarlo.
+    assert.strictEqual(ep.mintObservedEvent, undefined, 'mintObservedEvent no debe exportarse');
+    assert.strictEqual(ep.mintObservedDuel, undefined, 'mintObservedDuel no debe exportarse');
+    // Solo el adaptador confiable produce observado, a partir de telemetría real.
+    const rawMatch = {
+      data: {
+        metadata: { matchId: 'match-abc-123' },
+        segments: [
+          { type: 'player-summary', metadata: { platformUserHandle: 'A#1' }, stats: { kdRatio: { value: 1.3 }, scorePerRound: { value: 240 }, hsAccuracy: { value: 22 } } },
+          { type: 'player-round-damage', attributes: { round: 3 }, stats: { damage: { value: 165 }, headshots: { value: 1 }, bodyshots: { value: 2 }, legshots: { value: 0 } } },
+          { type: 'player-round-damage', attributes: { round: 9 }, stats: { damage: { value: 0 }, headshots: { value: 0 }, bodyshots: { value: 0 }, legshots: { value: 0 } } }
+        ]
+      }
+    };
+    const observed = ep.observeMatchTelemetry(rawMatch, 'A#1', { originPath: 'examples/x.json' });
+    assert.strictEqual(observed.rounds.length, 1, 'solo la ronda con daño real es evento');
+    assert.strictEqual(observed.sourceRef, 'match:match-abc-123');
+    const adapted = ep.classifyEvidence(observed);
+    assert.strictEqual(adapted.level, 'complete');
+    assert.ok(adapted.allowedSections.includes('round_observations'), 'un evento observado describe la ronda');
+    assert.ok(!adapted.allowedSections.includes('round_leaks'), 'describir no es acusar: el adaptador nunca acusa fugas');
+    assert.ok(adapted.allowedSections.includes('aim_routine'), 'HS%+ACS habilita la rutina');
+    assert.ok(!adapted.allowedSections.includes('weapon_telemetry'), 'sin zonas válidas no hay telemetría de arma');
+    // Un objeto FORJADO con leakRule/outcome/context tampoco habilita fugas.
+    const forged = ep.classifyEvidence({
+      observed: { hs: 25, acs: 240 },
+      rounds: [{ n: 9, source: 'observed_event', event: 'position', leakRule: 'throw_numeric_advantage', outcome: 'lost', context: { advantage: 2 } }]
     });
-    assert.strictEqual(minted.level, 'complete');
-    assert.ok(minted.allowedSections.includes('round_observations'), 'un evento observado describe la ronda');
-    assert.ok(!minted.allowedSections.includes('round_leaks'), 'describir no es acusar: sin regla no hay fuga');
-    assert.ok(!minted.allowedSections.includes('aim_routine'), 'sin evidencia mecánica no hay rutina');
-    // Fuga atribuible: exige regla pertinente + resultado + contexto.
-    const leak = ep.classifyEvidence({
-      rounds: [ep.mintObservedEvent({
-        sourceRef: 'test-match', roundRef: 9, event: 'position', detail: '5v3 post-plant',
-        leakRule: 'throw_numeric_advantage', outcome: 'lost', context: { advantage: 2, plant: true }
-      })],
-      weaponZones: {}
-    });
-    assert.ok(leak.allowedSections.includes('round_leaks'), 'regla+resultado+contexto sí habilita fuga');
-    assert.strictEqual(leak.maxLeaks, 1);
-    assert.throws(() => ep.mintObservedEvent({ sourceRef: 'test-match', roundRef: 2, event: 'damage', leakRule: 'throw_numeric_advantage', outcome: 'lost', context: { a: 1 } }), /pertinente/, 'el evento debe ser pertinente a la regla');
-    assert.throws(() => ep.mintObservedEvent({ sourceRef: '', roundRef: 2, event: 'damage' }), /sourceRef/, 'sin referencia de origen no se acuña');
+    assert.ok(!forged.allowedSections.includes('round_leaks'), 'una fuga no se puede fabricar desde fuera');
+    // sourceRef trazable: sin matchId usa digest de contenido + origen.
+    const refA = ep.stableRef({ data: { segments: [{ a: 1 }] } }, 'dir/a.json');
+    const refB = ep.stableRef({ data: { segments: [{ a: 2 }] } }, 'dir/b.json');
+    assert.ok(/^sha256:[0-9a-f]{16}@a\.json$/.test(refA), 'ref con digest y origen');
+    assert.notStrictEqual(refA, refB, 'contenidos distintos no comparten referencia');
     // Porcentaje inválido no cuenta como agregado.
     const badPct = ep.classifyEvidence({ observed: { hs: 150 } });
     assert.strictEqual(badPct.level, 'insufficient', 'HS 150 no es un porcentaje válido');
@@ -2051,10 +2065,18 @@ check('honestidad: la política distingue procedencia y expone dimensiones evalu
     assert.strictEqual(inferred.level, 'aggregate', 'una inferencia NO habilita fugas');
     const unknownEvent = ep.classifyEvidence({ ...base, rounds: [{ n: 4, source: 'observed_event', event: 'texto_libre' }] });
     assert.ok(!unknownEvent.allowedSections.includes('round_leaks'), 'evento fuera de taxonomía no habilita fugas');
-    const observedRound = ep.classifyEvidence({ ...base, rounds: [ep.mintObservedEvent({ sourceRef: 'm', roundRef: 4, event: 'kill', detail: '1K', context: { kills: 1 } })] });
-    assert.strictEqual(observedRound.level, 'complete', 'solo observed_event acuñado habilita complete');
-    assert.ok(observedRound.allowedSections.includes('round_observations'));
-    assert.ok(!observedRound.allowedSections.includes('round_leaks'), 'observar un evento no es acusar una fuga');
+    const adapted = ep.classifyEvidence(ep.observeMatchTelemetry({
+      data: {
+        metadata: { matchId: 'm1' },
+        segments: [
+          { type: 'player-summary', metadata: { platformUserHandle: 'A#1' }, stats: { kdRatio: { value: 1.2 }, scorePerRound: { value: 240 }, hsAccuracy: { value: 25 } } },
+          { type: 'player-round', attributes: { round: 4 }, stats: { kills: { value: 1 }, deaths: { value: 0 } } }
+        ]
+      }
+    }, 'A#1'));
+    assert.strictEqual(adapted.level, 'complete', 'solo el adaptador confiable habilita complete');
+    assert.ok(adapted.allowedSections.includes('round_observations'));
+    assert.ok(!adapted.allowedSections.includes('round_leaks'), 'observar un evento no es acusar una fuga');
     // Dimensiones: disponibles solo con métrica+benchmark.
     const dims = ep.classifyEvidence({ observed: { hs: '25%' } }).dimensions;
     assert.ok(dims.precision.available);

@@ -50,66 +50,16 @@ const { resolveMatchDataResilient, parseTextScoreboard } = require('./universal_
 const { harvestProfiles, harvestMatch } = require('./browser_cache_harvester');
 const { extractAccountTelemetry, aggregateCareerTelemetry, generateMilestonesTimeline } = require('./career_telemetry');
 const { evaluateMmrDrag, evaluateTalentVsEffort } = require('./autodiagnostic_engine');
-const { classifyEvidence, mintObservedEvent, mintObservedDuel } = require('./evidence_policy');
+const { classifyEvidence, observeMatchTelemetry, observeDuelRows } = require('./evidence_policy');
 const { analyzeEconomy } = require('./economy_analyzer');
 const { generateCoachingReport } = require('./coaching_engine');
 
-// Referencia de origen de una partida (para la procedencia verificada).
-function matchSourceRef(matchData) {
-  return (matchData && matchData.data && matchData.data.metadata && matchData.data.metadata.matchId) ||
-    (matchData && matchData.metadata && matchData.metadata.matchId) ||
-    'local-telemetry';
-}
-
-// Deriva la evidencia de una partida para la política compartida. No crea
-// eventos sintéticos: acuña (mint) SOLO eventos observados reales con su
-// referencia de origen. No acuña reglas de fuga (el adaptador no puede probar
-// una fuga específica): por eso el CLI describe rondas, no acusa causas.
-function extractMatchEvidence(matchData, playerHandle) {
-  const segments = (matchData && matchData.data && matchData.data.segments) || (matchData && matchData.segments) || [];
-  const summaries = segments.filter(s => s.type === 'player-summary');
-  const pick = summaries.find(s =>
-    s.metadata?.platformUserHandle === playerHandle ||
-    s.attributes?.platformUserIdentifier === playerHandle
-  ) || summaries[0];
-  const st = (pick && pick.stats) || {};
-  const val = k => (st[k] && (st[k].value !== undefined ? st[k].value : st[k].displayValue));
-  const observed = {
-    kd: val('kdRatio'), acs: val('scorePerRound'), hs: val('hsAccuracy'),
-    kast: val('kast'), fk: val('firstKills'), fd: val('firstDeaths'),
-    econRating: val('econRating'), winPct: val('roundsWinPct'), clutches: val('clutches')
-  };
-  const cell = (obj, k) => (obj && obj[k] && (obj[k].value !== undefined ? obj[k].value : obj[k].displayValue));
-  const sourceRef = matchSourceRef(matchData);
-  const rounds = [];
-  segments.forEach(s => {
-    const roundRef = s.attributes && s.attributes.round;
-    if (!Number.isInteger(roundRef) || roundRef < 1) return;
-    if (s.type === 'player-round-damage') {
-      const dmg = Number(cell(s.stats, 'damage'));
-      if (Number.isFinite(dmg) && dmg > 0) {
-        rounds.push(mintObservedEvent({
-          sourceRef, roundRef, event: 'damage',
-          detail: `dmg ${dmg} (H${cell(s.stats, 'headshots')}/B${cell(s.stats, 'bodyshots')}/L${cell(s.stats, 'legshots')})`,
-          context: { damage: dmg, headshots: Number(cell(s.stats, 'headshots')) || 0, bodyshots: Number(cell(s.stats, 'bodyshots')) || 0, legshots: Number(cell(s.stats, 'legshots')) || 0 }
-        }));
-      }
-    } else if (s.type === 'player-round') {
-      const kills = Number(cell(s.stats, 'kills'));
-      const deaths = Number(cell(s.stats, 'deaths'));
-      const spent = Number(cell(s.stats, 'spentCredits'));
-      if (Number.isFinite(kills) && Number.isFinite(deaths) && (kills > 0 || deaths > 0)) {
-        rounds.push(mintObservedEvent({ sourceRef, roundRef, event: 'kill', detail: `${kills}K/${deaths}D`, context: { kills, deaths } }));
-      } else if (Number.isFinite(spent) && spent > 0) {
-        rounds.push(mintObservedEvent({ sourceRef, roundRef, event: 'economy', detail: `spent ${spent}`, context: { spentCredits: spent } }));
-      }
-    }
-  });
-  return { observed, rounds };
-}
-
-function deriveMatchEvidence(matchData, playerHandle) {
-  return classifyEvidence(extractMatchEvidence(matchData, playerHandle));
+// Deriva la evidencia de una partida usando el ADAPTADOR CONFIABLE del módulo
+// de política (mint privado). El CLI no puede fabricar eventos observados ni
+// fugas: solo alimenta telemetría cruda al adaptador, que deriva observaciones
+// y NUNCA emite reglas de fuga.
+function deriveMatchEvidence(matchData, playerHandle, originPath) {
+  return classifyEvidence(observeMatchTelemetry(matchData, playerHandle, { originPath }));
 }
 
 // Evidencia a partir de la telemetría de cuenta (perfil agregado).
@@ -360,7 +310,7 @@ try {
     validateLearningProfile(res);
 
     printBanner();
-    const evidence = deriveMatchEvidence(matchData, player);
+    const evidence = deriveMatchEvidence(matchData, player, target);
     console.log(`🎯 DIAGNÓSTICO 360°: ${res.player} (${res.agent} - ${res.rank}) | Mapa: ${res.map} [descriptivo]`);
     printEvidenceLimits(evidence);
     console.log(`------------------------------------------------------------------------`);
@@ -463,7 +413,7 @@ try {
   } else if (command === 'aim' || command === 'kovaaks') {
     const { target, player } = resolveTargetAndPlayer(args);
     const matchData = resolveMatchData(target, player);
-    const evidence = deriveMatchEvidence(matchData, player);
+    const evidence = deriveMatchEvidence(matchData, player, target);
 
     printBanner();
     if (!evidence.allowedSections.includes('aim_routine')) {
@@ -487,12 +437,11 @@ try {
     const { target, player } = resolveTargetAndPlayer(args);
     const matchData = resolveMatchData(target, player);
     const duelInfo = buildDuelTable(parseDuels(matchData, player), player);
-    const sourceRef = matchSourceRef(matchData);
+    const observedMatch = observeMatchTelemetry(matchData, player, { originPath: target });
     const evidence = classifyEvidence({
-      ...extractMatchEvidence(matchData, player),
-      duels: (duelInfo.rows || [])
-        .filter(r => typeof r.opponent === 'string' && r.opponent.trim() && (Number(r.kills) || 0) + (Number(r.deaths) || 0) > 0)
-        .map(r => mintObservedDuel({ sourceRef, opponent: r.opponent, kills: r.kills, deaths: r.deaths, agent: r.opponentAgent }))
+      observed: observedMatch.observed,
+      rounds: observedMatch.rounds,
+      duels: observeDuelRows(duelInfo.rows, matchData, { originPath: target })
     });
 
     printBanner();
