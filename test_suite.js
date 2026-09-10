@@ -10,6 +10,7 @@ const assert = require('assert');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 
 const scriptsDir = path.join(__dirname, 'scripts');
@@ -52,7 +53,10 @@ let passed = 0;
 let total = 0;
 function check(name, fn) {
   total++;
-  process.stdout.write(`Testing: ${name}... `);
+  // Contador ÚNICO de casos: la numeración la emite el harness, jamás el
+  // nombre manual. El total reportado es exactamente el número de casos
+  // registrados y ejecutados.
+  process.stdout.write(`Testing: [#${total}] ${name}... `);
   try {
     fn();
     console.log('PASS (Exit 0)');
@@ -64,20 +68,20 @@ function check(name, fn) {
 }
 
 // ---- Unidad: normalización de Riot IDs ----
-check('1. normalizeHandle: espacios y tag -> encodeURIComponent correcto',
+check('normalizeHandle: espacios y tag -> encodeURIComponent correcto',
   () => {
     assert.strictEqual(normalizeHandle('TenZ 001#NA1'), 'TenZ%20001%23NA1');
     assert.strictEqual(normalizeHandle('  TenZ#0001  '), 'TenZ%230001');
   });
 
-check('2. normalizeHandle: cirílico/acentos se codifican sin romper el tag, y vacío lanza',
+check('normalizeHandle: cirílico/acentos se codifican sin romper el tag, y vacío lanza',
   () => {
     assert.ok(normalizeHandle('Chronicle#0001').includes('%23'), 'tag no codificado');
     assert.throws(() => normalizeHandle('   '), /Riot ID vacío/);
   });
 
 // ---- Unidad: extracción de match ID ----
-check('3. extractMatchId: URL de tracker, UUID plano y cadena larga',
+check('extractMatchId: URL de tracker, UUID plano y cadena larga',
   () => {
     const uuid = 'cb4ebb70-4ecf-425d-8aaf-3bf9cf718631';
     assert.strictEqual(extractMatchId(`https://tracker.gg/valorant/match/${uuid}?x=1`), uuid);
@@ -86,7 +90,7 @@ check('3. extractMatchId: URL de tracker, UUID plano y cadena larga',
   });
 
 // ---- Unidad: parseMatchSummary sobre el fixture real ----
-check('4. parseMatchSummary: 10 jugadores, 2 equipos, stats numéricas, orden por combatScore',
+check('parseMatchSummary: 10 jugadores, 2 equipos, stats numéricas, orden por combatScore',
   () => {
     const s = parseMatchSummary(sample);
     assert.strictEqual(s.players.length, 10);
@@ -99,7 +103,7 @@ check('4. parseMatchSummary: 10 jugadores, 2 equipos, stats numéricas, orden po
   });
 
 // ---- Unidad: duel_matrix ----
-check('5. parseDuels: target case-insensitive, matriz killer->victim con conteos',
+check('parseDuels: target case-insensitive, matriz killer->victim con conteos',
   () => {
     const { playerMap, duelMatrix, target } = parseDuels(sample, 'tenz#0001');
     assert.ok(target, 'target no resuelto (insensible a mayúsculas)');
@@ -108,7 +112,7 @@ check('5. parseDuels: target case-insensitive, matriz killer->victim con conteos
   });
 
 // ---- Unidad: kovaaks ----
-check('6. generateKovaaksRoutine: 3 bloques, 15 min totales, telemetría FK/FD',
+check('generateKovaaksRoutine: 3 bloques, 15 min totales, telemetría FK/FD',
   () => {
     const r = generateKovaaksRoutine(sample, 'TenZ#0001');
     assert.strictEqual(r.routine.length, 3);
@@ -119,7 +123,7 @@ check('6. generateKovaaksRoutine: 3 bloques, 15 min totales, telemetría FK/FD',
   });
 
 // ---- Unidad: duo_synergy ----
-check('7. auditDuoSynergy: estructura, mismo equipo y carryAnalysis honesto',
+check('auditDuoSynergy: estructura, mismo equipo y carryAnalysis honesto',
   () => {
     const r = auditDuoSynergy(sample, 'TenZ#0001', 'Chronicle#0001');
     assert.ok(r.p1 && r.p2 && r.synergy.score.includes('/ 100'));
@@ -129,7 +133,7 @@ check('7. auditDuoSynergy: estructura, mismo equipo y carryAnalysis honesto',
     assert.ok(r.p1.team === r.p2.team, 'jugadores del fixture deberían estar en el mismo equipo');
   });
 
-check('8. auditDuoSynergy: rivales en equipos opuestos producen veredicto RIVALES',
+check('auditDuoSynergy: rivales en equipos opuestos producen veredicto RIVALES',
   () => {
     const { playerMap } = parseDuels(sample);
     const handles = Object.keys(playerMap);
@@ -139,7 +143,7 @@ check('8. auditDuoSynergy: rivales en equipos opuestos producen veredicto RIVALE
   });
 
 // ---- Unidad: economía ----
-check('9. analyzeEconomy: tier loadouts con rondas y winPct',
+check('analyzeEconomy: tier loadouts con rondas y winPct',
   () => {
     const r = analyzeEconomy(sample, 'TenZ#0001');
     assert.ok(r.player && r.agent);
@@ -178,39 +182,39 @@ function withIsolatedCache(fn) {
   }
 }
 
-check('10. cli.js aim: dispatcher ejecuta la rutina sin TypeError (regresión P0)',
+check('cli.js aim: dispatcher ejecuta la rutina sin TypeError (regresión P0)',
   () => {
     const out = cliOk(['aim', sampleFile, 'TenZ#0001']);
     assert.ok(out.includes('RUTINA KOVAAKS 15-MIN'), 'cabecera aim ausente');
   });
 
-check('11. cli.js duels: matriz 1v1 renderizada (regresión P0: contrato parseDuels)',
+check('cli.js duels: matriz 1v1 renderizada (regresión P0: contrato parseDuels)',
   () => {
     const out = cliOk(['duels', sampleFile, 'TenZ#0001']);
     assert.ok(out.includes('MATRIZ DE DUELOS 1v1'), 'cabecera duels ausente');
     assert.ok(!out.includes('undefined'), 'duels emite undefined');
   });
 
-check('12. cli.js match: diagnóstico 360° completo con radar y fugas',
+check('cli.js match: diagnóstico 360° completo con radar y fugas',
   () => {
     const out = cliOk(['match', sampleFile, 'TenZ#0001']);
     assert.ok(out.includes('DIAGNÓSTICO 360°') && out.includes('RADAR DE DOMINIO'));
     assert.ok(out.includes('FUGAS DE ELO'));
   });
 
-check('13. cli.js duo: auditoría con carryAnalysis en consola',
+check('cli.js duo: auditoría con carryAnalysis en consola',
   () => {
     const out = cliOk(['duo', sampleFile, 'TenZ#0001', 'Chronicle#0001']);
     assert.ok(out.includes('AUDITORÍA DE DÚO') && out.includes('Carga:'));
   });
 
-check('14. cli.js perfil: genera URLs multi-plataforma normalizadas',
+check('cli.js perfil: genera URLs multi-plataforma normalizadas',
   () => {
     const out = cliOk(['profile', 'Mixwell#EUW']);
     assert.ok(out.includes('OP.GG') && out.includes('Mixwell%23EUW'));
   });
 
-check('15. analyzeWeaponTelemetry: cálculo de zonas (Head/Body/Leg) y SE/TP spray ratio',
+check('analyzeWeaponTelemetry: cálculo de zonas (Head/Body/Leg) y SE/TP spray ratio',
   () => {
     const res = analyzeWeaponTelemetry(sample, 'TenZ#0001');
     assert.ok(res.hitZoneDistribution, 'hitZoneDistribution ausente');
@@ -221,21 +225,21 @@ check('15. analyzeWeaponTelemetry: cálculo de zonas (Head/Body/Leg) y SE/TP spr
     assert.ok(res.recoilDiagnosis && res.recoilDiagnosis.kovaaksPrescription);
   });
 
-check('16. analyzeWeaponTelemetry: categorización en 3 bandas de distancia (Close/Mid/Long)',
+check('analyzeWeaponTelemetry: categorización en 3 bandas de distancia (Close/Mid/Long)',
   () => {
     const res = analyzeWeaponTelemetry(sample, 'TenZ#0001');
     assert.strictEqual(res.distanceBands.length, 3);
     assert.ok(res.distanceBands.every(b => typeof b.duels === 'number' && typeof b.totalDamage === 'number'));
   });
 
-check('17. cli.js weapons: telemetría de armas y bandas de impacto en consola',
+check('cli.js weapons: telemetría de armas y bandas de impacto en consola',
   () => {
     const out = cliOk(['weapons', sampleFile, 'TenZ#0001']);
     assert.ok(out.includes('TELEMETRÍA DE ARMAS') && out.includes('DISTANCIA Y CONVERSIÓN'));
     assert.ok(out.includes('SE/TP Ratio'));
   });
 
-check('18. cli.js calibrate: modo zero-cloud offline diagnóstico instantáneo',
+check('cli.js calibrate: modo zero-cloud offline diagnóstico instantáneo',
   () => {
     const out = cliOk(['calibrate', 'Sovereign#001', 'Immortal 3', 'Initiator']);
     assert.ok(out.includes('CALIBRACIÓN INSTANTÁNEA ZERO-CLOUD'));
@@ -243,20 +247,20 @@ check('18. cli.js calibrate: modo zero-cloud offline diagnóstico instantáneo',
     assert.ok(out.includes('Immortal 3'));
   });
 
-check('19. invariant_validator: aserción formal de radar y suma de zonas de impacto (100%)',
+check('invariant_validator: aserción formal de radar y suma de zonas de impacto (100%)',
   () => {
     assert.strictEqual(validateRadar({ precisionMecanica: 90, macrogamePosicionamiento: 80, duelosDeApertura: 70, disciplinaEconomica: 85, composturaClutch: 95 }), true);
     assert.strictEqual(validateHitZones({ head: '32.5%', body: '65.5%', leg: '2.0%' }), true);
   });
 
-check('20. invariant_validator: captura violaciones matemáticas (NaN, fuera de rango [0,100], sum!=100%)',
+check('invariant_validator: captura violaciones matemáticas (NaN, fuera de rango [0,100], sum!=100%)',
   () => {
     assert.throws(() => validateRadar({ precisionMecanica: 105, macrogamePosicionamiento: 70, duelosDeApertura: 80, disciplinaEconomica: 50, composturaClutch: 60 }), InvariantViolationError);
     assert.throws(() => validateHitZones({ head: '50%', body: '20%', leg: '10%' }), InvariantViolationError);
     assert.throws(() => validateRadar({ precisionMecanica: NaN, macrogamePosicionamiento: 70, duelosDeApertura: 80, disciplinaEconomica: 50, composturaClutch: 60 }), InvariantViolationError);
   });
 
-check('21. invariant_validator: validación formal completa sobre match real de telemetría',
+check('invariant_validator: validación formal completa sobre match real de telemetría',
   () => {
     const p = evaluateLearningProfile(sample, 'TenZ#0001');
     assert.strictEqual(validateLearningProfile(p), true);
@@ -266,14 +270,14 @@ check('21. invariant_validator: validación formal completa sobre match real de 
     assert.strictEqual(validateDuoSynergy(d), true);
   });
 
-check('22. cli.js invariants: verificación formal de invariantes matemáticos en CLI dispatcher',
+check('cli.js invariants: verificación formal de invariantes matemáticos en CLI dispatcher',
   () => {
     const out = cliOk(['invariants', sampleFile, 'TenZ#0001']);
     assert.ok(out.includes('VERIFICACIÓN FORMAL DE INVARIANTES MATEMÁTICOS'));
     assert.ok(out.includes('TODOS LOS INVARIANTES MATEMÁTICOS VERIFICADOS'));
   });
 
-check('23. cli.js attest: sobre DSSE in-toto firmado con Ed25519 y verificado',
+check('cli.js attest: sobre DSSE in-toto firmado con Ed25519 y verificado',
   () => {
     withIsolatedCache(() => {
       const out = cliOk(['attest', sampleFile, 'TenZ#0001', '--trust-new-key']);
@@ -283,42 +287,42 @@ check('23. cli.js attest: sobre DSSE in-toto firmado con Ed25519 y verificado',
     });
   });
 
-check('24. cli.js merkle: árbol Merkle de eventos discretos y prueba de inclusión',
+check('cli.js merkle: árbol Merkle de eventos discretos y prueba de inclusión',
   () => {
     const out = cliOk(['merkle', sampleFile]);
     assert.ok(out.includes('ÁRBOL DE AUDITORÍA MERKLE'));
     assert.ok(out.includes('VÁLIDA (Exit 0)'));
   });
 
-check('25. cli.js guardian: monitor de fatiga neuromuscular y tilt cognitivo',
+check('cli.js guardian: monitor de fatiga neuromuscular y tilt cognitivo',
   () => {
     const out = cliOk(['guardian', sampleFile, 'TenZ#0001']);
     assert.ok(out.includes('SESSION GUARDIAN'));
     assert.ok(out.includes('Apto para competir'));
   });
 
-check('26. cli.js drift: cálculo de deriva táctica y entropía de Shanon',
+check('cli.js drift: cálculo de deriva táctica y entropía de Shanon',
   () => {
     const out = cliOk(['drift', sampleFile, 'TenZ#0001']);
     assert.ok(out.includes('RADAR DE DERIVA TÁCTICA'));
     assert.ok(out.includes('Entropía de Quarters'));
   });
 
-check('27. cli.js consensus: arbitraje bizantino multi-lente con quórum BFT',
+check('cli.js consensus: arbitraje bizantino multi-lente con quórum BFT',
   () => {
     const out = cliOk(['consensus', sampleFile, 'TenZ#0001']);
     assert.ok(out.includes('SÍNTESIS DE CONSENSO BIZANTINO'));
     assert.ok(out.includes('Lentes Participantes:  3'));
   });
 
-check('28. cli.js synthesize: rutina evolutiva adaptativa según debilidades de match',
+check('cli.js synthesize: rutina evolutiva adaptativa según debilidades de match',
   () => {
     const out = cliOk(['synthesize', sampleFile, 'TenZ#0001']);
     assert.ok(out.includes('RUTINA EVOLUTIVA ADAPTATIVA'));
     assert.ok(out.includes('EJERCICIOS SINTETIZADOS'));
   });
 
-check('29. cli.js sbom: manifiesto CycloneDX v1.5 con 0 dependencias externas',
+check('cli.js sbom: manifiesto CycloneDX v1.5 con 0 dependencias externas',
   () => {
     const out = cliOk(['sbom']);
     assert.ok(out.includes('MANIFIESTO CYCLONEDX SBOM'));
@@ -326,7 +330,7 @@ check('29. cli.js sbom: manifiesto CycloneDX v1.5 con 0 dependencias externas',
   });
 
 // ---- universal_ingestor & resiliencia táctica (v1.2) ----
-check('30. universal_ingestor: parseTextScoreboard extrae handles, rangos y estadísticas de texto plano',
+check('universal_ingestor: parseTextScoreboard extrae handles, rangos y estadísticas de texto plano',
   () => {
     const raw = `
 kirtmy#000	Iso	Gold 2	21	14	5	245	162	26%
@@ -341,7 +345,7 @@ TenZ#0001	Omen	Platinum 1	19	16	4	225	150	28%
     assert.ok(k && k.stats.kills.value === 21 && k.stats.deaths.value === 14);
   });
 
-check('31. universal_ingestor: assembleRawMatchStructure genera 10 jugadores, 2 equipos y zonas al 100%',
+check('universal_ingestor: assembleRawMatchStructure genera 10 jugadores, 2 equipos y zonas al 100%',
   () => {
     const synthetic = assembleRawMatchStructure([], 'Ascent', 24, 'kirtmy#000');
     assert.strictEqual(synthetic.data.segments.filter(s => s.type === 'team-summary').length, 2);
@@ -358,7 +362,7 @@ check('31. universal_ingestor: assembleRawMatchStructure genera 10 jugadores, 2 
     });
   });
 
-check('32. universal_ingestor: cumplimiento formal de invariant_validator sobre telemetría sintetizada',
+check('universal_ingestor: cumplimiento formal de invariant_validator sobre telemetría sintetizada',
   () => {
     const synthetic = assembleRawMatchStructure([], 'Ascent', 24, 'kirtmy#000');
     const p = evaluateLearningProfile(synthetic, 'kirtmy#000');
@@ -368,7 +372,7 @@ check('32. universal_ingestor: cumplimiento formal de invariant_validator sobre 
     assert.strictEqual(validateWeaponTelemetry(w), true);
   });
 
-check('33. universal_ingestor: resolveMatchDataResilient intercepta WAF 403 con contención fail-closed',
+check('universal_ingestor: resolveMatchDataResilient intercepta WAF 403 con contención fail-closed',
   () => {
     const fakeWafUrl = 'https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04';
     assert.throws(
@@ -382,7 +386,7 @@ check('33. universal_ingestor: resolveMatchDataResilient intercepta WAF 403 con 
     assert.strictEqual(match.data.metadata.synthetic, true);
   });
 
-check('34. cli.js parse: dispatcher procesa archivo de volcado de texto sin errores',
+check('cli.js parse: dispatcher procesa archivo de volcado de texto sin errores',
   () => {
     const tmpScoreboard = path.join(scriptsDir, '..', 'examples', 'scoreboard_sample.txt');
     fs.writeFileSync(tmpScoreboard, 'kirtmy#000\tIso\tGold 2\t21\t14\t5\t245\t162\t26%\n', 'utf8');
@@ -394,7 +398,7 @@ check('34. cli.js parse: dispatcher procesa archivo de volcado de texto sin erro
     }
   });
 
-check('35. cli.js match (WAF resilient): URL remota protegida ejecuta Zero-Crash con Exit Code 0',
+check('cli.js match (WAF resilient): URL remota protegida ejecuta Zero-Crash con Exit Code 0',
   () => {
     const out = cliOk(['match', 'https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04', 'kirtmy#000', '--demo']);
     assert.ok(out.includes('DIAGNÓSTICO 360°') && out.includes('kirtmy#000'));
@@ -402,7 +406,7 @@ check('35. cli.js match (WAF resilient): URL remota protegida ejecuta Zero-Crash
     assert.ok(out.includes('SINTÉTICA'), 'modo demo debe declarar procedencia sintética');
   });
 
-check('36. browser_cache_harvester: decompressBuffer y detección de rutas Chromium',
+check('browser_cache_harvester: decompressBuffer y detección de rutas Chromium',
   () => {
     const raw = Buffer.from(JSON.stringify({ ok: true, timestamp: Date.now() }));
     const zlib = require('zlib');
@@ -413,7 +417,7 @@ check('36. browser_cache_harvester: decompressBuffer y detección de rutas Chrom
     assert.ok(Array.isArray(paths));
   });
 
-check('37. career_telemetry: desglose de horas competitivas vs general y cronología de hitos',
+check('career_telemetry: desglose de horas competitivas vs general y cronología de hitos',
   () => {
     const mock = {
       platformInfo: { platformUserHandle: 'kirtmy#000' },
@@ -436,7 +440,7 @@ check('37. career_telemetry: desglose de horas competitivas vs general y cronolo
     assert.strictEqual(tl[0].rango, 'Hierro 3 (Inicio)');
   });
 
-check('38. autodiagnostic_engine: diagnóstico de MMR drag, verdadero rango merecido y ratio de talento',
+check('autodiagnostic_engine: diagnóstico de MMR drag, verdadero rango merecido y ratio de talento',
   () => {
     const drag = evaluateMmrDrag({
       competitive: { matches: 500, kd: '1.20', acs: '240', dd: '25' },
@@ -460,7 +464,7 @@ check('38. autodiagnostic_engine: diagnóstico de MMR drag, verdadero rango mere
     assert.ok(evalRes.trueDeservedRank.includes('Platino') || evalRes.trueDeservedRank.includes('Diamante'));
   });
 
-check('39. cli.js career & diagnose: ejecución exitosa de los nuevos comandos con Exit Code 0',
+check('cli.js career & diagnose: ejecución exitosa de los nuevos comandos con Exit Code 0',
   () => {
     const mockFile = path.join(__dirname, 'examples', 'mock_profile.json');
     const mockData = {
@@ -493,7 +497,7 @@ check('39. cli.js career & diagnose: ejecución exitosa de los nuevos comandos c
 
 // ---- Blindaje adversarial v4.1: casos límite y edge cases ----
 
-check('40. harvester: cacheDir inexistente y data_1 truncado no lanzan (retornan [])',
+check('harvester: cacheDir inexistente y data_1 truncado no lanzan (retornan [])',
   () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'harv-edge-'));
     try {
@@ -508,7 +512,7 @@ check('40. harvester: cacheDir inexistente y data_1 truncado no lanzan (retornan
     }
   });
 
-check('41. ingestor: options.matchId determinista y sin random en contrato',
+check('ingestor: options.matchId determinista y sin random en contrato',
   () => {
     const r = assembleRawMatchStructure([], 'Ascent', 24, 'Test#0001', { matchId: 'resilient-test-001' });
     assert.strictEqual(r.data.metadata.matchId, 'resilient-test-001');
@@ -516,7 +520,7 @@ check('41. ingestor: options.matchId determinista y sin random en contrato',
     assert.strictEqual(r.data.metadata.rounds, 24);
   });
 
-check('42. ingestor: archivo JSON corrupto lanza Error descriptivo (fail-closed, sin sintético)',
+check('ingestor: archivo JSON corrupto lanza Error descriptivo (fail-closed, sin sintético)',
   () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ing-edge-'));
     try {
@@ -528,13 +532,13 @@ check('42. ingestor: archivo JSON corrupto lanza Error descriptivo (fail-closed,
     }
   });
 
-check('43. ingestor: parseTextScoreboard rechaza cadena vacía con mensaje descriptivo',
+check('ingestor: parseTextScoreboard rechaza cadena vacía con mensaje descriptivo',
   () => {
     assert.throws(() => parseTextScoreboard(''), /no vacía/);
     assert.throws(() => parseTextScoreboard(null), /no vacía/);
   });
 
-check('44. autodiagnostic: null/malformado lanza Error descriptivo, no TypeError',
+check('autodiagnostic: null/malformado lanza Error descriptivo, no TypeError',
   () => {
     assert.throws(() => evaluateMmrDrag(null), /requiere telemetría de cuenta/);
     assert.throws(() => evaluateMmrDrag('cadena'), /requiere telemetría de cuenta/);
@@ -543,7 +547,7 @@ check('44. autodiagnostic: null/malformado lanza Error descriptivo, no TypeError
     assert.throws(() => evaluateTalentVsEffort({ accounts: [{ competitive: {} }], summary: {} }), /totalGeneral/);
   });
 
-check('45. career milestones: opciones personalizadas (mainAgent/speedrunHours) sin hardcode',
+check('career milestones: opciones personalizadas (mainAgent/speedrunHours) sin hardcode',
   () => {
     const career = {
       summary: {
@@ -560,7 +564,7 @@ check('45. career milestones: opciones personalizadas (mainAgent/speedrunHours) 
     assert.ok(t2.some(m => m.contexto.includes('Iso')), 'default Iso no preservado');
   });
 
-check('46. autodiagnostic: cuenta malformada parcial no truena en agregados',
+check('autodiagnostic: cuenta malformada parcial no truena en agregados',
   () => {
     const career = {
       summary: { totalGeneral: { hours: 200 }, highestPeakRank: 'Gold 3' },
@@ -571,7 +575,7 @@ check('46. autodiagnostic: cuenta malformada parcial no truena en agregados',
     assert.ok(r.category.length > 0 && r.talentRatio.includes('/'), 'categoría incompleta');
   });
 
-check('47. learning_profile: match sin jugadores válidos lanza Error descriptivo (fail-closed)',
+check('learning_profile: match sin jugadores válidos lanza Error descriptivo (fail-closed)',
   () => {
     assert.throws(
       () => evaluateLearningProfile({ data: { segments: [] } }, 'TenZ#0001'),
@@ -579,7 +583,7 @@ check('47. learning_profile: match sin jugadores válidos lanza Error descriptiv
     );
   });
 
-check('48. duo_synergy: handles vacíos/ausentes lanzan Error descriptivo en vez de TypeError',
+check('duo_synergy: handles vacíos/ausentes lanzan Error descriptivo en vez de TypeError',
   () => {
     assert.throws(
       () => auditDuoSynergy(sample, null, 'Chronicle#0001'),
@@ -591,7 +595,7 @@ check('48. duo_synergy: handles vacíos/ausentes lanzan Error descriptivo en vez
     );
   });
 
-check('49. economy_analyzer: sintetiza tiers a partir de player-round si faltan player-loadout',
+check('economy_analyzer: sintetiza tiers a partir de player-round si faltan player-loadout',
   () => {
     const matchWithoutLoadouts = {
       data: {
@@ -609,7 +613,7 @@ check('49. economy_analyzer: sintetiza tiers a partir de player-round si faltan 
     assert.ok(eco.tiers.some(t => t.tier === 'Full-Buy'));
   });
 
-check('50. cli.js duels: dispatcher sin jugador resuelve target automáticamente con Exit Code 0',
+check('cli.js duels: dispatcher sin jugador resuelve target automáticamente con Exit Code 0',
   () => {
     const out = execFileSync(process.execPath, [cliPath, 'duels', sampleFile], { encoding: 'utf8' });
     assert.ok(out.includes('MATRIZ DE DUELOS 1v1 DIRECTOS'), 'Encabezado ausente');
@@ -617,7 +621,7 @@ check('50. cli.js duels: dispatcher sin jugador resuelve target automáticamente
     assert.ok(out.includes('Duelos: 5'), 'Debe listar los 5 duelos contra rivales');
   });
 
-check('51. cli.js duo: dispatcher sin jugadores resuelve compañeros dinámicamente con Exit Code 0',
+check('cli.js duo: dispatcher sin jugadores resuelve compañeros dinámicamente con Exit Code 0',
   () => {
     const out = execFileSync(process.execPath, [cliPath, 'duo', sampleFile], { encoding: 'utf8' });
     assert.ok(out.includes('AUDITORÍA DE DÚO'), 'Encabezado ausente');
@@ -625,7 +629,7 @@ check('51. cli.js duo: dispatcher sin jugadores resuelve compañeros dinámicame
     assert.ok(!out.includes('None and None'), 'No debe fallar por jugadores no encontrados');
   });
 
-check('52. cli.js economy: dispatcher ejecuta desglose de buy-tiers con Exit Code 0',
+check('cli.js economy: dispatcher ejecuta desglose de buy-tiers con Exit Code 0',
   () => {
     const out = execFileSync(process.execPath, [cliPath, 'economy', sampleFile, 'TenZ#0001'], { encoding: 'utf8' });
     assert.ok(out.includes('DESGLOSE DE ECONOMÍA Y BUY TIERS'), 'Encabezado ausente');
@@ -633,7 +637,7 @@ check('52. cli.js economy: dispatcher ejecuta desglose de buy-tiers con Exit Cod
     assert.ok(out.includes('Pistol'), 'Tier Pistol ausente');
   });
 
-check('53. cli.js coaching: dispatcher ejecuta reporte introspectivo con Exit Code 0',
+check('cli.js coaching: dispatcher ejecuta reporte introspectivo con Exit Code 0',
   () => {
     const out = execFileSync(process.execPath, [cliPath, 'coaching', sampleFile, 'TenZ#0001'], { encoding: 'utf8' });
     assert.ok(out.includes('REPORTE INTROSPECTIVO DE COACHING TÁCTICO'), 'Encabezado ausente');
@@ -641,7 +645,7 @@ check('53. cli.js coaching: dispatcher ejecuta reporte introspectivo con Exit Co
     assert.ok(out.includes('youtube.com'), 'Enlaces ausentes');
   });
 
-check('54. cli.js match: shorthand de jugador resuelve sobre sample_match sin WAF sintético',
+check('cli.js match: shorthand de jugador resuelve sobre sample_match sin WAF sintético',
   () => {
     const out = execFileSync(process.execPath, [cliPath, 'match', 'TenZ#0001'], { encoding: 'utf8' });
     assert.ok(out.includes('DIAGNÓSTICO 360°: TenZ#0001'), 'Debe diagnosticar a TenZ#0001');
@@ -650,7 +654,7 @@ check('54. cli.js match: shorthand de jugador resuelve sobre sample_match sin WA
 
 // ---- Regresiones del veredicto REQUIERE_CORRECCIÓN (v4.6) ----
 
-check('55. ingestor fail-closed: archivo inexistente y URL no canónica lanzan sin análisis',
+check('ingestor fail-closed: archivo inexistente y URL no canónica lanzan sin análisis',
   () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ing-fc-'));
     try {
@@ -663,7 +667,7 @@ check('55. ingestor fail-closed: archivo inexistente y URL no canónica lanzan s
     }
   });
 
-check('56. ingestor demo: --demo emite sintético con procedencia explícita',
+check('ingestor demo: --demo emite sintético con procedencia explícita',
   () => {
     const fm = require(path.join(scriptsDir, 'fetch_match.js'));
     const orig = fm.fetchMatch;
@@ -682,7 +686,7 @@ check('56. ingestor demo: --demo emite sintético con procedencia explícita',
     }
   });
 
-check('57. dsse: auto-firmado desconocido falla; keystore + rotación verifican',
+check('dsse: auto-firmado desconocido falla; keystore + rotación verifican',
   () => {
     const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
     const rep = { player: 'Test#0001', map: 'Ascent' };
@@ -709,7 +713,7 @@ check('57. dsse: auto-firmado desconocido falla; keystore + rotación verifican'
     }
   });
 
-check('58. invariant: zonas todo-cero y matriz imposible fallan con error tipado',
+check('invariant: zonas todo-cero y matriz imposible fallan con error tipado',
   () => {
     assert.throws(() => validateHitZones({ head: '0%', body: '0%', leg: '0%' }), /HIT_ZONES_EMPTY/);
     const phantom = {
@@ -723,7 +727,7 @@ check('58. invariant: zonas todo-cero y matriz imposible fallan con error tipado
     assert.ok(rec.reconciled === true && rec.knownPlayers === true, 'muestra real debe reconciliar');
   });
 
-check('59. learning/coaching: telemetría ausente no fabrica fugas ni módulos',
+check('learning/coaching: telemetría ausente no fabrica fugas ni módulos',
   () => {
     const emptyMatch = { data: { metadata: { mapName: 'Ascent', rounds: 24 }, segments: [{ type: 'player-summary', metadata: { platformUserHandle: 'X#1' }, attributes: { platformUserIdentifier: 'X#1' }, stats: {} }] } };
     const p = evaluateLearningProfile(emptyMatch, 'X#1');
@@ -733,7 +737,7 @@ check('59. learning/coaching: telemetría ausente no fabrica fugas ni módulos',
     assert.ok(p.warning && p.warning.includes('ADVERTENCIA'), 'warning ausente');
   });
 
-check('60. autodiagnostic/career: muestra vacía declara insuficiencia sin inventar',
+check('autodiagnostic/career: muestra vacía declara insuficiencia sin inventar',
   () => {
     const tel = extractAccountTelemetry({}, { handle: 'X#1' });
     assert.strictEqual(tel.insufficientData, true);
@@ -747,7 +751,7 @@ check('60. autodiagnostic/career: muestra vacía declara insuficiencia sin inven
     assert.ok(tl[0].contexto.includes('Datos insuficientes'));
   });
 
-check('61. cli.js: archivo inexistente y parse inválido fallan con Exit 1',
+check('cli.js: archivo inexistente y parse inválido fallan con Exit 1',
   () => {
     let code1 = 0;
     try { cliOk(['match', './no-existe-xyz.json']); } catch (e) { code1 = e.status; }
@@ -760,7 +764,7 @@ check('61. cli.js: archivo inexistente y parse inválido fallan con Exit 1',
     assert.strictEqual(code3, 1, 'parse con Riot ID inválido debe salir 1');
   });
 
-check('62. attest: identidad persistente + --trust-new-key explícito (sin TOFU silencioso)',
+check('attest: identidad persistente + --trust-new-key explícito (sin TOFU silencioso)',
   () => {
     withIsolatedCache(() => {
       let code1 = 0;
@@ -773,7 +777,7 @@ check('62. attest: identidad persistente + --trust-new-key explícito (sin TOFU 
     });
   });
 
-check('63. invariant: matriz imposible con jugadores conocidos falla (DUEL_RECONCILE)',
+check('invariant: matriz imposible con jugadores conocidos falla (DUEL_RECONCILE)',
   () => {
     const { reconcileDuelMatrix } = require(path.join(scriptsDir, 'invariant_validator.js'));
     const impossible = {
@@ -787,7 +791,7 @@ check('63. invariant: matriz imposible con jugadores conocidos falla (DUEL_RECON
     assert.strictEqual(real.reconciled, true, 'muestra real debe reconciliar dentro de tolerancia');
   });
 
-check('64. autodiagnostic/career: muestra cero preserva ceros, sin talento ni horas inventadas',
+check('autodiagnostic/career: muestra cero preserva ceros, sin talento ni horas inventadas',
   () => {
     const empty = evaluateTalentVsEffort({
       summary: { totalGeneral: { hours: 0 }, highestPeakRank: 'Unranked' },
@@ -801,7 +805,7 @@ check('64. autodiagnostic/career: muestra cero preserva ceros, sin talento ni ho
     assert.strictEqual(levelOnly.insufficientData, true);
   });
 
-check('65. cli.js profile: Riot ID malformado falla; shorthand declara fixture',
+check('cli.js profile: Riot ID malformado falla; shorthand declara fixture',
   () => {
     let code = 0;
     try { cliOk(['profile', 'not-a-riot-id']); } catch (e) { code = e.status; }
@@ -810,7 +814,7 @@ check('65. cli.js profile: Riot ID malformado falla; shorthand declara fixture',
     assert.ok(out.includes('fixture de ejemplo'), 'shorthand debe declarar uso del fixture');
   });
 
-check('66. identidad DSSE: creación 0600 y rechazo de permisos inseguros',
+check('identidad DSSE: creación 0600 y rechazo de permisos inseguros',
   () => {
     withIsolatedCache((tmpCache) => {
       const idFile = path.join(tmpCache, 'attest_identity.json');
@@ -831,7 +835,7 @@ check('66. identidad DSSE: creación 0600 y rechazo de permisos inseguros',
     });
   });
 
-check('67. autodiagnostic: muestra cero devuelve null, no promedios fabricados',
+check('autodiagnostic: muestra cero devuelve null, no promedios fabricados',
   () => {
     const r = evaluateTalentVsEffort({
       summary: { totalGeneral: { hours: 0 }, highestPeakRank: 'Unranked' },
@@ -843,7 +847,7 @@ check('67. autodiagnostic: muestra cero devuelve null, no promedios fabricados',
     assert.strictEqual(r.telemetrySummary.averageHs, null);
   });
 
-check('68. ingestor: IDs no-archivo no provocan sondas fs; parse sin entrada falla',
+check('ingestor: IDs no-archivo no provocan sondas fs; parse sin entrada falla',
   () => {
     let code = 0;
     try { cliOk(['parse']); } catch (e) { code = e.status; }
@@ -863,7 +867,7 @@ check('68. ingestor: IDs no-archivo no provocan sondas fs; parse sin entrada fal
     assert.strictEqual(probed.length, 0, `sondas fs inesperadas: ${probed.join(',')}`);
   });
 
-check('71. dsse: registros concurrentes al keystore no pierden claves (merge atómico)',
+check('dsse: registros concurrentes al keystore no pierden claves (merge atómico)',
   () => {
     const dssePath = path.join(scriptsDir, 'dsse_attestation.js').replace(/\\/g, '/');
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-conc-'));
@@ -903,7 +907,7 @@ const DSSE = ${JSON.stringify(dssePath)};
     }
   });
 
-check('72. autodiagnostic MMR: null/NaN/Infinity/negativos/rango ausente son insuficiencia',
+check('autodiagnostic MMR: null/NaN/Infinity/negativos/rango ausente son insuficiencia',
   () => {
     const bad = [
       { competitive: { matches: 400, kd: null, acs: null, dd: null }, currentRank: 'Gold 2' },
@@ -921,7 +925,7 @@ check('72. autodiagnostic MMR: null/NaN/Infinity/negativos/rango ausente son ins
     assert.strictEqual(inf.mmrDragDetected, true, 'valores altos en dominio deben detectarse');
   });
 
-check('73. autodiagnostic talento: ceros/negativos/HS150% no clasifican',
+check('autodiagnostic talento: ceros/negativos/HS150% no clasifican',
   () => {
     const mk = (comp) => ({
       summary: { totalGeneral: { hours: 100 }, highestPeakRank: 'Gold 2' },
@@ -937,7 +941,7 @@ check('73. autodiagnostic talento: ceros/negativos/HS150% no clasifican',
     assert.strictEqual(hs150.category, 'DATOS INSUFICIENTES', 'HS150 fuera de dominio es insuficiencia');
   });
 
-check('74. versión única: banner CLI y SBOM derivan de package.json',
+check('versión única: banner CLI y SBOM derivan de package.json',
   () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
     const out = cliOk([]);
@@ -947,7 +951,7 @@ check('74. versión única: banner CLI y SBOM derivan de package.json',
     assert.strictEqual(manifest.metadata.component.version, pkg.version, 'SBOM no deriva versión de package.json');
   });
 
-check('69. identidad DSSE: symlink en destino se rechaza sin seguirlo',
+check('identidad DSSE: symlink en destino se rechaza sin seguirlo',
   () => {
     withIsolatedCache((tmpCache) => {
       const idFile = path.join(tmpCache, 'attest_identity.json');
@@ -979,7 +983,7 @@ check('69. identidad DSSE: symlink en destino se rechaza sin seguirlo',
     });
   });
 
-check('70. autodiagnostic: perfil parcial (matches sin métricas) no clasifica',
+check('autodiagnostic: perfil parcial (matches sin métricas) no clasifica',
   () => {
     const r = evaluateTalentVsEffort({
       summary: { totalGeneral: { hours: 50 }, highestPeakRank: 'Gold 2' },
@@ -993,7 +997,7 @@ check('70. autodiagnostic: perfil parcial (matches sin métricas) no clasifica',
     assert.ok(m.diagnosis.includes('DATOS INSUFICIENTES'), 'MMR sin métricas de impacto debe declararse insuficiente');
   });
 
-check('75. dsse: writer muerto pre-marcador no bloquea; el protocolo recupera sin reinicio',
+check('dsse: writer muerto pre-marcador no bloquea; el protocolo recupera sin reinicio',
   () => {
     const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-dead-'));
@@ -1021,7 +1025,7 @@ check('75. dsse: writer muerto pre-marcador no bloquea; el protocolo recupera si
     }
   });
 
-check('76. ranks: gramática exacta insensible a mayúsculas; subcadenas rechazadas',
+check('ranks: gramática exacta insensible a mayúsculas; subcadenas rechazadas',
   () => {
     const prober = { competitive: { matches: 400, kd: '1.5', acs: '250', dd: '30' }, currentRank: 'GOLD 2' };
     const upper = evaluateMmrDrag(prober);
@@ -1034,7 +1038,7 @@ check('76. ranks: gramática exacta insensible a mayúsculas; subcadenas rechaza
     }
   });
 
-check('77. talento: epsilon (KD 0.01, HS 0.1%) no clasifica; débil-real sí',
+check('talento: epsilon (KD 0.01, HS 0.1%) no clasifica; débil-real sí',
   () => {
     const mk = (comp) => ({
       summary: { totalGeneral: { hours: 100 }, highestPeakRank: 'Gold 2' },
@@ -1049,7 +1053,7 @@ check('77. talento: epsilon (KD 0.01, HS 0.1%) no clasifica; débil-real sí',
     assert.ok(weak.confidence === 'media' || weak.confidence === 'baja', 'confianza calibrada por muestra');
   });
 
-check('78. MMR: pisos significativos (KD≥0.3 o ACS≥100) para evaluar',
+check('MMR: pisos significativos (KD≥0.3 o ACS≥100) para evaluar',
   () => {
     const thin = evaluateMmrDrag({ competitive: { matches: 400, kd: '0.1', acs: '40', dd: '5' }, currentRank: 'Gold 2' });
     assert.ok(thin.diagnosis.includes('DATOS INSUFICIENTES'), 'bajo umbral debe ser insuficiente');
@@ -1057,7 +1061,7 @@ check('78. MMR: pisos significativos (KD≥0.3 o ACS≥100) para evaluar',
     assert.ok(!solid.diagnosis.includes('DATOS INSUFICIENTES'), 'sobre umbral debe evaluarse');
   });
 
-check('79. dsse commitKeystore: rechaza symlink y publica por generaciones (sin escritura ciega)',
+check('dsse commitKeystore: rechaza symlink y publica por generaciones (sin escritura ciega)',
   () => {
     const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-save-'));
@@ -1084,7 +1088,7 @@ check('79. dsse commitKeystore: rechaza symlink y publica por generaciones (sin 
     }
   });
 
-check('80. talento: cobertura disjunta no infla confianza (joint, no suma)',
+check('talento: cobertura disjunta no infla confianza (joint, no suma)',
   () => {
     const r = evaluateTalentVsEffort({
       summary: { totalGeneral: { hours: 500 }, highestPeakRank: 'Gold 2' },
@@ -1098,14 +1102,14 @@ check('80. talento: cobertura disjunta no infla confianza (joint, no suma)',
     assert.strictEqual(r.jointMatches, 5);
   });
 
-check('81. MMR: una sola señal límite (kd 0.3 aislado) es insuficiencia',
+check('MMR: una sola señal límite (kd 0.3 aislado) es insuficiencia',
   () => {
     const r = evaluateMmrDrag({ competitive: { matches: 400, kd: '0.3', acs: '0', dd: '-300' }, currentRank: 'Gold 2' });
     assert.ok(r.diagnosis.includes('DATOS INSUFICIENTES'), 'una sola señal no basta para evaluar MMR');
     assert.strictEqual(r.confidence, 'nula');
   });
 
-check('82. dsse commitKeystore: rechaza symlink y publica con merge explícito',
+check('dsse commitKeystore: rechaza symlink y publica con merge explícito',
   () => {
     const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-save-'));
@@ -1128,7 +1132,7 @@ check('82. dsse commitKeystore: rechaza symlink y publica con merge explícito',
     }
   });
 
-check('83. talento: promedios calculados solo sobre muestra conjunta',
+check('talento: promedios calculados solo sobre muestra conjunta',
   () => {
     const r = evaluateTalentVsEffort({
       summary: { totalGeneral: { hours: 500 }, highestPeakRank: 'Gold 2' },
@@ -1142,7 +1146,7 @@ check('83. talento: promedios calculados solo sobre muestra conjunta',
     assert.ok(r.confidence === 'alta', 'joint 2005 debe dar alta confianza');
   });
 
-check('84. talento: valores límite exactos (kd 0.3/acs 100) no clasifican',
+check('talento: valores límite exactos (kd 0.3/acs 100) no clasifican',
   () => {
     const mk = (comp) => ({
       summary: { totalGeneral: { hours: 100 }, highestPeakRank: 'Gold 2' },
@@ -1153,7 +1157,7 @@ check('84. talento: valores límite exactos (kd 0.3/acs 100) no clasifican',
     assert.strictEqual(r.talentRatio, 'N/A');
   });
 
-check('85. dsse: carrera de marcador determinística — validar e instalar son una sola operación (sin TOCTOU)',
+check('dsse: carrera de marcador determinística — validar e instalar son una sola operación (sin TOCTOU)',
   () => {
     const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-race-'));
@@ -1165,11 +1169,14 @@ check('85. dsse: carrera de marcador determinística — validar e instalar son 
         mutateCalls++;
         if (mutateCalls === 1) {
           // Simula un corredor que gana la generación 2 entre nuestra lectura
-          // y nuestro intento de marcador: contenido durable + marcador wx.
+          // y nuestro intento de marcador: contenido durable + marcador wx
+          // con el digest vinculante del contenido exacto.
           const racerNonce = 'a11ce5';
           const racer = { keys: current.keys.concat([{ keyid: 'racer', publicKeyPem: 'R', label: 'racer', created: 'now' }]), generation: 2, writer: `999:1:${racerNonce}` };
-          fs.writeFileSync(`${ksPath}.g2.${racerNonce}`, JSON.stringify(racer), { flag: 'wx' });
-          fs.writeFileSync(`${ksPath}.commit.2`, `999:1:${racerNonce}`, { flag: 'wx' });
+          const racerJson = JSON.stringify(racer, null, 2);
+          const racerDigest = crypto.createHash('sha256').update(Buffer.from(racerJson, 'utf8')).digest('hex');
+          fs.writeFileSync(`${ksPath}.g2.${racerNonce}`, racerJson, { flag: 'wx' });
+          fs.writeFileSync(`${ksPath}.commit.2`, `999:1:${racerNonce}:${racerDigest}`, { flag: 'wx' });
         }
         return { keys: current.keys.concat([{ keyid: 'mine', publicKeyPem: 'M', label: 'mine', created: 'now' }]) };
       });
@@ -1186,7 +1193,7 @@ check('85. dsse: carrera de marcador determinística — validar e instalar son 
     }
   });
 
-check('86. talento: duplicados exactos no inflan muestra ni confianza',
+check('talento: duplicados exactos no inflan muestra ni confianza',
   () => {
     const one = { handle: 'D#1', isExcluded: false, competitive: { matches: 10, kd: '1.1', acs: '220', dd: '15', hs: '22' }, peakRank: 'Gold 2' };
     const ten = Array.from({ length: 10 }, () => JSON.parse(JSON.stringify(one)));
@@ -1200,7 +1207,7 @@ check('86. talento: duplicados exactos no inflan muestra ni confianza',
     assert.ok(r.confidence !== 'alta', 'duplicados jamás dan alta confianza');
   });
 
-check('87. talento: identidad incierta (vacíos/duplicados de handle) topa confianza',
+check('talento: identidad incierta (vacíos/duplicados de handle) topa confianza',
   () => {
     const mkAcc = (handle, comp) => ({ handle, isExcluded: false, competitive: comp, peakRank: 'Gold 2' });
     const blanks = evaluateTalentVsEffort({
@@ -1229,7 +1236,7 @@ check('87. talento: identidad incierta (vacíos/duplicados de handle) topa confi
     assert.strictEqual(sameHandle.confidence, 'media', 'mismo handle con datos distintos topa en media');
   });
 
-check('88. talento/MMR: apenas-sobre-umbral no produce conclusiones favorables',
+check('talento/MMR: apenas-sobre-umbral no produce conclusiones favorables',
   () => {
     const r = evaluateTalentVsEffort({
       summary: { totalGeneral: { hours: 100 }, highestPeakRank: 'Gold 2' },
@@ -1241,7 +1248,7 @@ check('88. talento/MMR: apenas-sobre-umbral no produce conclusiones favorables',
     assert.ok(m.confidence === 'media' || m.confidence === 'baja', 'MMR límite no debe dar alta confianza');
     assert.ok(m.confidence !== 'alta', 'MMR límite jamás alta confianza');
   });
-check('89. dsse: 8 worker-threads concurrentes retienen todas las claves (sin overlap)',
+check('dsse: 8 worker-threads concurrentes retienen todas las claves (sin overlap)',
   () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-workers-'));
     try {
@@ -1279,7 +1286,7 @@ const dsse = require(${JSON.stringify(path.join(scriptsDir, 'dsse_attestation.js
     }
   });
 
-check('90. MMR límite (1 señal decisiva) es evidencia límite, no veredicto',
+check('MMR límite (1 señal decisiva) es evidencia límite, no veredicto',
   () => {
     const m = evaluateMmrDrag({ competitive: { matches: 400, kd: '0.4', acs: '120', dd: '-50' }, currentRank: 'Gold 2' });
     assert.ok(m.diagnosis.includes('EVIDENCIA L'), 'MMR débil debe declararse límite');
@@ -1287,7 +1294,7 @@ check('90. MMR límite (1 señal decisiva) es evidencia límite, no veredicto',
     assert.strictEqual(m.mmrDragDetected, false);
   });
 
-check('91. dsse: saltos de reloj y mtimes arbitrarios no alteran el protocolo (sin relojes)',
+check('dsse: saltos de reloj y mtimes arbitrarios no alteran el protocolo (sin relojes)',
   () => {
     const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-clock-'));
@@ -1313,7 +1320,7 @@ check('91. dsse: saltos de reloj y mtimes arbitrarios no alteran el protocolo (s
     }
   });
 
-check('92. talento: epsilon apenas-sobre-umbral (0.306/100.06) es descriptivo',
+check('talento: epsilon apenas-sobre-umbral (0.306/100.06) es descriptivo',
   () => {
     const r = evaluateTalentVsEffort({
       summary: { totalGeneral: { hours: 100 }, highestPeakRank: 'Gold 2' },
@@ -1324,7 +1331,7 @@ check('92. talento: epsilon apenas-sobre-umbral (0.306/100.06) es descriptivo',
     assert.ok(!r.trueDeservedRank.includes('Platino') || r.trueDeservedRank.includes('Indeterminado'), 'sin proyección de rango');
   });
 
-check('93. dedup: orden de campos y delimitadores no alteran identidad',
+check('dedup: orden de campos y delimitadores no alteran identidad',
   () => {
     const base = { matches: 10, kd: '1.1', acs: '220', dd: '15', hs: '22' };
     const reordered = { hs: '22', dd: '15', acs: '220', kd: '1.1', matches: 10 };
@@ -1347,7 +1354,7 @@ check('93. dedup: orden de campos y delimitadores no alteran identidad',
     assert.strictEqual(tricky.duplicatesSkipped, 0, 'delimitadores no deben colisionar identidades distintas');
   });
 
-check('94. dsse: marcador ilegible es fail-closed o adopción única documentada',
+check('dsse: marcador ilegible SIEMPRE fail-closed (adopción prohibida); digest del marcador vincula el contenido',
   () => {
     const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-malmarker-'));
@@ -1358,34 +1365,47 @@ check('94. dsse: marcador ilegible es fail-closed o adopción única documentada
       fs.writeFileSync(`${ksPath}.g2.aaaa`, JSON.stringify({ keys: [], generation: 2, writer: '1:1:aaaa' }));
       fs.writeFileSync(`${ksPath}.g2.bbbb`, JSON.stringify({ keys: [], generation: 2, writer: '1:1:bbbb' }));
       fs.writeFileSync(`${ksPath}.commit.2`, 'escritura-parcial-sin-formato');
-      assert.throws(() => dsse.loadOrCreateKeystore(ksPath), /candidatos|fail-closed/,
+      assert.throws(() => dsse.loadOrCreateKeystore(ksPath), /ilegible|fail-closed/,
         'la ambigüidad jamás se resuelve adivinando');
       fs.rmSync(tmp, { recursive: true, force: true });
-      // Caso recuperable: un único candidato completo para el marcador ilegible.
+      // Caso de candidato ÚNICO: JAMÁS se adopta (un contenido sin marcador
+      // VÁLIDO es inerte; la adopción automática está prohibida).
       const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-adopt-'));
       try {
         const ks2 = path.join(tmp2, 'ks.json');
         dsse.commitKeystore(ks2, () => ({ keys: [{ keyid: 'k0', publicKeyPem: 'P0', label: 'base', created: 'now' }] }));
         fs.writeFileSync(`${ks2}.g2.c0de`, JSON.stringify({
-          keys: [{ keyid: 'k0', publicKeyPem: 'P0', label: 'base', created: 'now' }, { keyid: 'k1', publicKeyPem: 'P1', label: 'adopt', created: 'now' }],
+          keys: [{ keyid: 'k0', publicKeyPem: 'P0', label: 'base', created: 'now' }, { keyid: 'k1', publicKeyPem: 'P1', label: 'nunca-commiteado', created: 'now' }],
           generation: 2, writer: '999:1:c0de'
         }));
         fs.writeFileSync(`${ks2}.commit.2`, 'parcial');
-        const adopted = dsse.loadOrCreateKeystore(ks2);
-        assert.strictEqual(adopted.keys.length, 2, 'la adopción única documentada recupera el estado');
-        assert.strictEqual(adopted.generation, 2);
-        const k = dsse.generateAttestationKeyPair();
-        dsse.registerTrustedKey(ks2, k.publicKey.export({ type: 'spki', format: 'pem' }), 'post-adopt');
-        assert.strictEqual(dsse.loadOrCreateKeystore(ks2).generation, 3, 'la publicación continúa tras la adopción');
+        assert.throws(() => dsse.loadOrCreateKeystore(ks2), /ilegible|fail-closed/,
+          'un huérfano único con marcador inválido jamás se convierte en estado');
       } finally {
         fs.rmSync(tmp2, { recursive: true, force: true });
+      }
+      // Vínculo criptográfico: contenido manipulado post-commit = fail-closed.
+      const tmp3 = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-digest-'));
+      try {
+        const ks3 = path.join(tmp3, 'ks.json');
+        dsse.commitKeystore(ks3, () => ({ keys: [{ keyid: 'k0', publicKeyPem: 'P0', label: 'base', created: 'now' }] }));
+        assert.strictEqual(dsse.loadOrCreateKeystore(ks3).keys.length, 1, 'lectura íntegra acepta el digest');
+        // Manipular los bytes del contenido comprometido sin tocar el marcador:
+        const contentFile = fs.readdirSync(tmp3).find(f => /^ks\.json\.g1\./.test(f));
+        const tampered = JSON.parse(fs.readFileSync(path.join(tmp3, contentFile), 'utf8'));
+        tampered.keys[0].publicKeyPem = 'EVIL';
+        fs.writeFileSync(path.join(tmp3, contentFile), JSON.stringify(tampered, null, 2));
+        assert.throws(() => dsse.loadOrCreateKeystore(ks3), /digest|manipulación/,
+          'el digest del marcador detecta el contenido alterado');
+      } finally {
+        fs.rmSync(tmp3, { recursive: true, force: true });
       }
     } finally {
       try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
     }
   });
 
-check('95. MMR: apenas-sobre-umbral (KD 0.6001/ACS 200.01/DD -300) es evidencia límite',
+check('MMR: apenas-sobre-umbral (KD 0.6001/ACS 200.01/DD -300) es evidencia límite',
   () => {
     const m = evaluateMmrDrag({ competitive: { matches: 400, kd: '0.6001', acs: '200.01', dd: '-300' }, currentRank: 'Gold 2' });
     assert.ok(m.diagnosis.includes('EVIDENCIA L'), 'epsilon-sobre-umbral no es evidencia decisiva');
@@ -1398,7 +1418,7 @@ check('95. MMR: apenas-sobre-umbral (KD 0.6001/ACS 200.01/DD -300) es evidencia 
     assert.ok(contra.diagnosis.includes('Indeterminada'), 'no se afirma normalidad contra evidencia contraria');
   });
 
-check('96. identidad: equivalentes Unicode son la misma cuenta; formas no inflan muestra',
+check('identidad: equivalentes Unicode son la misma cuenta; formas no inflan muestra',
   () => {
     const comp = { matches: 40, kd: '1.2', acs: '240', dd: '20', hs: '25' };
     const r = evaluateTalentVsEffort({
@@ -1413,7 +1433,7 @@ check('96. identidad: equivalentes Unicode son la misma cuenta; formas no inflan
     assert.strictEqual(r.identityUncertain, false, 'equivalentes canónicos no generan incertidumbre');
   });
 
-check('97. dsse: estrés concurrente (24 workers) conserva TODAS las claves sin errores de lectura',
+check('dsse: estrés concurrente (24 workers) conserva TODAS las claves sin errores de lectura',
   () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-stress-'));
     try {
@@ -1452,7 +1472,7 @@ const dsse = require(${JSON.stringify(path.join(scriptsDir, 'dsse_attestation.js
     }
   });
 
-check('98. dsse: merge concurrente puro (16 commitKeystore en workers) converge sin pérdida',
+check('dsse: merge concurrente puro (16 commitKeystore en workers) converge sin pérdida',
   () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-merge-'));
     try {
@@ -1493,5 +1513,25 @@ const dsse = require(${JSON.stringify(path.join(scriptsDir, 'dsse_attestation.js
     }
   });
 
+// GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben
+// reflejar EXACTAMENTE el número de casos registrados y ejecutados. Un
+// manifiesto desincronizado hace fallar la suite (imposible sobre-declarar
+// cobertura: el número es el contador vivo del harness).
+const readmeManifest = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8');
+const badge = readmeManifest.match(/tests-(\d+)%2F\d+_PASS/);
+const guarantee = readmeManifest.match(/(\d+) pruebas automatizadas/);
+const manifestMismatches = [];
+if (!badge || parseInt(badge[1], 10) !== total) {
+  manifestMismatches.push(`badge=${badge ? badge[1] : 'ausente'}`);
+}
+if (!guarantee || parseInt(guarantee[1], 10) !== total) {
+  manifestMismatches.push(`conteo=${guarantee ? guarantee[1] : 'ausente'}`);
+}
+if (manifestMismatches.length > 0) {
+  console.error(`GATE MANIFIESTO: el README declara ${manifestMismatches.join(', ')} pero la suite ejecutó ${total} checks. Exit Code 1`);
+  process.exit(1);
+}
+
 if (passed !== total) process.exit(1);
+console.log(`Resultados: ${passed}/${total} checks registrados y ejecutados; manifiesto README trazable (${total}/${total}). Exit Code: 0`);
 console.log('All valorant-analytics deterministic tests passed with Exit Code: 0');

@@ -195,8 +195,12 @@ function verifyWithPem(envelope, pem) {
  *     separada y futura. Solo cada perdedor retira su PROPIO contenido no
  *     referenciable por marcador alguno. Así toda lectura de un marcador
  *     encuentra siempre su contenido: no existe carrera lector-GC.
- *   - Fail-closed: marcador ilegible con candidatos ambiguos, contenido
- *     ausente o generación inconsistente abortan con estado intacto.
+ *   - Fail-closed: marcador ilegible (parcial o manipulado) SIEMPRE aborta:
+ *     el contenido huérfano sin marcador VÁLIDO es inerte y jamás se adopta
+ *     como estado. La recuperación exige intervención manual explícita.
+ *   - Vínculo criptográfico: el marcador lleva el digest SHA-256 del contenido
+ *     que compromete; toda lectura verifica marcador→digest→contenido antes
+ *     de aceptarlo. Digest distinto o generación inconsistente = fail-closed.
  *
  * Convergencia: commitKeystore converge sin pérdida para mutaciones
  * conmutativas/idempotentes (p. ej., añadir una clave). Un REEMPLAZO total
@@ -204,7 +208,7 @@ function verifyWithPem(envelope, pem) {
  * coordinación externa del llamador: la API no expone escritura ciega.
  */
 
-const MARKER_RE = /^(\d+):([A-Za-z0-9_-]+):([0-9a-f]+)$/;
+const MARKER_RE = /^(\d+):([A-Za-z0-9_-]+):([0-9a-f]+):([0-9a-f]{64})$/;
 
 function currentThreadId() {
   try {
@@ -258,13 +262,27 @@ function readLegacyKeystore(keystorePath) {
   throw new Error(`El keystore legado (${keystorePath}) existe pero es ilegible: inspecciónalo manualmente (fail-closed; jamás se sobrescribe estado potencialmente recuperable).`);
 }
 
-function readGenerationContent(keystorePath, gen, nonce) {
+function readGenerationContent(keystorePath, gen, nonce, expectedDigest) {
   const contentPath = `${keystorePath}.g${gen}.${nonce}`;
-  let parsed;
+  let raw;
   try {
-    parsed = JSON.parse(fs.readFileSync(contentPath, 'utf8'));
+    raw = fs.readFileSync(contentPath);
   } catch (e) {
     throw new Error(`Contenido de la generación ${gen} ausente o ilegible (${contentPath}) pese a existir su marcador: posible sabotaje o corrupción de disco (fail-closed).`);
+  }
+  if (expectedDigest) {
+    // Vínculo criptográfico marcador→contenido: el digest grabado en el
+    // marcador DEBE coincidir con los bytes del contenido referenciado.
+    const actualDigest = crypto.createHash('sha256').update(raw).digest('hex');
+    if (actualDigest !== expectedDigest) {
+      throw new Error(`El contenido de la generación ${gen} no coincide con el digest de su marcador (${contentPath}): manipulación detectada (fail-closed).`);
+    }
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw.toString('utf8'));
+  } catch (e) {
+    throw new Error(`Contenido de la generación ${gen} sin JSON válido (${contentPath}): fail-closed.`);
   }
   if (!parsed || !Array.isArray(parsed.keys)) {
     throw new Error(`Contenido de la generación ${gen} sin estructura válida { keys: [] } (${contentPath}): fail-closed.`);
@@ -273,16 +291,6 @@ function readGenerationContent(keystorePath, gen, nonce) {
     throw new Error(`La generación del contenido (${parsed.generation}) no coincide con su marcador (${gen}): posible mezcla de estados (fail-closed).`);
   }
   return parsed;
-}
-
-function adoptOrphanGeneration(keystorePath, gen, nonces) {
-  if (nonces.length === 1) {
-    // Recuperación documentada: el único candidato fue escrito y sincronizado
-    // completo antes de un marcador que quedó ilegible (caída a mitad de una
-    // escritura de ~30 bytes). Se adopta como verdad de esa generación.
-    return { keystore: readGenerationContent(keystorePath, gen, nonces[0]), generation: gen };
-  }
-  throw new Error(`Marcador de commit de la generación ${gen} ilegible con ${nonces.length} candidatos de contenido (${keystorePath}): inspecciónalo y elimina manualmente el marcador defectuoso (fail-closed; el estado de la generación anterior permanece intacto).`);
 }
 
 function readCommittedKeystore(keystorePath) {
@@ -302,15 +310,18 @@ function readCommittedKeystore(keystorePath) {
     const gen = Math.max(...markers);
     const markerPath = `${keystorePath}.commit.${gen}`;
     let raw = null;
-    try { raw = fs.readFileSync(markerPath, 'utf8'); }
+    try { raw = fs.readFileSync(markerPath); }
     catch (e) { execSleep(20); continue; } // desapareció entre readdir y read: reintentar
-    const m = raw.trim().match(MARKER_RE);
+    const m = raw.toString('utf8').trim().match(MARKER_RE);
     if (!m) {
-      // Escritura parcial (caída) o sabotaje: reintentar antes de concluir.
+      // Escritura parcial (caída) o sabotaje: reintentar antes de concluir;
+      // al agotar, FAIL-CLOSED. La adopción automática de contenido huérfano
+      // está PROHIBIDA: un contenido sin marcador VÁLIDO es inerte y jamás
+      // se publica. Ningún marcador inválido puede alterar el estado.
       if (probe < 4) { execSleep(20); continue; }
-      return adoptOrphanGeneration(keystorePath, gen, contents.get(gen) || []);
+      throw new Error(`Marcador de commit de la generación ${gen} ilegible (${markerPath}): fail-closed; jamás se publica contenido huérfano (${(contents.get(gen) || []).length} candidato(s) retenido(s) como inerte(s)). Estado de la generación anterior intacto; inspecciónalo manualmente.`);
     }
-    return { keystore: readGenerationContent(keystorePath, gen, m[3]), generation: gen };
+    return { keystore: readGenerationContent(keystorePath, gen, m[3], m[4]), generation: gen };
   }
   throw new Error(`No se pudo leer el estado del keystore (${keystorePath}) de forma consistente tras 5 intentos.`);
 }
@@ -341,21 +352,26 @@ function commitKeystore(keystorePath, mutate, options = {}) {
     const contentPath = `${keystorePath}.g${nextGen}.${nonce}`;
     const markerPath = `${keystorePath}.commit.${nextGen}`;
     // 1) Contenido durable ANTES del marcador (wx: creación y contenido son
-    //    una sola operación; jamás se sigue un symlink preexistente).
+    //    una sola operación; jamás se sigue un symlink preexistente). El
+    //    digest del contenido exacto se graba dentro del marcador.
+    const contentJson = JSON.stringify(candidate, null, 2);
+    const contentDigest = crypto.createHash('sha256').update(Buffer.from(contentJson, 'utf8')).digest('hex');
     let fd = fs.openSync(contentPath, 'wx', 0o600);
     try {
-      fs.writeFileSync(fd, JSON.stringify(candidate, null, 2));
+      fs.writeFileSync(fd, contentJson);
       fs.fsyncSync(fd);
     } finally {
       try { fs.closeSync(fd); } catch (e) {}
     }
     try { fs.chmodSync(contentPath, 0o600); } catch (e) { /* Windows: mejor esfuerzo */ }
-    // 2) Marcador: LA operación atómica de validación+instalación.
+    // 2) Marcador: LA operación atómica de validación+instalación. Su
+    //    contenido (pid:tid:nonce:digest) vincula criptográficamente la
+    //    generación comprometida con los bytes exactos publicados.
     let committed = false;
     try {
       const mfd = fs.openSync(markerPath, 'wx', 0o600);
       try {
-        fs.writeFileSync(mfd, `${process.pid}:${currentThreadId()}:${nonce}`);
+        fs.writeFileSync(mfd, `${process.pid}:${currentThreadId()}:${nonce}:${contentDigest}`);
         fs.fsyncSync(mfd);
       } finally {
         try { fs.closeSync(mfd); } catch (e) {}
