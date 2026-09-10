@@ -17,6 +17,35 @@ const scriptsDir = path.join(__dirname, 'scripts');
 const cliPath = path.join(scriptsDir, 'cli.js');
 const sampleFile = path.join(__dirname, 'examples', 'sample_match.json');
 
+// --- Arranque controlado del frente #1: la configuración del operador se fija
+// ANTES de cargar riot_source (una sola vez). Las pruebas mutan el CONTENIDO de
+// los ficheros, nunca la ruta; cambiar la env después no debe surtir efecto.
+const RIOT_CFG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'riot-cfg-'));
+const RIOT_TRUST_PATH = path.join(RIOT_CFG_DIR, 'trust.json');
+const RIOT_KEY_PATH = path.join(RIOT_CFG_DIR, 'ingestor.key');
+function writeRiotTrust(keys) {
+  fs.writeFileSync(RIOT_TRUST_PATH, JSON.stringify(keys), { encoding: 'utf8', mode: 0o600 });
+  try { fs.chmodSync(RIOT_TRUST_PATH, 0o600); } catch (e) { /* Windows */ }
+}
+function writeRiotKey(privateKeyPem) {
+  fs.writeFileSync(RIOT_KEY_PATH, privateKeyPem, { encoding: 'utf8', mode: 0o600 });
+  try { fs.chmodSync(RIOT_KEY_PATH, 0o600); } catch (e) { /* Windows */ }
+}
+const RIOT_ATT_PATH = path.join(__dirname, 'examples', 'riot_match_anonymized.attestation.json');
+const RIOT_KEYS_PATH = path.join(__dirname, 'examples', 'riot_match_trusted_keys.json');
+const RIOT_BIG_MAX_AGE = 100 * 365 * 24 * 3600 * 1000;
+function loadRiotGolden() {
+  return {
+    payload: JSON.parse(fs.readFileSync(path.join(__dirname, 'examples', 'riot_match_anonymized.json'), 'utf8')),
+    attestation: JSON.parse(fs.readFileSync(RIOT_ATT_PATH, 'utf8')),
+    trustedKeys: JSON.parse(fs.readFileSync(RIOT_KEYS_PATH, 'utf8'))
+  };
+}
+writeRiotTrust([]);
+writeRiotKey('');
+process.env.RIOT_ATTESTATION_TRUST = RIOT_TRUST_PATH;
+process.env.RIOT_ATTESTATION_KEY = RIOT_KEY_PATH;
+
 console.log('=== VALORANT ANALYTICS: SUITE DETERMINISTA v3.0 ===\n');
 
 assert.ok(fs.existsSync(sampleFile), 'sample_match.json no existe');
@@ -198,8 +227,9 @@ check('cli.js duels: matriz 1v1 renderizada (regresión P0: contrato parseDuels)
 check('cli.js match: diagnóstico 360° completo con radar y fugas',
   () => {
     const out = cliOk(['match', sampleFile, 'TenZ#0001']);
-    assert.ok(out.includes('DIAGNÓSTICO 360°') && out.includes('RADAR DE DOMINIO'));
-    assert.ok(out.includes('FUGAS DE ELO'));
+    assert.ok(out.includes('RADAR DE DOMINIO'));
+    assert.ok(out.includes('OBSERVACIONES POR RONDA'), 'muestra ronda describe, no acusa causas');
+    assert.ok(!out.includes('FUGAS ATRIBUIBLES'), 'sin regla verificable no se acusan fugas');
   });
 
 check('cli.js duo: auditoría con carryAnalysis en consola',
@@ -440,7 +470,7 @@ check('career_telemetry: desglose de horas competitivas vs general y cronología
     assert.strictEqual(tl[0].rango, 'Hierro 3 (Inicio)');
   });
 
-check('autodiagnostic_engine: diagnóstico de MMR drag, verdadero rango merecido y ratio de talento',
+check('autodiagnostic_engine: señal heurística de MMR y mezcla de indicadores (no verificada)',
   () => {
     const drag = evaluateMmrDrag({
       competitive: { matches: 500, kd: '1.20', acs: '240', dd: '25' },
@@ -918,7 +948,7 @@ check('autodiagnostic MMR: null/NaN/Infinity/negativos/rango ausente son insufic
     ];
     for (const input of bad) {
       const r = evaluateMmrDrag(input);
-      assert.strictEqual(r.mmrDragDetected, false, `MMR drag con entrada inválida: ${JSON.stringify(input)}`);
+      assert.strictEqual(r.mmrDragDetected, false, `señal MMR con entrada inválida: ${JSON.stringify(input)}`);
       assert.ok(r.diagnosis.includes('DATOS INSUFICIENTES'), 'sin declaración de insuficiencia');
     }
     const inf = evaluateMmrDrag({ competitive: { matches: 400, kd: '9.9', acs: '900', dd: '299' }, currentRank: 'Gold 2' });
@@ -1415,7 +1445,7 @@ check('MMR: apenas-sobre-umbral (KD 0.6001/ACS 200.01/DD -300) es evidencia lím
     // Contrario extremo: DD en el piso impide confianza alta en normalidad.
     const contra = evaluateMmrDrag({ competitive: { matches: 400, kd: '1.5', acs: '260', dd: '-280' }, currentRank: 'Diamond 1' });
     assert.notStrictEqual(contra.confidence, 'alta', 'evidencia contraria acota la confianza');
-    assert.ok(contra.diagnosis.includes('Indeterminada'), 'no se afirma normalidad contra evidencia contraria');
+    assert.ok(/SIN CONCLUSIÓN|extremo contrario/i.test(contra.diagnosis), 'no se afirma normalidad contra evidencia contraria');
   });
 
 check('identidad: equivalentes Unicode son la misma cuenta; formas no inflan muestra',
@@ -1805,6 +1835,441 @@ check('dsse: junction/reparse de directorio no se sigue (Windows junction / POSI
     }
   });
 
+check('honestidad: el motor marca toda salida interpretativa como hipótesis no verificada',
+  () => {
+    const { evaluateMmrDrag, evaluateTalentVsEffort } = require(path.join(scriptsDir, 'autodiagnostic_engine.js'));
+    const mmrCases = [
+      evaluateMmrDrag({ competitive: { matches: 0 }, currentRank: 'Gold 2' }),
+      evaluateMmrDrag({ competitive: { matches: 400, kd: '0.4', acs: '120', dd: '-50' }, currentRank: 'Gold 2' }),
+      evaluateMmrDrag({ competitive: { matches: 400, kd: '1.5', acs: '260', dd: '30' }, currentRank: 'Gold 2' })
+    ];
+    for (const m of mmrCases) {
+      assert.strictEqual(m.claimStatus, 'hipotesis_no_verificada', 'MMR sin sello de hipótesis');
+      assert.ok(typeof m.disclaimer === 'string' && m.disclaimer.includes('NO mide el MMR interno'), 'MMR sin disclaimer explícito');
+      assert.ok(Array.isArray(m.limitations) && m.limitations.length >= 2, 'MMR sin limitaciones declaradas');
+    }
+    const detected = mmrCases[2];
+    assert.strictEqual(detected.mmrDragDetected, true, 'caso fuerte debe marcar señal');
+    assert.ok(/hipótesis/i.test(detected.diagnosis) && /NO demuestra/i.test(detected.diagnosis),
+      'el diagnóstico de anclaje debe formularse como hipótesis, no como hecho');
+    const talentCases = [
+      evaluateTalentVsEffort({ summary: { totalGeneral: { hours: 0 }, highestPeakRank: 'Unranked' }, accounts: [{ handle: 'A#1', isExcluded: false, competitive: { matches: 0 } }] }),
+      evaluateTalentVsEffort({ summary: { totalGeneral: { hours: 100 }, highestPeakRank: 'Gold 2' }, accounts: [{ handle: 'A#1', isExcluded: false, competitive: { matches: 5, kd: 0.3, acs: 100, dd: -300, hs: 0 }, peakRank: 'Gold 2' }] }),
+      evaluateTalentVsEffort({ summary: { totalGeneral: { hours: 100 }, highestPeakRank: 'Gold 2' }, accounts: [{ handle: 'A#1', isExcluded: false, competitive: { matches: 10, kd: 1.3, acs: 250, dd: 20, hs: 25 }, peakRank: 'Gold 2' }] })
+    ];
+    for (const t of talentCases) {
+      assert.strictEqual(t.claimStatus, 'hipotesis_no_verificada', 'talento sin sello de hipótesis');
+      assert.ok(typeof t.disclaimer === 'string' && t.disclaimer.includes('talento real'), 'talento sin disclaimer explícito');
+      assert.ok(Array.isArray(t.limitations) && t.limitations.length >= 2, 'talento sin limitaciones declaradas');
+    }
+    const favorable = talentCases[2];
+    assert.ok(/HIPÓTESIS/i.test(favorable.category), 'la categoría favorable debe declararse hipótesis');
+    assert.ok(/NO verificada/i.test(favorable.trueDeservedRank), 'la estimación de rango debe marcarse NO verificada');
+    assert.ok(!/demuestra/i.test(String(favorable.rationale)), 'la justificación no debe afirmar demostración');
+  });
+
+check('honestidad: matriz de superficies públicas sin lenguaje absoluto',
+  () => {
+    // Inventario de superficies públicas: docs, prompt, help renderizado y
+    // salida de diagnose. Cada LÍNEA con un rótulo absoluto debe llevar un
+    // matiz explícito; si no, la suite falla (no basta con que el documento
+    // tenga un marcador en cualquier parte).
+    const absoluteLabels = [/rango real/i, /merecido/i, /detecta mmr/i, /mmr drag/i, /true rank/i, /deserved rank/i];
+    const hedge = /hip[oó]tesis|hypothesis|no verifica|unverified|no mide|prohib|nunca|sin embargo|cota|indicative|no implica|no es un|no un|no afirma|no se |alcance|scope|l[ií]mit|no probad|compatible|indicio|señal/i;
+    const docSurfaces = ['README.md', 'README.es.md', 'README.en.md', 'SKILL.md', 'standalone_prompt.md'];
+    const offenders = [];
+    const scan = (surface, text) => {
+      text.split(/\r?\n/).forEach((line, i) => {
+        if (absoluteLabels.some(r => r.test(line)) && !hedge.test(line)) {
+          offenders.push(`${surface}:${i + 1} → ${line.trim().slice(0, 120)}`);
+        }
+      });
+    };
+    for (const f of docSurfaces) scan(f, fs.readFileSync(path.join(__dirname, f), 'utf8'));
+    scan('CLI --help', cliOk(['--help']));
+    const mockFile = path.join(os.tmpdir(), `mock-claims-${process.pid}.json`);
+    fs.writeFileSync(mockFile, JSON.stringify({
+      platformInfo: { platformUserHandle: 'Claims#1' },
+      segments: [{
+        type: 'playlist',
+        attributes: { playlist: 'competitive' },
+        stats: {
+          timePlayed: { value: 72000 }, matchesPlayed: { value: 35 },
+          kDRatio: { displayValue: '1.25' }, headshotsPercentage: { displayValue: '22.0%' },
+          scorePerRound: { displayValue: '240.0' }, damageDeltaPerRound: { displayValue: '28' },
+          rank: { metadata: { tierName: 'Gold 3' } }, peakRank: { displayValue: 'Platinum 1' }
+        }
+      }]
+    }), 'utf8');
+    let diagOut = '';
+    try {
+      diagOut = cliOk(['diagnose', mockFile, 'Claims#1']);
+    } finally {
+      if (fs.existsSync(mockFile)) fs.unlinkSync(mockFile);
+    }
+    scan('CLI diagnose', diagOut);
+    assert.strictEqual(offenders.length, 0, `lenguaje absoluto sin matiz en superficies públicas:\n${offenders.join('\n')}`);
+    assert.ok(/NO VERIFICAD/i.test(diagOut), 'CLI diagnose debe mostrar el aviso de no verificado');
+    assert.ok(/ALCANCE/i.test(diagOut), 'CLI diagnose debe mostrar el alcance/límites');
+    assert.ok(!/DETECTADO \(ANCLADO\)/i.test(diagOut), 'CLI no debe afirmar anclaje detectado');
+  });
+
+check('honestidad: la política de evidencia no fuerza coaching ni diagnósticos (fixtures)',
+  () => {
+    const { classifyEvidence } = require(path.join(scriptsDir, 'evidence_policy.js'));
+    const fixture = f => JSON.parse(fs.readFileSync(path.join(__dirname, 'examples', f), 'utf8'));
+    const minimal = classifyEvidence(fixture('telemetry_minimal.json'));
+    assert.strictEqual(minimal.level, 'aggregate', 'solo KDA/ACS es evidencia agregada');
+    for (const s of ['round_leaks', 'aim_routine', 'duel_matrix', 'weapon_telemetry']) {
+      assert.ok(!minimal.allowedSections.includes(s), `mínimo NO debe permitir ${s}`);
+      assert.ok(minimal.forbiddenSections.includes(s), `${s} debe estar prohibido en mínimo`);
+    }
+    assert.strictEqual(minimal.maxLeaks, 0, 'sin evidencia por ronda no hay fugas');
+    assert.ok(minimal.missing.some(m => m.startsWith('eventos_normalizados_por_ronda')), 'debe declarar la falta de eventos de ronda');
+    const partial = classifyEvidence(fixture('telemetry_partial.json'));
+    assert.strictEqual(partial.level, 'aggregate', 'un marcador agregado sigue siendo evidencia agregada');
+    assert.ok(!partial.allowedSections.includes('round_leaks'), 'sin rondas no se atribuyen fugas');
+    assert.ok(!partial.allowedSections.includes('duel_matrix'), 'sin duelos no hay matriz');
+    assert.ok(!partial.allowedSections.includes('weapon_telemetry'), 'sin zonas no hay telemetría de arma');
+    assert.ok(partial.allowedSections.includes('aim_routine'), 'con HS%+ACS sí hay evidencia mecánica para la rutina');
+    // Fichero aportado por el usuario: sus rondas son DECLARACIONES, no telemetría verificada.
+    const userProvided = classifyEvidence(fixture('telemetry_complete.json'));
+    assert.strictEqual(userProvided.level, 'aggregate', 'datos de fichero no son observados por adaptador');
+    assert.ok(!userProvided.allowedSections.includes('round_leaks'), 'declaraciones no acusan fugas');
+    assert.ok(!userProvided.allowedSections.includes('round_observations'), 'declaraciones no son eventos observados');
+    assert.ok(!userProvided.allowedSections.includes('duel_matrix'), 'duelos de fichero no están verificados');
+    assert.strictEqual(userProvided.declaredObservations, 3, 'user_claim/inference se cuentan como declaraciones');
+    assert.strictEqual(userProvided.normalizedRoundCount, 0, 'un JSON no puede portar procedencia de ronda');
+    assert.ok(userProvided.dimensions.precision.available, 'con HS% la precisión es evaluable');
+    assert.ok(userProvided.allowedSections.includes('weapon_telemetry'), 'con zonas válidas sí hay telemetría de arma');
+    const none = classifyEvidence({ observed: {} });
+    assert.strictEqual(none.level, 'insufficient');
+    assert.ok(!none.allowedSections.includes('aggregate_radar'), 'sin métricas no hay radar');
+    assert.ok(!none.allowedSections.includes('round_leaks'), 'sin rondas no hay fugas');
+  });
+
+check('honestidad: el prompt exige salida condicional y no fuerza conclusiones',
+  () => {
+    const prompt = fs.readFileSync(path.join(__dirname, 'standalone_prompt.md'), 'utf8');
+    assert.ok(/0 a 3/i.test(prompt), 'el prompt debe permitir 0–3 hallazgos, no forzar 3');
+    assert.ok(/evidencia por ronda/i.test(prompt), 'el prompt debe exigir evidencia por ronda para causas');
+    assert.ok(/cat[aá]logo/i.test(prompt), 'el prompt debe restringir escenarios al catálogo disponible');
+    assert.ok(/NIVEL DE EVIDENCIA/i.test(prompt) && /insufficient/i.test(prompt) && /aggregate/i.test(prompt) && /complete/i.test(prompt),
+      'el prompt debe clasificar el nivel de evidencia con la política compartida');
+    assert.ok(!/TOP 3 FUGAS CR[ÍI]TICAS/i.test(prompt), 'no debe forzar siempre 3 fugas');
+    assert.ok(!/15 MINUTOS EXACTOS/i.test(prompt), 'no debe forzar siempre la rutina de 15 minutos');
+    assert.ok(/evidence_policy\.js/.test(prompt), 'el prompt debe referenciar la política de evidencia compartida');
+    assert.ok(/DIMENSIONAL/i.test(prompt) && /n\/d/.test(prompt) && /sin barra/i.test(prompt),
+      'el radar debe ser dimensional: n/d sin barra ni score cuando falte la métrica');
+  });
+
+check('honestidad: los hitos de carrera se declaran escenario ilustrativo (no predicción)',
+  () => {
+    const career = {
+      summary: { totalCompetitive: { hours: 300 }, totalGeneral: { hours: 400 }, highestPeakRank: 'Diamond 1' },
+      accounts: [{ peakRank: 'Diamond 1', competitive: { hours: 12.5 }, handle: 'X#1', isExcluded: false }]
+    };
+    const tl = generateMilestonesTimeline(career, { mainAgent: 'Jett', speedrunHours: 12.5 });
+    assert.ok(tl.length > 0);
+    for (const m of tl) {
+      assert.strictEqual(m.tipo, 'ilustrativo', 'cada hito debe declararse ilustrativo');
+      assert.ok(/no predicci/i.test(m.contexto), 'cada hito debe declarar que no es predicción');
+    }
+  });
+
+check('honestidad: la política exige evidencia válida (rondas/duelos/zonas/porcentajes)',
+  () => {
+    const ep = require(path.join(scriptsDir, 'evidence_policy.js'));
+    // Repro del auditor: array no vacío pero vacío por dentro + objeto de zonas vacío.
+    const fake = ep.classifyEvidence({ rounds: [{}], weaponZones: {} });
+    assert.strictEqual(fake.level, 'insufficient', 'rounds [{}] + weaponZones {} NO es complete');
+    assert.ok(!fake.allowedSections.includes('round_leaks'), 'no debe habilitar fugas');
+    assert.ok(!fake.allowedSections.includes('aim_routine'), 'no debe habilitar rutina');
+    // Procedencia VERIFICADA: un objeto con source:'observed_event' NO basta.
+    const plainObserved = ep.classifyEvidence({ rounds: [{ n: 3, source: 'observed_event', event: 'plant' }], weaponZones: {} });
+    assert.strictEqual(plainObserved.level, 'insufficient', 'source observado sin adaptador NO es evidencia');
+    assert.ok(!plainObserved.allowedSections.includes('round_observations'));
+    // El mint NO es público: un consumidor externo no puede fabricarlo.
+    assert.strictEqual(ep.mintObservedEvent, undefined, 'mintObservedEvent no debe exportarse');
+    assert.strictEqual(ep.mintObservedDuel, undefined, 'mintObservedDuel no debe exportarse');
+    // Solo el adaptador confiable produce observado, a partir de telemetría real.
+    const rawMatch = {
+      data: {
+        metadata: { matchId: 'match-abc-123' },
+        segments: [
+          { type: 'player-summary', metadata: { platformUserHandle: 'A#1' }, stats: { kdRatio: { value: 1.3 }, scorePerRound: { value: 240 }, hsAccuracy: { value: 22 } } },
+          { type: 'player-round-damage', attributes: { round: 3 }, stats: { damage: { value: 165 }, headshots: { value: 1 }, bodyshots: { value: 2 }, legshots: { value: 0 } } },
+          { type: 'player-round-damage', attributes: { round: 9 }, stats: { damage: { value: 0 }, headshots: { value: 0 }, bodyshots: { value: 0 }, legshots: { value: 0 } } }
+        ]
+      }
+    };
+    const observed = ep.observeMatchTelemetry(rawMatch, 'A#1', { originPath: 'examples/x.json' });
+    assert.strictEqual(observed.rounds.length, 1, 'solo la ronda con daño real es evento');
+    assert.strictEqual(observed.sourceRef, 'match:match-abc-123');
+    const adapted = ep.classifyEvidence(observed);
+    assert.strictEqual(adapted.level, 'normalized', 'datos locales son normalized_input, no complete');
+    assert.strictEqual(adapted.provenanceStatus, 'normalized_input');
+    assert.strictEqual(adapted.verifiedSource, false, 'ninguna fuente local es verificada');
+    assert.ok(adapted.missing.some(m => m.startsWith('fuente_verificada')), 'debe declarar la falta de fuente verificada');
+    // Canonicalidad: el orden de claves no altera la referencia.
+    const c1 = ep.stableRef({ data: { segments: [{ a: 1, b: 2 }] } }, 'x.json');
+    const c2 = ep.stableRef({ data: { segments: [{ b: 2, a: 1 }] } }, 'x.json');
+    assert.strictEqual(c1, c2, 'objetos semánticamente equivalentes comparten sourceRef');
+    assert.ok(adapted.allowedSections.includes('round_observations'), 'un evento observado describe la ronda');
+    assert.ok(!adapted.allowedSections.includes('round_leaks'), 'describir no es acusar: el adaptador nunca acusa fugas');
+    assert.ok(adapted.allowedSections.includes('aim_routine'), 'HS%+ACS habilita la rutina');
+    assert.ok(!adapted.allowedSections.includes('weapon_telemetry'), 'sin zonas válidas no hay telemetría de arma');
+    // Un objeto FORJADO con leakRule/outcome/context tampoco habilita fugas.
+    const forged = ep.classifyEvidence({
+      observed: { hs: 25, acs: 240 },
+      rounds: [{ n: 9, source: 'observed_event', event: 'position', leakRule: 'throw_numeric_advantage', outcome: 'lost', context: { advantage: 2 } }]
+    });
+    assert.ok(!forged.allowedSections.includes('round_leaks'), 'una fuga no se puede fabricar desde fuera');
+    // sourceRef trazable: sin matchId usa digest de contenido + origen.
+    const refA = ep.stableRef({ data: { segments: [{ a: 1 }] } }, 'dir/a.json');
+    const refB = ep.stableRef({ data: { segments: [{ a: 2 }] } }, 'dir/b.json');
+    assert.ok(/^sha256:[0-9a-f]{16}@a\.json$/.test(refA), 'ref con digest y origen');
+    assert.notStrictEqual(refA, refB, 'contenidos distintos no comparten referencia');
+    // Porcentaje inválido no cuenta como agregado.
+    const badPct = ep.classifyEvidence({ observed: { hs: 150 } });
+    assert.strictEqual(badPct.level, 'insufficient', 'HS 150 no es un porcentaje válido');
+    // Zonas que suman 100 habilitan telemetría mecánica.
+    const zones = ep.classifyEvidence({ observed: { acs: 200 }, weaponZones: { head: 20, body: 70, leg: 10 } });
+    assert.ok(zones.allowedSections.includes('weapon_telemetry'));
+    assert.ok(zones.allowedSections.includes('aim_routine'));
+    assert.strictEqual(ep.isValidWeaponZones({ head: 10, body: 10, leg: 10 }), false, 'zonas que no suman 100 no son válidas');
+    // Duelo inválido no habilita la matriz.
+    const badDuel = ep.classifyEvidence({ observed: { acs: 200 }, duels: [{ opponent: '' }] });
+    assert.ok(!badDuel.allowedSections.includes('duel_matrix'));
+    const zeroDuel = ep.classifyEvidence({ observed: { acs: 200 }, duels: [{ opponent: 'x#1', kills: 0, deaths: 0 }] });
+    assert.ok(!zeroDuel.allowedSections.includes('duel_matrix'), 'un duelo 0-0 no es evidencia de duelo');
+  });
+
+check('honestidad: rutas CLI con evidencia mínima/parcial omiten secciones no permitidas',
+  () => {
+    const sampleFull = JSON.parse(fs.readFileSync(sampleFile, 'utf8'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-evidence-'));
+    try {
+      // Parcial: solo resúmenes (sin evidencia por ronda) → sin fugas.
+      const partial = { data: { segments: sampleFull.data.segments.filter(s => s.type === 'player-summary') } };
+      const partialFile = path.join(tmp, 'partial.json');
+      fs.writeFileSync(partialFile, JSON.stringify(partial), 'utf8');
+      const matchOut = cliOk(['match', partialFile, 'TenZ#0001']);
+      assert.ok(/Nivel de evidencia: aggregate/i.test(matchOut), 'match parcial debe declarar nivel aggregate');
+      assert.ok(/Observaciones\/fugas omitidas/i.test(matchOut), 'sin eventos observados no se describe ni acusa');
+      // Sin HS → sin evidencia mecánica → sin rutina.
+      const noHs = JSON.parse(JSON.stringify(partial));
+      noHs.data.segments.forEach(s => { if (s.stats) delete s.stats.hsAccuracy; });
+      const noHsFile = path.join(tmp, 'no-hs.json');
+      fs.writeFileSync(noHsFile, JSON.stringify(noHs), 'utf8');
+      const aimOut = cliOk(['aim', noHsFile, 'TenZ#0001']);
+      assert.ok(/RUTINA OMITIDA/i.test(aimOut), 'sin evidencia mecánica no debe emitir rutina');
+      // Sin datos de duelo → sin matriz 1v1.
+      const duelOut = cliOk(['duels', noHsFile, 'TenZ#0001']);
+      assert.ok(/MATRIZ DE DUELOS OMITIDA/i.test(duelOut), 'sin duelos no debe emitir matriz');
+      // diagnose: perfil mínimo (solo ACS) → agregado, sin prescripción mecánica.
+      const minimalProfile = {
+        platformInfo: { platformUserHandle: 'Min#1' },
+        segments: [{ type: 'playlist', attributes: { playlist: 'competitive' }, stats: { scorePerRound: { displayValue: '210.0' } } }]
+      };
+      const minFile = path.join(tmp, 'profile-min.json');
+      fs.writeFileSync(minFile, JSON.stringify(minimalProfile), 'utf8');
+      const diagOut = cliOk(['diagnose', minFile, 'Min#1']);
+      assert.ok(/Nivel de evidencia: aggregate/i.test(diagOut), 'perfil con solo ACS es agregado');
+      assert.ok(/Cuello de botella\/optimización omitido/i.test(diagOut), 'sin HS no debe prescribir');
+      // diagnose: perfil vacío → insufficient, sin prescripción.
+      const emptyProfile = { platformInfo: { platformUserHandle: 'Empty#1' }, segments: [] };
+      const emptyFile = path.join(tmp, 'profile-empty.json');
+      fs.writeFileSync(emptyFile, JSON.stringify(emptyProfile), 'utf8');
+      const emptyOut = cliOk(['diagnose', emptyFile, 'Empty#1']);
+      assert.ok(/Nivel de evidencia: insufficient/i.test(emptyOut), 'perfil vacío es insuficiente');
+      assert.ok(!/CUELLO DE BOTELLA/.test(emptyOut), 'sin evidencia no se prescribe');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+check('honestidad: la política distingue procedencia y expone dimensiones evaluables',
+  () => {
+    const ep = require(path.join(scriptsDir, 'evidence_policy.js'));
+    const base = { observed: { hs: '25%', acs: '240', kd: '1.2' } };
+    const claim = ep.classifyEvidence({ ...base, rounds: [{ n: 4, source: 'user_claim', event: 'kill', detail: 'dice que falló' }] });
+    assert.strictEqual(claim.level, 'aggregate', 'una afirmación del usuario NO habilita fugas');
+    assert.ok(!claim.allowedSections.includes('round_leaks'));
+    assert.strictEqual(claim.declaredObservations, 1);
+    const inferred = ep.classifyEvidence({ ...base, rounds: [{ n: 4, source: 'inference', event: 'position', detail: 'suposición' }] });
+    assert.strictEqual(inferred.level, 'aggregate', 'una inferencia NO habilita fugas');
+    const unknownEvent = ep.classifyEvidence({ ...base, rounds: [{ n: 4, source: 'observed_event', event: 'texto_libre' }] });
+    assert.ok(!unknownEvent.allowedSections.includes('round_leaks'), 'evento fuera de taxonomía no habilita fugas');
+    const adapted = ep.classifyEvidence(ep.observeMatchTelemetry({
+      data: {
+        metadata: { matchId: 'm1' },
+        segments: [
+          { type: 'player-summary', metadata: { platformUserHandle: 'A#1' }, stats: { kdRatio: { value: 1.2 }, scorePerRound: { value: 240 }, hsAccuracy: { value: 25 } } },
+          { type: 'player-round', attributes: { round: 4 }, stats: { kills: { value: 1 }, deaths: { value: 0 } } }
+        ]
+      }
+    }, 'A#1'));
+    assert.strictEqual(adapted.level, 'normalized', 'datos locales quedan en normalized (no verificados)');
+    assert.ok(adapted.allowedSections.includes('round_observations'));
+    assert.ok(!adapted.allowedSections.includes('round_leaks'), 'observar un evento no es acusar una fuga');
+    // Dimensiones: disponibles solo con métrica+benchmark.
+    const dims = ep.classifyEvidence({ observed: { hs: '25%' } }).dimensions;
+    assert.ok(dims.precision.available);
+    assert.ok(!dims.macro.available && !dims.openings.available && !dims.economy.available && !dims.clutch.available);
+    const acsOnly = ep.classifyEvidence({ observed: { acs: '220' } });
+    assert.ok(!acsOnly.allowedSections.includes('aggregate_radar'), 'solo ACS no habilita radar');
+    assert.ok(!acsOnly.allowedSections.includes('mmr_signal'), 'MMR requiere KD y ACS');
+  });
+
+check('honestidad: el radar del CLI es dimensional (n/d sin score cuando falta la métrica)',
+  () => {
+    const sampleFull = JSON.parse(fs.readFileSync(sampleFile, 'utf8'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-radar-'));
+    try {
+      const segs = sampleFull.data.segments;
+      const summary = JSON.parse(JSON.stringify(
+        segs.find(s => s.type === 'player-summary' && (s.metadata.platformUserHandle || s.attributes.platformUserIdentifier) === 'TenZ#0001')
+      ));
+      ['kast', 'econRating', 'clutches', 'roundsWinPct', 'firstKills', 'firstDeaths'].forEach(k => delete summary.stats[k]);
+      const mod = { data: { segments: [summary, ...segs.filter(s => s.type === 'player-round-damage').slice(0, 40)] } };
+      const file = path.join(tmp, 'radar.json');
+      fs.writeFileSync(file, JSON.stringify(mod), 'utf8');
+      const out = cliOk(['match', file, 'TenZ#0001']);
+      assert.ok(/Precisión Mecánica: \d+ \/ 100/.test(out), 'la dimensión con HS% debe puntuar');
+      assert.ok(/Macrogame y Espacio: n\/d/.test(out), 'KAST sin métrica debe ser n/d');
+      assert.ok(/Disciplina Económica: n\/d/.test(out), 'economía sin métrica debe ser n/d');
+      const econLine = out.split(/\r?\n/).find(l => l.includes('Disciplina Económica')) || '';
+      assert.ok(!/\d+ \/ 100/.test(econLine), 'una dimensión n/d no debe llevar score');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+check('fuente Riot: validaciones, credenciales y SIN oráculo de firma público',
+  () => {
+    const rs = require(path.join(scriptsDir, 'riot_source.js'));
+    assert.strictEqual(rs.createAttestation, undefined, 'createAttestation NO debe exportarse (oráculo de firma)');
+    assert.strictEqual(typeof rs.ingestRiotMatch, 'function', 'la operación de ingesta autorizada debe existir');
+    assert.throws(() => rs.validateMatchId('no-uuid'), /matchId/i);
+    assert.strictEqual(rs.validateMatchId('00000000-0000-4000-8000-000000000001').length, 36);
+    assert.strictEqual(rs.hostForRegion('americas'), 'americas.api.riotgames.com');
+    assert.throws(() => rs.hostForRegion('marte'), /Regi/i);
+    assert.strictEqual(rs.getOperatorConfig().trustPath, RIOT_TRUST_PATH);
+    assert.strictEqual(rs.getOperatorConfig().signingKeyPath, RIOT_KEY_PATH);
+    const savedKey = process.env.RIOT_API_KEY;
+    const savedRso = process.env.RIOT_RSO_TOKEN;
+    delete process.env.RIOT_API_KEY;
+    delete process.env.RIOT_RSO_TOKEN;
+    try {
+      assert.throws(() => rs.fetchRiotMatchById('00000000-0000-4000-8000-000000000001'), /credenciales|RIOT_API_KEY/i);
+      assert.throws(() => rs.ingestRiotMatch('00000000-0000-4000-8000-000000000001'), /credenciales|RIOT_API_KEY/i);
+    } finally {
+      if (savedKey === undefined) delete process.env.RIOT_API_KEY; else process.env.RIOT_API_KEY = savedKey;
+      if (savedRso === undefined) delete process.env.RIOT_RSO_TOKEN; else process.env.RIOT_RSO_TOKEN = savedRso;
+    }
+    // Verificación con la atestación GOLDEN (firmada una vez); en tests no se firma.
+    const g = loadRiotGolden();
+    writeRiotTrust(g.trustedKeys);
+    assert.ok(rs.verifyAttestation(g.attestation, { payload: g.payload, maxAgeMs: RIOT_BIG_MAX_AGE }).valid, 'atestación golden verificada');
+    assert.ok(!rs.verifyAttestation(g.attestation, { payload: { tampered: true }, maxAgeMs: RIOT_BIG_MAX_AGE }).valid, 'payload alterado no verifica');
+    assert.ok(!rs.verifyAttestation({ ...g.attestation, host: 'evil.example.com' }, { payload: g.payload, maxAgeMs: RIOT_BIG_MAX_AGE }).valid, 'host no permitido');
+    assert.ok(!rs.verifyAttestation(g.attestation, { payload: g.payload, maxAgeMs: 24 * 3600 * 1000 }).valid, 'caducada no verifica');
+    const riotSrc = fs.readFileSync(path.join(scriptsDir, 'riot_source.js'), 'utf8');
+    const httpSrc = fs.readFileSync(path.join(scriptsDir, 'http_fetch.js'), 'utf8');
+    assert.ok(!/console\.(log|error)\s*\(/.test(riotSrc), 'la fuente Riot no debe registrar nada');
+    assert.ok(!/console\.log/.test(httpSrc), 'el fetch no debe escribir logs de datos');
+    assert.ok(!/console\.[a-z]+\([^\n)]*headers/i.test(httpSrc), 'las cabeceras nunca se imprimen');
+    assert.ok(!/argv\[4\]/.test(httpSrc), 'las cabeceras no deben viajar por argv');
+    assert.ok(/VA_FETCH_HEADERS/.test(httpSrc), 'las cabeceras sensibles viajan por entorno');
+  });
+
+check('fuente Riot: trust no inyectable; autofirma y cambio de env fallan cerrados',
+  () => {
+    const ep = require(path.join(scriptsDir, 'evidence_policy.js'));
+    const rs = require(path.join(scriptsDir, 'riot_source.js'));
+    const g = loadRiotGolden();
+    writeRiotTrust(g.trustedKeys);
+    // El atacante firma un fixture con su propia clave (no hay createAttestation público).
+    const evil = crypto.generateKeyPairSync('ed25519');
+    const evilPub = evil.publicKey.export({ type: 'spki', format: 'pem' });
+    const core = { v: 1, matchId: g.attestation.matchId, host: g.attestation.host, endpoint: g.attestation.endpoint, fetchedAt: g.attestation.fetchedAt, payloadDigest: rs.payloadDigest(g.payload) };
+    const forged = { ...core, signerKeyId: rs.keyIdOf(evilPub), signature: crypto.sign(null, Buffer.from(rs.canonicalStringify(core), 'utf8'), evil.privateKey).toString('base64') };
+    assert.throws(() => ep.observeVerifiedMatch(g.payload, 'anon-puuid-focus', { attestation: forged, trustedKeys: [evilPub], maxAgeMs: RIOT_BIG_MAX_AGE }), /rechazado/, 'firma de consumidor + trustedKeys inyectado NO debe verificar');
+    // Cambiar la env del trust DESPUÉS del arranque NO redirige la autoridad.
+    const attackerTrust = path.join(RIOT_CFG_DIR, 'attacker-trust.json');
+    fs.writeFileSync(attackerTrust, JSON.stringify([evilPub]), { encoding: 'utf8', mode: 0o600 });
+    const savedTrustEnv = process.env.RIOT_ATTESTATION_TRUST;
+    process.env.RIOT_ATTESTATION_TRUST = attackerTrust;
+    try {
+      assert.throws(() => ep.observeVerifiedMatch(g.payload, 'anon-puuid-focus', { attestation: forged, maxAgeMs: RIOT_BIG_MAX_AGE }), /rechazado/, 'un cambio dinámico de env no debe autorizar');
+      assert.strictEqual(rs.getOperatorConfig().trustPath, RIOT_TRUST_PATH, 'la ruta capturada no cambia');
+    } finally {
+      process.env.RIOT_ATTESTATION_TRUST = savedTrustEnv;
+    }
+    // El camino legítimo (atestación del ingestor del operador) acredita verified_source.
+    const verified = ep.observeVerifiedMatch(g.payload, 'anon-puuid-focus', { attestation: g.attestation, maxAgeMs: RIOT_BIG_MAX_AGE });
+    const policy = ep.classifyEvidence(verified);
+    assert.strictEqual(verified.provenance, 'verified_source');
+    assert.strictEqual(policy.provenanceStatus, 'verified_source');
+    assert.strictEqual(policy.level, 'complete');
+    assert.strictEqual(policy.verifiedSource, true);
+    assert.ok(policy.verifiedRoundCount > 0, 'debe haber rondas verificadas');
+    assert.ok(policy.allowedSections.includes('round_observations'));
+    assert.ok(!policy.allowedSections.includes('round_leaks'), 'sin reglas verificables no hay fugas');
+    assert.strictEqual(ep.mintVerifiedEvent, undefined, 'mintVerifiedEvent no debe exportarse');
+    // Operación de producto: sin credenciales falla cerrado.
+    assert.strictEqual(typeof ep.ingestVerifiedMatch, 'function', 'la ingesta verificada de producto debe existir');
+    const savedKey = process.env.RIOT_API_KEY;
+    const savedRso = process.env.RIOT_RSO_TOKEN;
+    delete process.env.RIOT_API_KEY;
+    delete process.env.RIOT_RSO_TOKEN;
+    try {
+      assert.throws(() => ep.ingestVerifiedMatch('00000000-0000-4000-8000-000000000001', 'anon-puuid-focus'), /credenciales|RIOT_API_KEY/i);
+    } finally {
+      if (savedKey === undefined) delete process.env.RIOT_API_KEY; else process.env.RIOT_API_KEY = savedKey;
+      if (savedRso === undefined) delete process.env.RIOT_RSO_TOKEN; else process.env.RIOT_RSO_TOKEN = savedRso;
+    }
+  });
+
+check('fuente Riot: el trust store exige perímetro (0666, propietario, symlink) y falla cerrado',
+  () => {
+    const rs = require(path.join(scriptsDir, 'riot_source.js'));
+    const ep = require(path.join(scriptsDir, 'evidence_policy.js'));
+    assert.ok(rs.trustStorePolicyViolation(0o666, 1000, 1000), '0666 debe violar');
+    assert.ok(rs.trustStorePolicyViolation(0o622, 1000, 1000), 'escritura de otros debe violar');
+    assert.ok(rs.trustStorePolicyViolation(0o626, 1000, 1000), 'escritura de grupo debe violar');
+    assert.strictEqual(rs.trustStorePolicyViolation(0o644, 1000, 1000), null, '0644 sin escritura compartida es válido');
+    assert.strictEqual(rs.trustStorePolicyViolation(0o600, 1000, 1000), null, '0600 del propietario es válido');
+    assert.ok(rs.trustStorePolicyViolation(0o600, 1001, 1000), 'propietario ajeno debe violar');
+    assert.ok(rs.trustStorePolicyViolation(0o644, 1000, 1000, { strict: true }), 'clave privada exige 0600 (modo estricto)');
+    const g = loadRiotGolden();
+    writeRiotTrust(g.trustedKeys);
+    if (process.platform !== 'win32') {
+      fs.chmodSync(RIOT_TRUST_PATH, 0o666);
+      try {
+        assert.ok(!rs.verifyAttestation(g.attestation, { payload: g.payload, maxAgeMs: RIOT_BIG_MAX_AGE }).valid, 'trust 0666 no autoriza');
+        assert.throws(() => ep.observeVerifiedMatch(g.payload, 'anon-puuid-focus', { attestation: g.attestation, maxAgeMs: RIOT_BIG_MAX_AGE }), /rechazado|trust store/i);
+      } finally {
+        writeRiotTrust(g.trustedKeys);
+      }
+      const link = path.join(RIOT_CFG_DIR, 'trust-link.json');
+      try {
+        if (fs.existsSync(link)) fs.unlinkSync(link);
+        fs.symlinkSync(RIOT_TRUST_PATH, link, 'file');
+        assert.throws(() => rs.readProtectedFile(link, 'trust store'), /simb|symlink|enlace/i);
+      } catch (e) {
+        if (!/EEXIST|EPERM|privileg/i.test(e.message)) throw e;
+      }
+      fs.writeFileSync(RIOT_KEY_PATH, 'dummy', { encoding: 'utf8', mode: 0o600 });
+      fs.chmodSync(RIOT_KEY_PATH, 0o666);
+      assert.throws(() => rs.readProtectedFile(RIOT_KEY_PATH, 'clave de atestación', { strict: true }), /perímetro|0600|inseguro/i);
+      fs.writeFileSync(RIOT_KEY_PATH, '', { encoding: 'utf8', mode: 0o600 });
+    } else {
+      assert.ok(true, 'win32: integración chmod/symlink no aplicable; predicado puro cubierto');
+    }
+  });
+
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben
 // reflejar EXACTAMENTE el número de casos registrados y ejecutados. Un
 // manifiesto desincronizado hace fallar la suite (imposible sobre-declarar
@@ -1825,5 +2290,6 @@ if (manifestMismatches.length > 0) {
 }
 
 if (passed !== total) process.exit(1);
+try { fs.rmSync(RIOT_CFG_DIR, { recursive: true, force: true }); } catch (e) { /* limpieza best-effort */ }
 console.log(`Resultados: ${passed}/${total} checks registrados y ejecutados; manifiesto README trazable (${total}/${total}). Exit Code: 0`);
 console.log('All valorant-analytics deterministic tests passed with Exit Code: 0');

@@ -26,8 +26,12 @@ const CHILD_SCRIPT = [
   'const url=process.argv[1];',
   "const ua=process.argv[2]||'';",
   'const timeout=parseInt(process.argv[3]||\'12000\',10);',
+  // Cabeceras sensibles (tokens) por ENTORNO, nunca por argv: no aparecen en
+  // la línea de comandos del proceso hijo ni en listados de procesos.
+  "const extraHeaders=process.env.VA_FETCH_HEADERS?JSON.parse(process.env.VA_FETCH_HEADERS):{};",
   "let u; try{ u=new URL(url); }catch(e){ console.error('URL invalida'); process.exit(2); }",
-  "const req=https.get(u,{headers:{'User-Agent':ua,'Accept':'application/json'}},res=>{",
+  "const headers=Object.assign({'User-Agent':ua,'Accept':'application/json'},extraHeaders);",
+  "const req=https.get(u,{headers},res=>{",
   "  const chunks=[];",
   "  res.on('data',c=>chunks.push(c));",
   "  res.on('end',()=>{",
@@ -45,13 +49,17 @@ function httpsGetJson(urlStr, options = {}) {
   const maxRetries = options.maxRetries || 3;
   const timeoutMs = options.timeoutMs || 12000;
   const userAgent = options.userAgent || DEFAULT_UA;
+  const headersArg = options.headers ? JSON.stringify(options.headers) : '';
+  const childEnv = Object.assign({}, process.env);
+  if (headersArg) childEnv.VA_FETCH_HEADERS = headersArg;
+  else delete childEnv.VA_FETCH_HEADERS;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const out = execFileSync(
         process.execPath,
         ['-e', CHILD_SCRIPT, urlStr, userAgent, String(timeoutMs)],
-        { encoding: 'utf8', timeout: timeoutMs + 5000, maxBuffer: 30 * 1024 * 1024 }
+        { encoding: 'utf8', timeout: timeoutMs + 5000, maxBuffer: 30 * 1024 * 1024, env: childEnv }
       );
       return JSON.parse(out);
     } catch (e) {
@@ -65,7 +73,7 @@ function httpsGetJson(urlStr, options = {}) {
           } catch (be) { /* continuar */ }
           continue;
         }
-        throw new Error(`${code === 29 ? 'Rate limit / bloqueo Cloudflare' : 'Timeout'} tras ${maxRetries} intentos: ${urlStr}`);
+        throw new Error(`${code === 29 ? 'Rate limit / bloqueo de origen' : 'Timeout'} tras ${maxRetries} intentos: ${urlStr}`);
       }
       throw new Error(`Fallo de red (HTTP ${code}): ${errLine || urlStr}`);
     }

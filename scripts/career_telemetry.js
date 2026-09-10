@@ -9,7 +9,8 @@
  *    y puntos de cuenta teóricos (Account Points / AP).
  * 2. Desglosa horas Competitivas vs Horas Casuales (Unrated, Swiftplay, Nivel 1-20).
  * 3. Gestiona multi-cuenta con exclusión de cuentas prestadas/familiares (e.g. Ayco#Dark).
- * 4. Traza la cronología exacta de hitos por rango (Hierro ➔ Bronce ➔ Plata ➔ Oro ➔ Platino ➔ Diamante).
+ * 4. Muestra escenarios ILUSTRATIVOS de hitos por rango (no una predicción ni
+ *    una medición del MMR interno; sin validación empírica con telemetría real).
  * 5. Cero dependencias externas (Node.js core).
  */
 
@@ -199,13 +200,17 @@ function aggregateCareerTelemetry(accountsList) {
 }
 
 function generateMilestonesTimeline(careerReport, options = {}) {
+  // Escenarios ILUSTRATIVOS de referencia (tipo: 'ilustrativo'): sirven como
+  // vara de comparación pedagógica, NO como predicción del rango futuro ni
+  // como medición del MMR. Sin validación empírica con telemetría real.
   const totalComp = careerReport.summary.totalCompetitive.hours;
   if (!totalComp || totalComp <= 0) {
     return [{
+      tipo: 'ilustrativo',
       rango: 'Sin datos',
       tramoHoras: 0,
       acumuladoHoras: 0,
-      contexto: 'Datos insuficientes: conecta telemetría real de partidas para proyectar hitos de rango. No se inventa historial.'
+      contexto: 'Datos insuficientes: conecta telemetría real de partidas para comparar con escenarios de referencia. No se inventa historial.'
     }];
   }
   const diamondAcc = careerReport.accounts.find(a => (a.peakRank || '').includes('Diamond'));
@@ -217,40 +222,46 @@ function generateMilestonesTimeline(careerReport, options = {}) {
 
   return [
     {
+      tipo: 'ilustrativo',
       rango: 'Hierro 3 (Inicio)',
       tramoHoras: 8,
       acumuladoHoras: 8,
-      contexto: 'Calibración inicial y primer contacto con shooters tácticos.'
+      contexto: 'Escenario ilustrativo (no predicción): calibración inicial y primer contacto con shooters tácticos.'
     },
     {
+      tipo: 'ilustrativo',
       rango: 'Bronce 1 - Bronce 3',
       tramoHoras: 22,
       acumuladoHoras: 30,
-      contexto: 'Superación rápida de mecánicas elementales de movimiento y mapa.'
+      contexto: 'Escenario ilustrativo (no predicción): superación de mecánicas elementales de movimiento y mapa.'
     },
     {
+      tipo: 'ilustrativo',
       rango: 'Plata 1 - Plata 3',
       tramoHoras: 65,
       acumuladoHoras: 95,
-      contexto: 'Desarrollo de crosshair placement básico y control de dispersión.'
+      contexto: 'Escenario ilustrativo (no predicción): desarrollo de crosshair placement básico y control de dispersión.'
     },
     {
+      tipo: 'ilustrativo',
       rango: 'Oro 1 - Oro 3',
       tramoHoras: 165,
       acumuladoHoras: 260,
-      contexto: `Consolidación competitiva, cambio de ritmo y especialización en ${mainAgent}.`
+      contexto: `Escenario ilustrativo (no predicción): consolidación competitiva y especialización en ${mainAgent}.`
     },
     {
+      tipo: 'ilustrativo',
       rango: 'Platino 1',
       tramoHoras: 80,
       acumuladoHoras: 340,
-      contexto: 'Dominio de aislamiento de micro-duelos 1v1 y duelos de apertura.'
+      contexto: 'Escenario ilustrativo (no predicción): aislamiento de micro-duelos 1v1 y duelos de apertura.'
     },
     {
+      tipo: 'ilustrativo',
       rango: 'Diamante 1',
       tramoHoras: speedrunHours,
       acumuladoHoras: Math.round(340 + speedrunHours),
-      contexto: `Conquista en cuenta limpia sin anclaje de MMR (${speedrunHandle}).`
+      contexto: `Escenario ilustrativo (no predicción) en cuenta limpia (${speedrunHandle}); no implica anclaje de MMR verificado.`
     }
   ];
 }

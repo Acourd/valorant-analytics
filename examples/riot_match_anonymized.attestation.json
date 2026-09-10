@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "matchId": "00000000-0000-4000-8000-000000000001",
+  "host": "americas.api.riotgames.com",
+  "endpoint": "/val/match/v1/matches/00000000-0000-4000-8000-000000000001",
+  "fetchedAt": "2026-01-01T00:00:00.000Z",
+  "payloadDigest": "8a269fa2a910461b5d9b57e50d5e88936f95d48b2a5a12af82fe0591a471f5db",
+  "signerKeyId": "6e76d298c6ffa5b1",
+  "signature": "FpUctzvzE8fevGs+rchGrytZfRCsXY0F1C5Rc3P5wuMUCBfTf38hviPDLKgzxat1CLT8mZHrvT5CPVdCPO/0CQ=="
+}

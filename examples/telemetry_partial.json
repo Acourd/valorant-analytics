@@ -1,0 +1,18 @@
+{
+  "source": "scoreboard_row",
+  "description": "Nivel parcial: fila completa de marcador (agregados) pero sin evidencia por ronda ni zonas de daño.",
+  "map": "Sunset",
+  "mode": "competitive",
+  "result": "12-14",
+  "observed": {
+    "kda": "21/16/7",
+    "kd": 1.31,
+    "acs": 215,
+    "hs": 22,
+    "fk": 2,
+    "fd": 5
+  },
+  "scoreboard": [
+    { "handle": "Player#1", "agent": "Cypher", "acs": 215, "kda": "21/16/7", "hs": "22%", "fk": 2, "fd": 5 }
+  ]
+}

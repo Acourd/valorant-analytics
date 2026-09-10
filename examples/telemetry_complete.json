@@ -1,0 +1,25 @@
+{
+  "source": "match_full",
+  "description": "Nivel completo de reporte aportado por el usuario (declaraciones, NO telemetría verificada por adaptador): rondas, duelos y zonas.",
+  "map": "Ascent",
+  "mode": "competitive",
+  "agent": "Iso",
+  "observed": {
+    "kda": "24/12/4",
+    "kd": 2.0,
+    "acs": 347,
+    "hs": 29.9,
+    "fk": 4,
+    "fd": 1
+  },
+  "rounds": [
+    { "n": 7, "source": "user_claim", "event": "position", "detail": "Post-plant 5v3: sobre-asomo con ventaja numÃ©rica (declarado)." },
+    { "n": 11, "source": "user_claim", "event": "damage", "detail": "RÃ¡faga larga a >30m contra Vandal (declarado)." },
+    { "n": 14, "source": "inference", "event": "position", "detail": "Inferencia de repeticiÃ³n del patrÃ³n de la ronda 7." }
+  ],
+  "duels": [
+    { "opponent": "rival_1#LATAM", "agent": "Jett", "kills": 3, "deaths": 1 },
+    { "opponent": "rival_2#LAN", "agent": "Sova", "kills": 2, "deaths": 0 }
+  ],
+  "weaponZones": { "head": 30, "body": 60, "leg": 10 }
+}
