@@ -432,11 +432,26 @@ function observeVerifiedMatch(matchData, playerPuuid, options = {}) {
   return { observed, rounds, sourceRef, matchId, provenance: 'verified_source' };
 }
 
+// Operación de PRODUCTO: ingesta verificada de una partida real (fetch
+// autenticado + atestación interna + observación verificada). No expone
+// capacidad de firma: el resto del producto solo recibe resultados ya
+// verificados o un fallo cerrado.
+function ingestVerifiedMatch(matchId, playerPuuid, options = {}) {
+  const pkg = riotSource.ingestRiotMatch(matchId, {
+    region: options.region,
+    timeoutMs: options.timeoutMs,
+    maxRetries: options.maxRetries
+  });
+  const events = observeVerifiedMatch(pkg.payload, playerPuuid, { attestation: pkg.attestation, maxAgeMs: options.maxAgeMs });
+  return { ...events, matchId: pkg.matchId };
+}
+
 module.exports = {
   classifyEvidence,
   observeMatchTelemetry,
   observeDuelRows,
   observeVerifiedMatch,
+  ingestVerifiedMatch,
   stableRef,
   canonicalStringify,
   toFiniteNum,

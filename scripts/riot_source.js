@@ -185,6 +185,22 @@ function createAttestation(record) {
   return { ...core, signerKeyId: keyIdOf(publicKeyPem), signature };
 }
 
+// Operación de ingesta AUTORIZADA (única): fetch autenticado + atestación
+// interna. El resto del producto no puede firmar registros arbitrarios: no hay
+// oráculo de firma expuesto. Devuelve el registro ya atestiguado.
+function ingestRiotMatch(matchId, options = {}) {
+  const record = fetchRiotMatchById(matchId, options);
+  const attestation = createAttestation(record);
+  return {
+    matchId: record.matchId,
+    host: record.host,
+    endpoint: record.endpoint,
+    fetchedAt: record.fetchedAt,
+    payload: record.payload,
+    attestation
+  };
+}
+
 // Verificador. La confianza NO llega por argumento: se carga del almacén del
 // operador (RIOT_ATTESTATION_TRUST) con el mismo perímetro que la clave privada.
 function verifyAttestation(attestation, options = {}) {
@@ -243,7 +259,7 @@ module.exports = {
   hostForRegion,
   resolveCredentials,
   fetchRiotMatchById,
-  createAttestation,
+  ingestRiotMatch,
   verifyAttestation,
   loadTrustedKeys,
   getOperatorConfig,
