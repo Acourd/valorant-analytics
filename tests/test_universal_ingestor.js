@@ -122,19 +122,26 @@ assert.strictEqual(kovaaks.routine.length, 3, 'Debe constar de 3 bloques');
 assert.ok(kovaaks.firstDuels, 'Debe incluir telemetría de duelos tempranos');
 console.log('   ✓ Prescripción Kovaaks de 15 minutos generada con éxito.');
 
-// 7. Resiliencia Táctica y Zero-Crash ante URLs con WAF
-console.log('7. Probando resolveMatchDataResilient ante bloqueo WAF (Cloudflare 403)...');
+// 7. Resiliencia Táctica: fail-closed por defecto, sintético solo con allowSynthetic explícito
+console.log('7. Probando resolveMatchDataResilient ante bloqueo WAF (fail-closed + modo demo)...');
 const fakeWafUrl = 'https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04';
-const resilientMatch = resolveMatchDataResilient(fakeWafUrl, 'kirtmy#000', { map: 'Ascent' });
+assert.throws(
+  () => resolveMatchDataResilient(fakeWafUrl, 'kirtmy#000', { map: 'Ascent' }),
+  /Sin telemetría verificable/,
+  'Sin allowSynthetic debe fallar en vez de fabricar análisis'
+);
+const resilientMatch = resolveMatchDataResilient(fakeWafUrl, 'kirtmy#000', { map: 'Ascent', allowSynthetic: true });
 
 assert.ok(resilientMatch.data, 'Debe devolver un match estructurado sin arrojar excepción');
 assert.ok(resilientMatch.data.metadata.matchId.includes('c886e66a') || resilientMatch.data.metadata.matchId.includes('resilient'));
 assert.strictEqual(resilientMatch.data.segments.filter(s => s.type === 'player-summary').length, 10);
 assert.strictEqual(resilientMatch.data.segments.filter(s => s.type === 'team-summary').length, 2);
+assert.strictEqual(resilientMatch.data.metadata.synthetic, true, 'El modo demo debe declarar procedencia sintética');
+assert.ok(Array.isArray(resilientMatch.data.metadata.ingestionDiagnostics), 'Debe incluir diagnósticos de ingesta');
 
 const resilientProfile = evaluateLearningProfile(resilientMatch, 'kirtmy#000');
 assert.strictEqual(validateLearningProfile(resilientProfile), true);
-console.log('   ✓ Zero-Crash Guarantee verificado: contención de WAF 403 y síntesis de telemetría aprobada.');
+console.log('   ✓ Fail-closed por defecto verificado; modo demo explícito con procedencia sintética aprobada.');
 
 // 8. Validación de Manejo de Errores
 console.log('8. Probando rechazo de entradas corruptas en parseTextScoreboard...');

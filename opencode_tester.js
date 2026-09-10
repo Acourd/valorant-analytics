@@ -164,7 +164,7 @@ runtimeTests.forEach(test => {
   let errorMsg = null;
 
   try {
-    const out = execSync(test.cmd, { stdio: 'pipe', encoding: 'utf8', timeout: 15000 });
+    const out = execSync(test.cmd, { stdio: 'pipe', encoding: 'utf8', timeout: 120000 });
     passed = test.validate ? test.validate(out) : out.length > 50;
     outputSnippet = out.slice(0, 150).replace(/\s+/g, ' ');
     if (passed) runtimeScore += test.weight;

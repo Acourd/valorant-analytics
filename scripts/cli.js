@@ -39,7 +39,7 @@ const {
   validateDuelMatrix
 } = require('./invariant_validator');
 const { runPreflight } = require('./preflight_guard');
-const { signTelemetryReport, verifyTelemetryAttestation, registerTrustedKey, loadOrCreateKeystore } = require('./dsse_attestation');
+const { signTelemetryReport, verifyTelemetryAttestation, registerTrustedKey, loadOrCreateKeystore, generateAttestationKeyPair } = require('./dsse_attestation');
 const { buildMatchMerkleLedger, MerkleTree, sha256 } = require('./merkle_ledger');
 const { SessionGuardian } = require('./session_guardian');
 const { DriftDetector } = require('./drift_detector');
@@ -55,14 +55,114 @@ const { generateCoachingReport } = require('./coaching_engine');
 
 function printBanner() {
   console.log(`\n========================================================================`);
-  console.log(`⚡ VALORANT ANALYTICS: UNIVERSAL SOVEREIGN ENGINE (V4.0)`);
+  console.log(`⚡ VALORANT ANALYTICS: UNIVERSAL SOVEREIGN ENGINE (V${getProjectVersion()})`);
   console.log(`========================================================================`);
+}
+
+function getProjectVersion() {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    if (pkg && typeof pkg.version === 'string' && pkg.version.trim()) return pkg.version.trim();
+  } catch (e) { /* fallback */ }
+  return '4.5.0';
 }
 
 function resolveMatchData(source, playerHandle) {
   const data = resolveMatchDataResilient(source, playerHandle, { allowSynthetic: DEMO_MODE });
   printProvenance(source, data);
   return data;
+}
+
+function cacheDir() {
+  return process.env.VALORANT_CACHE_DIR || path.join(__dirname, '..', '.cache');
+}
+
+function loadAttestIdentity() {
+  const crypto = require('crypto');
+  const idPath = path.join(cacheDir(), 'attest_identity.json');
+  try {
+    const lst = fs.lstatSync(idPath);
+    if (lst.isSymbolicLink()) {
+      throw new Error(`Identidad es un enlace simbólico (${idPath}): elimínalo manualmente y re-ejecuta. Nunca se sigue un symlink para material privado.`);
+    }
+    if (process.platform !== 'win32' && (lst.mode & 0o077) !== 0) {
+      throw new Error(`Identidad con permisos inseguros (${(lst.mode & 0o777).toString(8)}) en ${idPath}: elimina el archivo y re-ejecuta para regenerarla con 0600.`);
+    }
+    const saved = JSON.parse(fs.readFileSync(idPath, 'utf8'));
+    if (saved && saved.privateKey && saved.publicKey) {
+      return {
+        privateKey: crypto.createPrivateKey(saved.privateKey),
+        publicKey: crypto.createPublicKey(saved.publicKey)
+      };
+    }
+  } catch (e) {
+    if (/enlace simbólico|permisos inseguros/.test(e.message)) throw e;
+    if (e.code !== 'ENOENT' && !/Identidad inválida|no es un objeto|Unexpected token|Unexpected end/.test(e.message)) throw e;
+    /* crear nueva identidad persistente */
+  }
+  const kp = generateAttestationKeyPair();
+  const persisted = {
+    privateKey: kp.privateKey.export({ type: 'pkcs8', format: 'pem' }),
+    publicKey: kp.publicKey.export({ type: 'spki', format: 'pem' }),
+    created: new Date().toISOString()
+  };
+  fs.mkdirSync(path.dirname(idPath), { recursive: true });
+  // Creación atómica SIN lock: el contenido completo se escribe a un archivo
+  // temporal exclusivo (wx, fsync) y el destino se reclama con un hard link
+  // (falla si ya existe). Jamás existe una identidad parcial ni se sobrescribe
+  // la del ganador; quien pierde la carrera relee la identidad instalada.
+  const tmp = `${idPath}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
+  let fd = fs.openSync(tmp, 'wx', 0o600);
+  try {
+    fs.writeFileSync(fd, JSON.stringify(persisted, null, 2));
+    fs.fsyncSync(fd);
+  } finally {
+    try { fs.closeSync(fd); } catch (e) {}
+  }
+  try { fs.chmodSync(tmp, 0o600); } catch (e) { /* Windows: mejor esfuerzo */ }
+  let installed = false;
+  try {
+    try {
+      fs.linkSync(tmp, idPath);
+      installed = true;
+    } catch (e) {
+      if (!fs.existsSync(idPath)) {
+        throw new Error(`No se pudo reclamar la identidad persistente (${e.message}).`);
+      }
+      // Perdimos la carrera: la identidad del ganador ya está instalada
+      // completa (mismo protocolo); se lee y se usa la suya.
+    }
+  } finally {
+    try { fs.unlinkSync(tmp); } catch (e) { /* ya limpio */ }
+  }
+  if (!installed) {
+    let existing = null;
+    try {
+      existing = JSON.parse(fs.readFileSync(idPath, 'utf8'));
+    } catch (e) { /* legado corrupto: regenerar de forma segura abajo */ }
+    if (existing && existing.privateKey && existing.publicKey) {
+      return {
+        privateKey: crypto.createPrivateKey(existing.privateKey),
+        publicKey: crypto.createPublicKey(existing.publicKey)
+      };
+    }
+    // El archivo instalado no contiene un par de claves válido: un legado
+    // corrupto se regenera (jamás se sigue un symlink: lstat antes de unlink).
+    const lst = fs.lstatSync(idPath);
+    if (lst.isSymbolicLink()) {
+      throw new Error(`Identidad es un enlace simbólico (${idPath}): elimínalo manualmente y re-ejecuta.`);
+    }
+    if (!lst.isFile()) {
+      throw new Error(`Identidad persistente con tipo inesperado (${idPath}): elimínala manualmente y re-ejecuta.`);
+    }
+    fs.unlinkSync(idPath);
+    return loadAttestIdentity();
+  }
+  try {
+    const dirFd = fs.openSync(path.dirname(idPath), 'r');
+    try { fs.fsyncSync(dirFd); } finally { try { fs.closeSync(dirFd); } catch (e) {} }
+  } catch (e) { /* filesystems sin fsync de directorio */ }
+  return kp;
 }
 
 function printProvenance(source, matchData) {
@@ -79,12 +179,19 @@ function printProvenance(source, matchData) {
 function resolveTargetAndPlayer(args) {
   let target = args[1];
   let player = args[2];
+  let usedBundledSample = false;
 
   if (target && target.includes('#') && !fs.existsSync(target)) {
     player = target;
     target = path.join(__dirname, '..', 'examples', 'sample_match.json');
+    usedBundledSample = true;
   } else if (!target) {
     target = path.join(__dirname, '..', 'examples', 'sample_match.json');
+    usedBundledSample = true;
+  }
+
+  if (usedBundledSample) {
+    console.log(`[FUENTE: fixture de ejemplo incluido (examples/sample_match.json). Pasa un archivo JSON o un Riot ID propio para análisis real.]`);
   }
 
   return { target, player };
@@ -420,15 +527,27 @@ try {
     console.log(`Objetivo: ${target} | Jugador: ${effectivePlayer}`);
     console.log(`------------------------------------------------------------------------`);
 
-    const envelope = signTelemetryReport(profile);
-    const keystorePath = path.join(__dirname, '..', '.cache', 'dsse_keystore.json');
-    const keyid = registerTrustedKey(keystorePath, envelope.publicKeyPem, `attest-${effectivePlayer}`);
-    const verifyRes = verifyTelemetryAttestation(envelope, null, { trustedKeystore: loadOrCreateKeystore(keystorePath).keys });
+    const envelope = signTelemetryReport(profile, loadAttestIdentity());
+    const keystorePath = path.join(cacheDir(), 'dsse_keystore.json');
+    const keystore = loadOrCreateKeystore(keystorePath);
+    let verifyRes = verifyTelemetryAttestation(envelope, null, { trustedKeystore: keystore.keys });
+    let provisioned = false;
+    if (!verifyRes.verified && args.includes('--trust-new-key')) {
+      const keyid = registerTrustedKey(keystorePath, envelope.publicKeyPem, `attest-${effectivePlayer}`);
+      verifyRes = verifyTelemetryAttestation(envelope, null, { trustedKeystore: loadOrCreateKeystore(keystorePath).keys });
+      provisioned = true;
+    }
+    if (!verifyRes.verified && !args.includes('--trust-new-key')) {
+      console.log(`  • Veredicto Criptográfico: FALLIDO: firmante desconocido (TOFU rechazado).`);
+      console.log(`  • Acción requerida: re-ejecuta con --trust-new-key para aprovisionar esta identidad tras verificarla por un canal independiente.`);
+      console.log(`------------------------------------------------------------------------`);
+      process.exit(1);
+    }
 
     console.log(`  • Tipo de Payload:       ${envelope.payloadType}`);
     console.log(`  • Clave Firmante (KeyID): ${envelope.signatures[0].keyid}`);
     console.log(`  • Longitud Firma Base64:  ${envelope.signatures[0].sig.length} bytes`);
-    console.log(`  • Almacén confiable:      ${keystorePath} (clave registrada: ${keyid})`);
+    console.log(`  • Almacén confiable:      ${keystorePath} (firmante: ${envelope.signatures[0].keyid}${provisioned ? ', aprovisionado con --trust-new-key' : ', identidad persistente'})`);
     console.log(`  • Veredicto Criptográfico: ${verifyRes.verified ? 'VERIFICADO contra keystore (Ed25519 OK)' : `FALLIDO: ${verifyRes.error}`}`);
     console.log(`------------------------------------------------------------------------`);
     console.log(`✓ Sobre DSSE in-toto v1 inmutable verificado con éxito (Exit 0)`);
@@ -541,14 +660,17 @@ try {
 
   } else if (command === 'profile') {
     const handle = args[1];
-    if (!handle) {
-      console.error('Error: Debes especificar un Riot ID (ej. node cli.js profile "Derke#0001")');
+    if (!handle || !/^[^#\s][^#]*#[^#\s][^#]*$/.test(handle.trim())) {
+      console.error('Error: Riot ID inválido. Usa formato Nombre#TAG (ej. node cli.js profile "Derke#0001").');
       process.exit(1);
     }
     handleProfile(handle);
 
   } else if (command === 'parse' || command === 'ingest') {
     const fileInput = args[1];
+    if (!fileInput) {
+      throw new Error('parse requiere entrada explícita: archivo JSON/Texto, match ID, URL o texto de scoreboard. Sin entrada no se analiza el fixture incluido.');
+    }
     const player = (args[2] && args[2].includes('#')) ? args[2] : undefined;
     if (args[2] && !player) {
       throw new Error(`parse: Riot ID inválido "${args[2]}" (formato esperado Nombre#TAG).`);

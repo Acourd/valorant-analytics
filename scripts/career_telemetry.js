@@ -91,15 +91,18 @@ function extractAccountTelemetry(profileData, options = {}) {
     if (st.peakRank?.displayValue) peakRank = st.peakRank.displayValue;
   });
 
-  // Base casual requirement (levels 1-20 need ~25h of casual to unlock competitive)
+  // Base casual requirement (levels 1-20 need ~25h of casual to unlock competitive).
+  // Solo se aplica con telemetría observada: con nivel pero cero segundos registrados
+  // no se inventan horas (allowance documentada, no medida).
+  const observedSeconds = competitiveSeconds + unratedSeconds + otherSeconds;
   let casualAllowanceSeconds = 0;
-  if (level && level >= 20 && unratedSeconds === 0) {
+  if (level && level >= 20 && unratedSeconds === 0 && observedSeconds > 0) {
     casualAllowanceSeconds = 25 * 3600; // ~25 hours standard
   }
 
   const totalCasualSeconds = unratedSeconds + otherSeconds + casualAllowanceSeconds;
   const totalGeneralSeconds = competitiveSeconds + totalCasualSeconds;
-  const insufficientData = competitiveSeconds === 0 && unratedSeconds === 0 && otherSeconds === 0 && (level == null);
+  const insufficientData = observedSeconds === 0;
 
   return {
     handle,

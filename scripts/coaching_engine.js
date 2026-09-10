@@ -72,7 +72,7 @@ function generateCoachingReport(matchData, targetHandle) {
   const hardOpponents = [];
   opponents.forEach(opp => {
     const kills = killsOnOpponents[opp.handle] || 0;
-    const deaths = (duelMatrix[opp.handle] || {})[target] || 0;
+    const deaths = (duelMatrix[opp.handle] || {})[effectiveTarget] || 0;
     if (deaths > kills) {
       hardOpponents.push({ opp, kills, deaths, diff: deaths - kills });
     }

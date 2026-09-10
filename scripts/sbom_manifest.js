@@ -14,6 +14,16 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+function getProjectVersion() {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    if (pkg && typeof pkg.version === 'string' && pkg.version.trim()) return pkg.version.trim();
+  } catch (e) { /* fallback */ }
+  return '4.5.0';
+}
+
+const APP_VERSION = getProjectVersion();
+
 function computeFileHash(filePath) {
   const content = fs.readFileSync(filePath);
   return crypto.createHash('sha256').update(content).digest('hex');
@@ -47,7 +57,7 @@ function generateSbom(projectRoot = path.join(__dirname, '..')) {
       timestamp: new Date().toISOString(),
       component: {
         name: 'valorant-analytics',
-        version: '1.2.0',
+        version: APP_VERSION,
         type: 'application',
         description: 'Sovereign Valorant Telemetry & AI Coaching Engine',
         licenses: [{ license: { id: 'MIT' } }],
@@ -57,7 +67,7 @@ function generateSbom(projectRoot = path.join(__dirname, '..')) {
     components: files.map(f => ({
       type: 'file',
       name: f.name,
-      version: '1.2.0',
+      version: APP_VERSION,
       hashes: [{ alg: 'SHA-256', content: f.sha256 }],
       properties: [
         { name: 'path', value: f.path },
