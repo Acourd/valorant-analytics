@@ -8,42 +8,42 @@ const path = require('path');
  * evidence_policy.js - Política de evidencia COMPARTIDA por el motor, el CLI y
  * el prompt standalone (Gem / Custom GPT).
  *
- * OBJETIVO: impedir que evidencia factual mínima se convierta en una acusación
- * táctica ("fuga / causa de derrota"). Distingue tres planos:
+ * HONESTIDAD DE PROCEDENCIA (v27): este módulo NO convierte datos locales en
+ * telemetría confiable. Distingue dos estados de fuente:
  *
- *   1. DATO OBSERVADO DE RONDA (`observed_event`): eventos reales de
- *      telemetría (daño, kills/muertes, economía) que SOLO pueden ser creados
- *      por un adaptador confiable vía `mintObservedEvent()`. La procedencia no
- *      es un campo de texto: es una marca de capacidad interna (Symbol) que un
- *      JSON/objeto manual NO puede falsificar. Un objeto con `source:
- *      'observed_event'` sin esa marca se trata como `user_claim`.
- *   2. OBSERVACIÓN DECLARADA (`user_claim` / `inference`): narrativa aportada
- *      o inferida por el usuario. Se describe, jamás habilita fugas.
- *   3. FUGA ATRIBUIBLE (`round_leaks`): exige evento observado PERTINENTE a una
- *      regla (`leakRule`), RESULTADO de ronda (`won`/`lost`) y CONTEXTO mínimo
- *      no vacío. Sin los tres, solo se permiten `round_observations`.
+ *   - `normalized_input`: datos aportados/normalizados localmente (telemetría
+ *     de fichero, objetos manuales). Pueden DESCRIBIR observaciones de ronda,
+ *     pero NUNCA habilitan una fuga ni se presentan como verificados.
+ *   - `verified_source`: fuente autenticada con referencia comprobable. Aún NO
+ *     existe ningún adaptador que lo emita; está reservado a un frente futuro
+ *     de telemetría real. Solo este estado podría habilitar fugas atribuidas.
  *
- * Niveles:
- *   - insufficient: sin métricas agregadas válidas.
- *   - aggregate   : agregados válidos pero SIN eventos observados de ronda.
- *   - complete    : ≥1 evento observado de ronda (habilita observaciones;
- *                   las fugas siguen condicionadas a la regla verificable).
+ * La marca de procedencia es una capacidad interna (Symbol) que un JSON/objeto
+ * manual no puede portar, y los constructores NO se exportan. Aun así, el
+ * adaptador local solo produce `normalized_input`: la procedencia está
+ * NORMALIZADA, no verificada.
  *
- * DIMENSIONES: disponibilidad POR DIMENSIÓN del radar (precisión, macro,
- * aperturas, economía, clutch) con métrica y benchmark.
+ * Planos de evidencia:
+ *   1. Ronda normalizada (`normalized_input`): evento real de los datos
+ *      aportados (daño, kills/muertes, economía). Describe la ronda.
+ *   2. Observación declarada (`user_claim`/`inference`): narrativa del usuario.
+ *   3. Fuga atribuible (`round_leaks`): exige ronda `verified_source` + regla
+ *      pertinente + resultado de ronda + contexto. Inalcanzable sin fuente
+ *      autenticada (estado honesto actual).
+ *
+ * DIMENSIONES: disponibilidad POR DIMENSIÓN del radar con métrica y benchmark.
  */
 
-const BASE_SECTIONS = ['evidence_level', 'observations', 'limits', 'missing'];const AGGREGATE_SECTIONS = ['aggregate_radar', 'mmr_signal'];
+const BASE_SECTIONS = ['evidence_level', 'observations', 'limits', 'missing'];
+const AGGREGATE_SECTIONS = ['aggregate_radar', 'mmr_signal'];
 const ROUND_OBSERVATION_SECTIONS = ['round_observations'];
 const LEAK_SECTIONS = ['round_leaks'];
 const DUEL_SECTIONS = ['duel_matrix'];
 const MECHANICAL_SECTIONS = ['weapon_telemetry', 'aim_routine'];
 
 const ALLOWED_EVENTS = ['kill', 'death', 'trade', 'ability', 'economy', 'position', 'damage', 'plant', 'defuse', 'clutch', 'opening'];
-const OBSERVED_SOURCES = ['observed_event'];
 const DECLARED_SOURCES = ['user_claim', 'inference'];
 
-// Reglas de fuga con su evento pertinente. Una fuga exige regla + resultado + contexto.
 const LEAK_RULES = {
   throw_numeric_advantage: ['position', 'kill', 'death', 'economy'],
   untraded_opening: ['kill', 'death', 'opening'],
@@ -52,9 +52,8 @@ const LEAK_RULES = {
   wasted_economy: ['economy']
 };
 
-// Marca de capacidad privada: solo `mintObservedEvent`/`mintObservedDuel`
-// pueden añadirla. Un JSON u objeto manual no puede portar un Symbol.
-const OBSERVED_PROVENANCE = Symbol('valorant-analytics.observed_event');
+const NORMALIZED_PROVENANCE = Symbol('valorant-analytics.normalized_input');
+const VERIFIED_PROVENANCE = Symbol('valorant-analytics.verified_source');
 
 function toFiniteNum(v) {
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
@@ -82,64 +81,72 @@ function hasContext(context) {
   return Object.keys(context).some(k => context[k] !== undefined && context[k] !== null && context[k] !== '');
 }
 
-// Único constructor de evidencia observada de ronda. Los adaptadores confiables
-// (p. ej. el extractor de telemetría del CLI) lo invocan con datos crudos.
-function mintObservedEvent({ sourceRef, roundRef, event, detail, outcome, context, leakRule }) {
+// Serialización canónica (claves ordenadas) para hashes estables.
+function canonicalStringify(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalStringify).join(',')}]`;
+  const keys = Object.keys(value).sort();
+  return `{${keys.map(k => `${JSON.stringify(k)}:${canonicalStringify(value[k])}`).join(',')}}`;
+}
+
+// Referencia de origen trazable: matchId si existe; si no, digest canónico del
+// contenido + nombre del fichero de origen.
+function stableRef(matchData, originPath) {
+  const matchId = (matchData && matchData.data && matchData.data.metadata && matchData.data.metadata.matchId) ||
+    (matchData && matchData.metadata && matchData.metadata.matchId);
+  if (typeof matchId === 'string' && matchId.trim().length > 0) return `match:${matchId.trim()}`;
+  let digest;
+  try {
+    digest = crypto.createHash('sha256').update(canonicalStringify(matchData === undefined ? null : matchData)).digest('hex').slice(0, 16);
+  } catch (e) {
+    digest = crypto.createHash('sha256').update(String(matchData)).digest('hex').slice(0, 16);
+  }
+  const base = originPath ? path.basename(path.resolve(originPath)) : 'inline';
+  return `sha256:${digest}@${base}`;
+}
+
+// Constructor privado de ronda NORMALIZADA (nunca exportado).
+function mintNormalizedEvent({ sourceRef, roundRef, event, detail, context }) {
   if (typeof sourceRef !== 'string' || sourceRef.trim().length === 0) {
-    throw new Error('mintObservedEvent requiere sourceRef (referencia de partida/fichero).');
+    throw new Error('mintNormalizedEvent requiere sourceRef.');
   }
   const n = toFiniteNum(roundRef);
   if (n === null || n < 1 || !Number.isInteger(n)) {
-    throw new Error('mintObservedEvent requiere roundRef entero >= 1.');
+    throw new Error('mintNormalizedEvent requiere roundRef entero >= 1.');
   }
   const ev = typeof event === 'string' ? event.trim().toLowerCase() : '';
   if (!ALLOWED_EVENTS.includes(ev)) {
-    throw new Error(`mintObservedEvent: evento "${event}" fuera de la taxonomía.`);
+    throw new Error(`mintNormalizedEvent: evento "${event}" fuera de la taxonomía.`);
   }
-  if (leakRule !== undefined) {
-    if (!Object.prototype.hasOwnProperty.call(LEAK_RULES, leakRule)) {
-      throw new Error(`mintObservedEvent: leakRule "${leakRule}" desconocida.`);
-    }
-    if (!LEAK_RULES[leakRule].includes(ev)) {
-      throw new Error(`mintObservedEvent: el evento "${ev}" no es pertinente a la regla "${leakRule}".`);
-    }
-    if (outcome !== 'won' && outcome !== 'lost') {
-      throw new Error('mintObservedEvent: una fuga atribuible exige outcome "won" o "lost".');
-    }
-    if (!hasContext(context)) {
-      throw new Error('mintObservedEvent: una fuga atribuible exige contexto mínimo no vacío.');
-    }
-  }
-  const entry = { };
-  Object.defineProperty(entry, OBSERVED_PROVENANCE, { value: true, enumerable: false });
-  entry.source = 'observed_event';
-  entry.sourceType = 'telemetry_adapter';
+  const entry = {};
+  Object.defineProperty(entry, NORMALIZED_PROVENANCE, { value: true, enumerable: false });
+  entry.source = 'normalized_input';
+  entry.sourceType = 'normalized_input';
   entry.sourceRef = sourceRef;
   entry.n = n;
   entry.roundRef = n;
   entry.event = ev;
   if (typeof detail === 'string' && detail.trim()) entry.detail = detail;
-  if (outcome === 'won' || outcome === 'lost') entry.outcome = outcome;
   if (hasContext(context)) entry.context = context;
-  if (leakRule !== undefined) entry.leakRule = leakRule;
   return entry;
 }
 
-function mintObservedDuel({ sourceRef, opponent, kills, deaths, agent }) {
+function mintNormalizedDuel({ sourceRef, opponent, kills, deaths, agent }) {
   if (typeof sourceRef !== 'string' || sourceRef.trim().length === 0) {
-    throw new Error('mintObservedDuel requiere sourceRef.');
+    throw new Error('mintNormalizedDuel requiere sourceRef.');
   }
   if (typeof opponent !== 'string' || opponent.trim().length === 0) {
-    throw new Error('mintObservedDuel requiere opponent no vacío.');
+    throw new Error('mintNormalizedDuel requiere opponent no vacío.');
   }
   const k = toFiniteNum(kills);
   const dd = toFiniteNum(deaths);
   if (k === null || dd === null || k < 0 || dd < 0 || (k + dd) <= 0) {
-    throw new Error('mintObservedDuel requiere K/D numéricos con kills+deaths > 0.');
+    throw new Error('mintNormalizedDuel requiere K/D numéricos con kills+deaths > 0.');
   }
   const entry = {};
-  Object.defineProperty(entry, OBSERVED_PROVENANCE, { value: true, enumerable: false });
-  entry.sourceType = 'telemetry_adapter';
+  Object.defineProperty(entry, NORMALIZED_PROVENANCE, { value: true, enumerable: false });
+  entry.source = 'normalized_input';
+  entry.sourceType = 'normalized_input';
   entry.sourceRef = sourceRef;
   entry.opponent = opponent;
   entry.kills = k;
@@ -148,8 +155,18 @@ function mintObservedDuel({ sourceRef, opponent, kills, deaths, agent }) {
   return entry;
 }
 
-function isObservedRound(r) {
-  if (!r || typeof r !== 'object' || r[OBSERVED_PROVENANCE] !== true) return false;
+function isNormalizedRound(r) {
+  if (!r || typeof r !== 'object' || r[NORMALIZED_PROVENANCE] !== true) return false;
+  if (typeof r.sourceRef !== 'string' || r.sourceRef.trim().length === 0) return false;
+  const n = toFiniteNum(r.roundRef !== undefined ? r.roundRef : r.n);
+  if (n === null || n < 1 || !Number.isInteger(n)) return false;
+  return ALLOWED_EVENTS.includes(typeof r.event === 'string' ? r.event.trim().toLowerCase() : '');
+}
+
+// Estado VERIFICADO: reservado a una fuente autenticada futura. Ningún
+// adaptador actual lo emite; por tanto las fugas quedan inalcanzables.
+function isVerifiedRound(r) {
+  if (!r || typeof r !== 'object' || r[VERIFIED_PROVENANCE] !== true) return false;
   if (typeof r.sourceRef !== 'string' || r.sourceRef.trim().length === 0) return false;
   const n = toFiniteNum(r.roundRef !== undefined ? r.roundRef : r.n);
   if (n === null || n < 1 || !Number.isInteger(n)) return false;
@@ -161,7 +178,7 @@ function isDeclaredRound(r) {
 }
 
 function isAttributableLeak(r) {
-  if (!isObservedRound(r)) return false;
+  if (!isVerifiedRound(r)) return false;
   if (!Object.prototype.hasOwnProperty.call(LEAK_RULES, r.leakRule)) return false;
   if (!LEAK_RULES[r.leakRule].includes(r.event)) return false;
   if (r.outcome !== 'won' && r.outcome !== 'lost') return false;
@@ -169,7 +186,7 @@ function isAttributableLeak(r) {
 }
 
 function isValidDuel(d) {
-  if (!d || typeof d !== 'object' || d[OBSERVED_PROVENANCE] !== true) return false;
+  if (!d || typeof d !== 'object' || d[NORMALIZED_PROVENANCE] !== true) return false;
   if (typeof d.opponent !== 'string' || d.opponent.trim().length === 0) return false;
   const k = toFiniteNum(d.kills);
   const dd = toFiniteNum(d.deaths);
@@ -209,22 +226,26 @@ function classifyEvidence(input) {
   const anyDimension = Object.values(dimensions).some(d => d.available);
 
   const rawRounds = Array.isArray(src.rounds) ? src.rounds : [];
-  const observedRounds = rawRounds.filter(isObservedRound);
-  const attributable = observedRounds.filter(isAttributableLeak);
+  const normalizedRounds = rawRounds.filter(isNormalizedRound);
+  const verifiedRounds = rawRounds.filter(isVerifiedRound);
+  const attributable = verifiedRounds.filter(isAttributableLeak);
   const declaredObservations = rawRounds.filter(isDeclaredRound);
-  const observedEvents = observedRounds.map(r => ({ n: r.roundRef, event: r.event, detail: r.detail || '', attributable: isAttributableLeak(r) }));
+  const observedEvents = normalizedRounds.map(r => ({ n: r.roundRef, event: r.event, detail: r.detail || '', sourceType: r.sourceType }));
   const duels = Array.isArray(src.duels) ? src.duels.filter(isValidDuel) : [];
   const hasWeaponZones = isValidWeaponZones(src.weaponZones);
   const hasMechanical = hasWeaponZones || (validHs && (validAcs || validKd));
 
   let level = 'insufficient';
-  if (observedRounds.length > 0) level = 'complete';
+  if (verifiedRounds.length > 0) level = 'complete';
+  else if (normalizedRounds.length > 0) level = 'normalized';
   else if (hasAggregate) level = 'aggregate';
+
+  const provenanceStatus = verifiedRounds.length > 0 ? 'verified_source' : (normalizedRounds.length > 0 ? 'normalized_input' : 'none');
 
   const allowedSections = BASE_SECTIONS.slice();
   if (anyDimension) allowedSections.push('aggregate_radar');
   if (validKd && validAcs) allowedSections.push('mmr_signal');
-  if (observedRounds.length > 0) allowedSections.push(...ROUND_OBSERVATION_SECTIONS);
+  if (normalizedRounds.length > 0 || verifiedRounds.length > 0) allowedSections.push(...ROUND_OBSERVATION_SECTIONS);
   if (attributable.length > 0) allowedSections.push(...LEAK_SECTIONS);
   if (duels.length > 0) allowedSections.push(...DUEL_SECTIONS);
   if (hasMechanical) allowedSections.push(...MECHANICAL_SECTIONS);
@@ -246,17 +267,20 @@ function classifyEvidence(input) {
   if (!validFkFd) missing.push('first_kills/first_deaths');
   if (!validEcon) missing.push('economia (econRating o win%)');
   if (!validClutches) missing.push('clutches (entero >= 0)');
-  if (observedRounds.length === 0) missing.push('eventos_observados_por_ronda (procedencia verificada por adaptador)');
-  if (attributable.length === 0) missing.push('fugas_verificables (regla + resultado de ronda + contexto)');
-  if (duels.length === 0) missing.push('eventos_de_duelo observados');
+  if (normalizedRounds.length === 0) missing.push('eventos_normalizados_por_ronda (datos locales)');
+  missing.push('fuente_verificada (requiere origen autenticado: frente de telemetria real)');
+  if (duels.length === 0) missing.push('eventos_de_duelo normalizados');
   if (!hasWeaponZones) missing.push('zonas_de_dano (head/body/leg sumando 100%)');
 
   return {
     level,
+    provenanceStatus,
+    verifiedSource: verifiedRounds.length > 0,
     allowedSections,
     forbiddenSections,
     dimensions,
-    observedRoundCount: observedRounds.length,
+    normalizedRoundCount: normalizedRounds.length,
+    verifiedRoundCount: verifiedRounds.length,
     attributableLeakCount: attributable.length,
     declaredObservations: declaredObservations.length,
     observedEvents,
@@ -264,33 +288,15 @@ function classifyEvidence(input) {
     missing,
     hasWeaponZones,
     claimStatus: 'hipotesis_no_verificada',
-    notes: 'Un evento observado describe; solo una fuga con regla+resultado+contexto acusa. El texto declarado es user_claim, nunca evidencia táctica.'
+    notes: 'Datos locales son normalized_input (no verificados): describen, no acusan. Una fuga exige fuente verificada + regla + resultado + contexto.'
   };
 }
 
 // ---------------------------------------------------------------------------
-// ADAPTADOR CONFIABLE (única vía a la procedencia observada).
-// Los constructores `mintObservedEvent`/`mintObservedDuel` NO se exportan: solo
-// este adaptador puede acuñar observado, y lo hace a partir de CAMPOS REALES
-// de la telemetría (no de afirmaciones ya formadas). Un consumidor externo no
-// puede fabricar eventos observados ni fugas: como mucho, puede alimentar
-// telemetría cruda al adaptador, que nunca emite `leakRule`.
+// Adaptador LOCAL (normalización). NO es una "fuente confiable": convierte
+// telemetría de fichero/objeto en eventos `normalized_input`. Nunca emite
+// `verified_source` ni reglas de fuga.
 // ---------------------------------------------------------------------------
-
-function stableRef(matchData, originPath) {
-  const matchId = (matchData && matchData.data && matchData.data.metadata && matchData.data.metadata.matchId) ||
-    (matchData && matchData.metadata && matchData.metadata.matchId);
-  if (typeof matchId === 'string' && matchId.trim().length > 0) return `match:${matchId.trim()}`;
-  let digest;
-  try {
-    digest = crypto.createHash('sha256').update(JSON.stringify(matchData === undefined ? null : matchData)).digest('hex').slice(0, 16);
-  } catch (e) {
-    digest = crypto.createHash('sha256').update(String(matchData)).digest('hex').slice(0, 16);
-  }
-  const base = originPath ? path.basename(path.resolve(originPath)) : 'inline';
-  return `sha256:${digest}@${base}`;
-}
-
 function observeMatchTelemetry(matchData, playerHandle, options = {}) {
   const segments = (matchData && matchData.data && matchData.data.segments) || (matchData && matchData.segments) || [];
   const summaries = segments.filter(s => s.type === 'player-summary');
@@ -314,7 +320,7 @@ function observeMatchTelemetry(matchData, playerHandle, options = {}) {
     if (s.type === 'player-round-damage') {
       const dmg = Number(cell(s.stats, 'damage'));
       if (Number.isFinite(dmg) && dmg > 0) {
-        rounds.push(mintObservedEvent({
+        rounds.push(mintNormalizedEvent({
           sourceRef, roundRef, event: 'damage',
           detail: `dmg ${dmg} (H${cell(s.stats, 'headshots')}/B${cell(s.stats, 'bodyshots')}/L${cell(s.stats, 'legshots')})`,
           context: { damage: dmg, headshots: Number(cell(s.stats, 'headshots')) || 0, bodyshots: Number(cell(s.stats, 'bodyshots')) || 0, legshots: Number(cell(s.stats, 'legshots')) || 0 }
@@ -325,13 +331,13 @@ function observeMatchTelemetry(matchData, playerHandle, options = {}) {
       const deaths = Number(cell(s.stats, 'deaths'));
       const spent = Number(cell(s.stats, 'spentCredits'));
       if (Number.isFinite(kills) && Number.isFinite(deaths) && (kills > 0 || deaths > 0)) {
-        rounds.push(mintObservedEvent({ sourceRef, roundRef, event: 'kill', detail: `${kills}K/${deaths}D`, context: { kills, deaths } }));
+        rounds.push(mintNormalizedEvent({ sourceRef, roundRef, event: 'kill', detail: `${kills}K/${deaths}D`, context: { kills, deaths } }));
       } else if (Number.isFinite(spent) && spent > 0) {
-        rounds.push(mintObservedEvent({ sourceRef, roundRef, event: 'economy', detail: `spent ${spent}`, context: { spentCredits: spent } }));
+        rounds.push(mintNormalizedEvent({ sourceRef, roundRef, event: 'economy', detail: `spent ${spent}`, context: { spentCredits: spent } }));
       }
     }
   });
-  return { observed, rounds, sourceRef };
+  return { observed, rounds, sourceRef, provenance: 'normalized_input' };
 }
 
 function observeDuelRows(rows, matchData, options = {}) {
@@ -343,7 +349,7 @@ function observeDuelRows(rows, matchData, options = {}) {
     const kills = Number(r && r.kills);
     const deaths = Number(r && r.deaths);
     if (!Number.isFinite(kills) || !Number.isFinite(deaths) || (kills + deaths) <= 0) return;
-    duels.push(mintObservedDuel({ sourceRef, opponent, kills, deaths, agent: r.opponentAgent }));
+    duels.push(mintNormalizedDuel({ sourceRef, opponent, kills, deaths, agent: r.opponentAgent }));
   });
   return duels;
 }
@@ -353,9 +359,11 @@ module.exports = {
   observeMatchTelemetry,
   observeDuelRows,
   stableRef,
+  canonicalStringify,
   toFiniteNum,
   isPercent,
-  isObservedRound,
+  isNormalizedRound,
+  isVerifiedRound,
   isDeclaredRound,
   isAttributableLeak,
   isValidDuel,

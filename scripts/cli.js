@@ -338,11 +338,11 @@ try {
         console.log(`       Solución: ${l.solution}`);
       });
     } else if (evidence.allowedSections.includes('round_observations')) {
-      console.log(`\n🔎 OBSERVACIONES POR RONDA (eventos observados; NO se atribuyen causas):`);
+      console.log(`\n🔎 OBSERVACIONES POR RONDA (datos normalizados; NO verificados; NO se atribuyen causas):`);
       (evidence.observedEvents || []).slice(0, 10).forEach(ev => {
         console.log(`  • R${ev.n} [${ev.event}] ${ev.detail}`);
       });
-      console.log(`  (Fugas/causas de derrota omitidas: falta regla verificable + resultado + contexto.)`);
+      console.log(`  (Fugas/causas omitidas: falta fuente verificada + regla + resultado + contexto.)`);
     } else {
       console.log(`\n🔎 Observaciones/fugas omitidas: sin eventos observados de ronda.`);
     }

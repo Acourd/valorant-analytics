@@ -1896,7 +1896,7 @@ check('honestidad: la política de evidencia no fuerza coaching ni diagnósticos
       assert.ok(minimal.forbiddenSections.includes(s), `${s} debe estar prohibido en mínimo`);
     }
     assert.strictEqual(minimal.maxLeaks, 0, 'sin evidencia por ronda no hay fugas');
-    assert.ok(minimal.missing.some(m => m.startsWith('eventos_observados_por_ronda')), 'debe declarar la falta de evidencia por ronda');
+    assert.ok(minimal.missing.some(m => m.startsWith('eventos_normalizados_por_ronda')), 'debe declarar la falta de eventos de ronda');
     const partial = classifyEvidence(fixture('telemetry_partial.json'));
     assert.strictEqual(partial.level, 'aggregate', 'un marcador agregado sigue siendo evidencia agregada');
     assert.ok(!partial.allowedSections.includes('round_leaks'), 'sin rondas no se atribuyen fugas');
@@ -1910,7 +1910,7 @@ check('honestidad: la política de evidencia no fuerza coaching ni diagnósticos
     assert.ok(!userProvided.allowedSections.includes('round_observations'), 'declaraciones no son eventos observados');
     assert.ok(!userProvided.allowedSections.includes('duel_matrix'), 'duelos de fichero no están verificados');
     assert.strictEqual(userProvided.declaredObservations, 3, 'user_claim/inference se cuentan como declaraciones');
-    assert.strictEqual(userProvided.observedRoundCount, 0, 'un JSON no puede portar procedencia observada');
+    assert.strictEqual(userProvided.normalizedRoundCount, 0, 'un JSON no puede portar procedencia de ronda');
     assert.ok(userProvided.dimensions.precision.available, 'con HS% la precisión es evaluable');
     assert.ok(userProvided.allowedSections.includes('weapon_telemetry'), 'con zonas válidas sí hay telemetría de arma');
     const none = classifyEvidence({ observed: {} });
@@ -1978,7 +1978,14 @@ check('honestidad: la política exige evidencia válida (rondas/duelos/zonas/por
     assert.strictEqual(observed.rounds.length, 1, 'solo la ronda con daño real es evento');
     assert.strictEqual(observed.sourceRef, 'match:match-abc-123');
     const adapted = ep.classifyEvidence(observed);
-    assert.strictEqual(adapted.level, 'complete');
+    assert.strictEqual(adapted.level, 'normalized', 'datos locales son normalized_input, no complete');
+    assert.strictEqual(adapted.provenanceStatus, 'normalized_input');
+    assert.strictEqual(adapted.verifiedSource, false, 'ninguna fuente local es verificada');
+    assert.ok(adapted.missing.some(m => m.startsWith('fuente_verificada')), 'debe declarar la falta de fuente verificada');
+    // Canonicalidad: el orden de claves no altera la referencia.
+    const c1 = ep.stableRef({ data: { segments: [{ a: 1, b: 2 }] } }, 'x.json');
+    const c2 = ep.stableRef({ data: { segments: [{ b: 2, a: 1 }] } }, 'x.json');
+    assert.strictEqual(c1, c2, 'objetos semánticamente equivalentes comparten sourceRef');
     assert.ok(adapted.allowedSections.includes('round_observations'), 'un evento observado describe la ronda');
     assert.ok(!adapted.allowedSections.includes('round_leaks'), 'describir no es acusar: el adaptador nunca acusa fugas');
     assert.ok(adapted.allowedSections.includes('aim_routine'), 'HS%+ACS habilita la rutina');
@@ -2074,7 +2081,7 @@ check('honestidad: la política distingue procedencia y expone dimensiones evalu
         ]
       }
     }, 'A#1'));
-    assert.strictEqual(adapted.level, 'complete', 'solo el adaptador confiable habilita complete');
+    assert.strictEqual(adapted.level, 'normalized', 'datos locales quedan en normalized (no verificados)');
     assert.ok(adapted.allowedSections.includes('round_observations'));
     assert.ok(!adapted.allowedSections.includes('round_leaks'), 'observar un evento no es acusar una fuga');
     // Dimensiones: disponibles solo con métrica+benchmark.
