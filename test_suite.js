@@ -1766,22 +1766,24 @@ check('dsse: junction/reparse de directorio no se sigue (Windows junction / POSI
   () => {
     const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
     const base = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-junc-'));
+    const linkType = process.platform === 'win32' ? 'junction' : 'dir';
     try {
       const real = path.join(base, 'real');
       fs.mkdirSync(real, { mode: 0o700 });
       const link = path.join(base, 'link');
-      let linkOk = true;
+      // El caso DEBE ejecutarse de verdad: en Windows los junctions no
+      // requieren privilegios y en POSIX un symlink de directorio tampoco.
+      // Si no puede crearse, la suite FALLA (jamás un PASS vacío).
+      let created = false;
       try {
-        // En Windows los junctions NO requieren privilegios; en POSIX un
-        // symlink de directorio (reparse equivalente).
-        fs.symlinkSync(real, link, process.platform === 'win32' ? 'junction' : 'dir');
+        fs.symlinkSync(real, link, linkType);
+        created = true;
       } catch (e) {
-        linkOk = false;
+        assert.fail(`no se pudo crear el ${linkType} de directorio (${e.message}): el caso reparse DEBE demostrarse, no omitirse`);
       }
-      if (!linkOk) {
-        assert.ok(true, 'entorno sin junctions/symlink de directorio: caso no aplicable');
-        return;
-      }
+      assert.ok(created, 'el enlace de directorio debe haberse creado');
+      assert.strictEqual(fs.lstatSync(link).isSymbolicLink(), true,
+        `lstat del ${linkType} debe reportar enlace (reparse/junction)`);
       const kp = crypto.generateKeyPairSync('ed25519');
       assert.throws(
         () => dsse.registerTrustedKey(path.join(link, 'ks.json'), kp.publicKey.export({ type: 'spki', format: 'pem' }), 'junc'),
