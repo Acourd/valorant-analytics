@@ -100,10 +100,54 @@ function fetchRiotMatchById(matchId, options = {}) {
   return { matchId: id, host, endpoint, fetchedAt: new Date().toISOString(), payload };
 }
 
-// Atestación local (Ed25519) del registro obtenido. La clave privada NO se
-// acepta como argumento: se carga SIEMPRE del almacén del operador
-// (RIOT_ATTESTATION_KEY, ruta a PEM 0600 fuera del repo). Un llamador externo
-// no puede firmar con una clave propia.
+// Perímetro de ficheros de confianza (clave privada y trust store).
+// Puro y determinista; en POSIX exige propietario actual y ausencia de
+// escritura de grupo/otros (el trust store define QUIÉN tiene autoridad).
+const NOFOLLOW_FLAG = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0;
+
+function trustStorePolicyViolation(mode, uid, currentUid, options = {}) {
+  const strict = Boolean(options.strict);
+  if (strict) {
+    if ((mode & 0o077) !== 0) return 'permisos de grupo u otros presentes (exige 0600)';
+  } else if ((mode & 0o022) !== 0) {
+    return 'escritura para grupo u otros (exige sin grupo/otros de escritura)';
+  }
+  if (typeof uid === 'number' && typeof currentUid === 'number' && uid !== currentUid) {
+    return `propietario distinto al usuario actual (uid ${uid} != ${currentUid})`;
+  }
+  return null;
+}
+
+// Lectura resistente a sustitución/TOCTOU: lstat → open O_NOFOLLOW → fstat →
+// comparación dev/ino → validación de perímetro → leer del descriptor.
+function readProtectedFile(pathLike, what, options = {}) {
+  const resolved = path.resolve(pathLike);
+  let lst;
+  try { lst = fs.lstatSync(resolved); }
+  catch (e) { throw new Error(`${what} ausente o ilegible (${resolved}): ${e.message} (fail-closed).`); }
+  if (lst.isSymbolicLink()) throw new Error(`${what} no puede ser un enlace simbólico (${resolved}) (fail-closed).`);
+  if (!lst.isFile()) throw new Error(`${what} debe ser un archivo regular (${resolved}) (fail-closed).`);
+  let fd = null;
+  try {
+    fd = fs.openSync(resolved, fs.constants.O_RDONLY | NOFOLLOW_FLAG);
+    const st = fs.fstatSync(fd);
+    if (!st.isFile()) throw new Error(`${what} no es un archivo regular tras la apertura (fail-closed).`);
+    if (st.dev !== lst.dev || st.ino !== lst.ino) {
+      throw new Error(`sustitución de ${what} entre la inspección y la apertura (fail-closed).`);
+    }
+    if (process.platform !== 'win32') {
+      const currentUid = typeof process.getuid === 'function' ? process.getuid() : null;
+      const violation = trustStorePolicyViolation(st.mode & 0o7777, typeof st.uid === 'number' ? st.uid : null, currentUid, { strict: options.strict });
+      if (violation) throw new Error(`${what} con perímetro inseguro (modo ${(st.mode & 0o7777).toString(8)}): ${violation} (fail-closed).`);
+    }
+    return fs.readFileSync(fd, 'utf8');
+  } finally {
+    if (fd !== null) { try { fs.closeSync(fd); } catch (e) { /* cerrar */ } }
+  }
+}
+
+// Clave privada del ingestor autorizado: NO se acepta como argumento; se carga
+// del almacén del operador (RIOT_ATTESTATION_KEY, 0600 fuera del repo).
 function loadSigningKey() {
   const p = process.env.RIOT_ATTESTATION_KEY;
   if (!p) {
@@ -111,17 +155,7 @@ function loadSigningKey() {
     err.code = 'ATTESTATION_KEY_MISSING';
     throw err;
   }
-  const resolved = path.resolve(p);
-  let st;
-  try { st = fs.lstatSync(resolved); } catch (e) {
-    throw new Error(`No se pudo leer la clave de atestación (${resolved}): ${e.message} (fail-closed).`);
-  }
-  if (st.isSymbolicLink()) throw new Error('La clave de atestación no puede ser un enlace simbólico (fail-closed).');
-  if (!st.isFile()) throw new Error('La clave de atestación debe ser un archivo regular (fail-closed).');
-  if (process.platform !== 'win32' && (st.mode & 0o077) !== 0) {
-    throw new Error(`La clave de atestación tiene permisos inseguros (${(st.mode & 0o777).toString(8)}): exige 0600 (fail-closed).`);
-  }
-  return fs.readFileSync(resolved, 'utf8');
+  return readProtectedFile(p, 'clave de atestación', { strict: true });
 }
 
 function createAttestation(record) {
@@ -140,7 +174,7 @@ function createAttestation(record) {
 }
 
 // Verificador. La confianza NO llega por argumento: se carga del almacén del
-// operador (RIOT_ATTESTATION_TRUST). Un llamador no puede inyectar su clave.
+// operador (RIOT_ATTESTATION_TRUST) con el mismo perímetro que la clave privada.
 function verifyAttestation(attestation, options = {}) {
   const att = attestation;
   if (!att || typeof att !== 'object') return { valid: false, reason: 'atestación ausente' };
@@ -154,8 +188,12 @@ function verifyAttestation(attestation, options = {}) {
   if (options.payload !== undefined) {
     if (payloadDigest(options.payload) !== att.payloadDigest) return { valid: false, reason: 'digest del payload no coincide' };
   }
-  // La confianza SIEMPRE proviene del almacén del operador; jamás del llamador.
-  const trusted = loadTrustedKeys();
+  let trusted;
+  try {
+    trusted = loadTrustedKeys();
+  } catch (e) {
+    return { valid: false, reason: `trust store inseguro: ${e.message}` };
+  }
   if (!Array.isArray(trusted) || trusted.length === 0) return { valid: false, reason: 'trust store del operador vacío: sin fuente verificada' };
   const core = { v: 1, matchId: att.matchId && att.matchId.trim().toLowerCase(), host: att.host, endpoint: att.endpoint, fetchedAt: att.fetchedAt, payloadDigest: att.payloadDigest };
   for (const pem of trusted) {
@@ -170,15 +208,19 @@ function verifyAttestation(attestation, options = {}) {
   return { valid: false, reason: 'firma no verificada' };
 }
 
-// Trust store: fichero JSON con array de claves públicas SPKI (PEM).
+// Trust store: fichero JSON con array de claves públicas SPKI (PEM). Se
+// valida perímetro (regular, no symlink, propietario, sin escritura de
+// grupo/otros) y se lee de forma resistente a TOCTOU.
 function loadTrustedKeys(filePath) {
   const p = filePath || process.env.RIOT_ATTESTATION_TRUST;
   if (!p) return [];
-  try {
-    const parsed = JSON.parse(fs.readFileSync(path.resolve(p), 'utf8'));
-    if (Array.isArray(parsed)) return parsed.filter(k => typeof k === 'string' && k.includes('BEGIN PUBLIC KEY'));
-  } catch (e) { /* fail-closed: sin trust store */ }
-  return [];
+  const raw = readProtectedFile(p, 'trust store', { strict: false });
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch (e) {
+    throw new Error(`trust store ilegible (JSON inválido): ${e.message} (fail-closed).`);
+  }
+  if (!Array.isArray(parsed)) throw new Error('trust store debe ser un array de claves públicas PEM (fail-closed).');
+  return parsed.filter(k => typeof k === 'string' && k.includes('BEGIN PUBLIC KEY'));
 }
 
 module.exports = {
@@ -192,6 +234,8 @@ module.exports = {
   createAttestation,
   verifyAttestation,
   loadTrustedKeys,
+  trustStorePolicyViolation,
+  readProtectedFile,
   payloadDigest,
   canonicalStringify,
   keyIdOf

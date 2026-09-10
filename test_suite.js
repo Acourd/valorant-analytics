@@ -2153,7 +2153,7 @@ check('fuente Riot: validaciones, credenciales y atestación con trust del opera
       const keyPath = path.join(tmp, 'ingestor.key');
       fs.writeFileSync(keyPath, kp.privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
       const trustPath = path.join(tmp, 'trust.json');
-      fs.writeFileSync(trustPath, JSON.stringify([kp.publicKey.export({ type: 'spki', format: 'pem' })]), 'utf8');
+      fs.writeFileSync(trustPath, JSON.stringify([kp.publicKey.export({ type: 'spki', format: 'pem' })]), { encoding: 'utf8', mode: 0o600 });
       process.env.RIOT_ATTESTATION_KEY = keyPath;
       process.env.RIOT_ATTESTATION_TRUST = trustPath;
       const att = rs.createAttestation(record);
@@ -2205,7 +2205,7 @@ check('fuente Riot: trust no inyectable; autofirma de consumidor falla cerrada',
       const keyPath = path.join(tmp, 'ingestor.key');
       fs.writeFileSync(keyPath, opKp.privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
       const trustPath = path.join(tmp, 'trust.json');
-      fs.writeFileSync(trustPath, JSON.stringify([opKp.publicKey.export({ type: 'spki', format: 'pem' })]), 'utf8');
+      fs.writeFileSync(trustPath, JSON.stringify([opKp.publicKey.export({ type: 'spki', format: 'pem' })]), { encoding: 'utf8', mode: 0o600 });
       process.env.RIOT_ATTESTATION_KEY = keyPath;
       process.env.RIOT_ATTESTATION_TRUST = trustPath;
       assert.throws(() => ep.observeVerifiedMatch(payload, 'anon-puuid-focus', { attestation: forged }), /rechazado/);
@@ -2228,6 +2228,69 @@ check('fuente Riot: trust no inyectable; autofirma de consumidor falla cerrada',
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
+check('fuente Riot: el trust store exige perímetro (0666, propietario, symlink) y falla cerrado',
+  () => {
+    const rs = require(path.join(scriptsDir, 'riot_source.js'));
+    const ep = require(path.join(scriptsDir, 'evidence_policy.js'));
+    // Predicado puro (determinista en toda plataforma).
+    assert.ok(rs.trustStorePolicyViolation(0o666, 1000, 1000), '0666 debe violar');
+    assert.ok(rs.trustStorePolicyViolation(0o622, 1000, 1000), 'escritura de otros debe violar');
+    assert.ok(rs.trustStorePolicyViolation(0o626, 1000, 1000), 'escritura de grupo debe violar');
+    assert.strictEqual(rs.trustStorePolicyViolation(0o644, 1000, 1000), null, '0644 sin escritura compartida es válido');
+    assert.strictEqual(rs.trustStorePolicyViolation(0o600, 1000, 1000), null, '0600 del propietario es válido');
+    assert.ok(rs.trustStorePolicyViolation(0o600, 1001, 1000), 'propietario ajeno debe violar');
+    assert.ok(rs.trustStorePolicyViolation(0o644, 1000, 1000, { strict: true }), 'clave privada exige 0600 (modo estricto)');
+    const saved = { signKey: process.env.RIOT_ATTESTATION_KEY, trust: process.env.RIOT_ATTESTATION_TRUST };
+    const restore = () => {
+      if (saved.signKey === undefined) delete process.env.RIOT_ATTESTATION_KEY; else process.env.RIOT_ATTESTATION_KEY = saved.signKey;
+      if (saved.trust === undefined) delete process.env.RIOT_ATTESTATION_TRUST; else process.env.RIOT_ATTESTATION_TRUST = saved.trust;
+    };
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'riot-perim-'));
+    try {
+      const payload = JSON.parse(fs.readFileSync(path.join(__dirname, 'examples', 'riot_match_anonymized.json'), 'utf8'));
+      const matchId = payload.matchInfo.matchId;
+      const kp = crypto.generateKeyPairSync('ed25519');
+      const pub = kp.publicKey.export({ type: 'spki', format: 'pem' });
+      const keyPath = path.join(tmp, 'ingestor.key');
+      fs.writeFileSync(keyPath, kp.privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
+      process.env.RIOT_ATTESTATION_KEY = keyPath;
+      const record = { matchId, host: 'americas.api.riotgames.com', endpoint: rs.matchEndpoint(matchId), fetchedAt: new Date().toISOString(), payload };
+      if (process.platform !== 'win32') {
+        // Trust store 0666 → fail-closed aunque contenga la clave correcta.
+        const trust666 = path.join(tmp, 'trust-666.json');
+        fs.writeFileSync(trust666, JSON.stringify([pub]), 'utf8');
+        fs.chmodSync(trust666, 0o666);
+        process.env.RIOT_ATTESTATION_TRUST = trust666;
+        const att = rs.createAttestation(record);
+        assert.throws(() => ep.observeVerifiedMatch(payload, 'anon-puuid-focus', { attestation: att }), /rechazado|trust store/i, 'trust 0666 no debe autorizar');
+        assert.ok(!rs.verifyAttestation(att, { payload }).valid, 'verificación falla con trust 0666');
+        // Symlink del trust store → fail-closed.
+        const realTrust = path.join(tmp, 'trust-ok.json');
+        fs.writeFileSync(realTrust, JSON.stringify([pub]), { mode: 0o600 });
+        const linkTrust = path.join(tmp, 'trust-link.json');
+        try {
+          fs.symlinkSync(realTrust, linkTrust, 'file');
+          process.env.RIOT_ATTESTATION_TRUST = linkTrust;
+          assert.ok(!rs.verifyAttestation(att, { payload }).valid, 'symlink de trust store no debe autorizar');
+          assert.throws(() => ep.observeVerifiedMatch(payload, 'anon-puuid-focus', { attestation: att }), /rechazado|symb/i);
+        } catch (e) {
+          if (!/EEXIST|EPERM|privileg/i.test(e.message)) throw e;
+        }
+        // Clave privada 0666 → no se puede atestiguar.
+        const badKey = path.join(tmp, 'bad.key');
+        fs.writeFileSync(badKey, kp.privateKey.export({ type: 'pkcs8', format: 'pem' }), 'utf8');
+        fs.chmodSync(badKey, 0o666);
+        process.env.RIOT_ATTESTATION_KEY = badKey;
+        assert.throws(() => rs.createAttestation(record), /perímetro|0600|inseguro/i);
+      } else {
+        assert.ok(true, 'win32: integración chmod/symlink no aplicable; predicado puro cubierto arriba');
+      }
+    } finally {
+      restore();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben
 // reflejar EXACTAMENTE el número de casos registrados y ejecutados. Un
 // manifiesto desincronizado hace fallar la suite (imposible sobre-declarar
