@@ -2,18 +2,18 @@
 
 # ⚡ VALORANT ANALYTICS
 
-### Telemetría Competitiva Soberana · Diagnóstico Forense 360° · Motor de Puntería Adaptativo
+### Telemetría Competitiva Local · Diagnóstico Descriptivo 360° · Motor de Puntería Adaptativo
 
 [![Versión](https://img.shields.io/badge/versión-4.5_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
 [![Runtime](https://img.shields.io/badge/runtime-Node.js_18%2B_Nativo-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Dependencias](https://img.shields.io/badge/dependencias-0_npm_(Core)-38BDF8.svg?style=for-the-badge&logo=codeforces&logoColor=white)](package.json)
-[![Pruebas](https://img.shields.io/badge/tests-54%2F54_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
+[![Pruebas](https://img.shields.io/badge/tests-106%2F106_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
 [![Auditoría](https://img.shields.io/badge/auditoría-100%2F100_Verificado-8B5CF6.svg?style=for-the-badge&logo=codereview&logoColor=white)](opencode_tester.js)
 [![Licencia](https://img.shields.io/badge/licencia-MIT-6B7280.svg?style=for-the-badge)](LICENSE)
 
 <p align="center">
   <b>Transforma micro-eventos de ronda en decisiones tácticas deterministas.</b><br>
-  Diseñado para erradicar las fugas invisibles de ELO, diagnosticar el anclaje algorítmico (MMR Drag) y prescribir rutinas biomecánicas personalizadas de 15 minutos en KovaaK's y Aim Lab.
+  Diseñado para describir patrones de rendimiento y fugas probables de ronda, señalar posibles indicios de anclaje de MMR (hipótesis, no verificado) y sugerir rutinas biomecánicas de 15 minutos en KovaaK's y Aim Lab.
 </p>
 
 [Tres Formas de Empezar](#-tres-formas-de-empezar) • [Matriz de Telemetría](#-el-problema-con-los-rastreadores-convencionales) • [Arquitectura](#-arquitectura-del-flujo-de-análisis) • [Diagnóstico en Acción](#-diagnóstico-en-acción) • [Comandos CLI](#-guía-de-comandos-principales) • [Gemini Gems & GPTs](#-soporte-para-gemini-gems-y-custom-gpts) • [English](README.en.md)
@@ -32,7 +32,7 @@ La mayoría de rastreadores web públicos solo suman cifras acumuladas al final 
 | **Mecánica de Disparo** | 🔴 % Headshot global | 🟢 **Ratio $SE/TP$ & 3 Bandas de Distancia** | Detecta sobre-spray prolongado a más de 25m y estabiliza el primer impacto (1-tap). |
 | **Sinergia en Pareja** | 🔴 Inexistente | 🟢 **Auditoría de Dúo & Ventanas de Re-frag** | Mide tiempos de tradeo (<2s) y balance de carga para evitar jugar dos 1v1 aislados. |
 | **Economía de Rondas** | 🔴 Total gastado global | 🟢 **Conversión por Buy-Tiers (Eco/Semi/Full)** | Identifica si estás regalando rondas clave tras ganar pistolas o en compras completas. |
-| **Salud de Cuenta** | 🔴 Solo rango visual | 🟢 **Detección de *MMR Drag* & Rango Merecido** | Revela si estás estancado por habilidad o por el anclaje de certeza del algoritmo de Riot. |
+| **Salud de Cuenta** | 🔴 Solo rango visual | 🟡 **Señal heurística de MMR & estimación de rango** | Plantea una HIPÓTESIS (no verificada) de posible anclaje y una estimación orientativa de rango. No mide el MMR interno de Riot ni el talento real. |
 | **Disponibilidad WAF** | 🔴 Caídas por Cloudflare 403 | 🟢 **Cosecha Local de Caché & Modo Zero-Cloud** | Cero bloqueos: lee directamente del navegador (Brotli/Gzip) o analiza sin conexión. |
 
 ---
@@ -62,7 +62,7 @@ flowchart TD
         B --> C4["duo_synergy.js
 (Tradeos & Balance de Carga)"]
         B --> C5["autodiagnostic_engine.js
-(MMR Drag & Rango Merecido)"]
+(señal heurística MMR & estimación de rango)"]
     end
 
     subgraph OUTPUT["3. PRESCRIPCIÓN Y ACCIÓN INMEDIATA"]
@@ -89,7 +89,7 @@ Diseñado para adaptarse a cualquier flujo de trabajo sin fricciones:
 3. Pega el enlace de Tracker.gg, el texto de tu marcador o una captura de pantalla para recibir el reporte 360° instantáneo.
 
 ### ⚡ Opción 2: Modo Local en Terminal (Despachador Maestro `cli.js`)
-> **Ideal para jugadores competitivos que buscan velocidad (<100ms), privacidad total y funcionamiento sin red.**
+> **Ideal para jugadores competitivos que buscan velocidad (<100ms), privacidad total y análisis 100% local. El análisis de archivos y scoreboards locales es íntegramente offline; los comandos `fetch_profile` / `fetch_match` y las URLs remotas son la única superficie de red (ver Privacidad).**
 
 ```bash
 # 1. Clona el repositorio
@@ -116,7 +116,7 @@ node cli.js economy "TenZ#0001"
 
 ## ◈ Diagnóstico en Acción
 
-Ejemplo real generado a partir de telemetría procesada por el motor soberano:
+Ejemplo ilustrativo (fixture local; no es telemetría real ni una salida validada empíricamente):
 
 ```text
 ========================================================================
@@ -171,7 +171,7 @@ El despachador maestro `cli.js` provee acceso unificado a todas las capacidades 
 | **Calibración Offline** | `node cli.js calibrate [jugador] [rango] [rol]` | Simulación instantánea sin conexión para entrenar sin llamadas de red. |
 | **Cosecha de Caché** | `node cli.js harvest [jugador]` | Recupera partidas desde la caché local Chromium evadiendo Cloudflare Turnstile. |
 | **Auditoría de Carrera** | `node cli.js career <perfil.json\|handle>` | Desglosa horas competitivas vs casuales y cronología de hitos por rango. |
-| **Diagnóstico de MMR** | `node cli.js diagnose <perfil.json\|handle>` | Detecta anclaje algorítmico (*MMR Drag*) y calcula tu Rango Merecido real. |
+| **Señal Heurística de MMR** | `node cli.js diagnose <perfil.json\|handle>` | Señala un patrón compatible con posible anclaje (hipótesis NO verificada) y una estimación orientativa de rango. No mide el MMR interno. |
 | **Ingesta Resiliente** | `node cli.js parse <archivo_o_texto> [jugador]` | Procesa volcados de texto plano o marcadores de Tracker.gg / OP.GG. |
 | **Invariantes Matemáticos**| `node cli.js invariants [partida.json] [jugador]` | Verificación formal de cotas numéricas [0, 100] y convergencia de zonas (100%). |
 | **Atestación Cripto** | `node cli.js attest [partida.json] [jugador]` | Genera y valida un sobre DSSE in-toto firmado con Ed25519. |
@@ -189,7 +189,7 @@ Si utilizas **Google Gemini (Gems)** o **OpenAI (Custom GPTs)**, el archivo [`st
 
 - **Instrucciones de Sistema (System Prompt)** estructuradas con tags XML (`<system_role>`, `<vision_and_input_protocol>`, `<output_specification>`, etc.) con rigor matemático y guardas anti-alucinación.
 - **Protocolo de Ingesta Multi-Formato:** Diseñado específicamente para OCR de capturas de pantalla de marcadores, texto plano y resúmenes manuales.
-- **Iniciadores de Conversación Listos para Usar:** 4 botones pre-configurados para diagnósticos de partida, sinergia de dúo, rutinas KovaaK's y cálculo de MMR Drag.
+- **Iniciadores de Conversación Listos para Usar:** 4 botones pre-configurados para diagnósticos de partida, sinergia de dúo, rutinas KovaaK's y señal heurística de MMR.
 - **Formato Visual Deterministico:** Salida con barras ASCII de progreso (`[████████░░]`), matrices limpias de datos y bifurcaciones de coaching interactivo.
 
 👉 **Consulta la guía completa de configuración en [standalone_prompt.md](standalone_prompt.md)**.
@@ -198,10 +198,23 @@ Si utilizas **Google Gemini (Gems)** o **OpenAI (Custom GPTs)**, el archivo [`st
 
 ## ◈ Privacidad y Especificaciones de Ingeniería
 
-- **100% Local y Confidencial:** Todo el análisis se ejecuta localmente en tu procesador. Ninguna estadística, Riot ID o captura sale de tu máquina.
+- **100% Local y Confidencial:** Todo el análisis se ejecuta localmente en tu procesador. Ninguna estadística, Riot ID o captura sale de tu máquina, EXCEPTO cuando TÚ invocas explícitamente `fetch_profile`, `fetch_match` o pasas una URL remota (esos comandos transmiten únicamente el Riot ID / match ID a la API pública de Tracker.gg para descargar la telemetría).
+- **Red solo bajo demanda explícita:** los comandos `fetch_profile` / `fetch_match` (y URLs remotas en `match`) consultan la API pública de Tracker.gg con reintento y backoff; todo lo demás (JSON local, scoreboards, caché) es 100% offline. Un perfil privado devuelve error instructivo, jamás datos inventados.
 - **Zero Dependencias NPM:** Diseñado exclusivamente sobre las librerías estándar de Node.js (`fs`, `path`, `zlib`, `crypto`, `child_process`). Cero descargas externas.
 - **Compatibilidad Multiplataforma:** Probado y garantizado en Windows 11 (PowerShell/CMD), macOS (zsh) y Linux (bash).
-- **Garantía Determinista:** 54 pruebas automatizadas verificadas con Exit Code 0 y puntuación perfecta de 100/100 en auditorías de código agéntico.
+- **Garantía Determinista:** 106 pruebas automatizadas verificadas con Exit Code 0 (`node test_suite.js`) y puntuación perfecta de 100/100 en auditorías de código agéntico (`node opencode_tester.js`).
+
+---
+
+## ◈ Alcance y Límites (Honestidad de Datos)
+
+Este proyecto **describe** lo que la telemetría local permite observar; no certifica hechos sobre el emparejamiento interno de Riot ni sobre el jugador.
+
+- **MMR / "MMR Drag":** la salida es una **hipótesis heurística no verificada** a partir de agregados (partidas, KD, ACS, DDΔ, HS, horas). El proyecto **no accede al MMR interno** ni a las ganancias/pérdidas de RR por partida, por lo que no puede determinar ni demostrar un anclaje algorítmico. Toda conclusión de este tipo queda marcada como `hipotesis_no_verificada`.
+- **Talento vs esfuerzo:** es una **etiqueta descriptiva** de patrones de impacto/volumen, no una medición de talento. Los agregados no separan talento de esfuerzo ni prueban causalidad.
+- **Rango merecido:** la "estimación de rango" es una **cota orientativa** derivada de umbrales heurísticos, no un rango real.
+- **Validación pendiente:** el motor aún no se ha validado con telemetría real ni con una muestra de jugadores. Hasta entonces, ninguna salida debe presentarse como diagnóstico concluyente.
+- **Fugas de ELO (aprendizaje 360°):** son señales derivadas de micro-eventos de la partida analizada (fixture o datos que aportes), no una auditoría forense de la cuenta.
 
 ---
 

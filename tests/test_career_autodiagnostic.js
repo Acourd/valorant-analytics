@@ -114,7 +114,13 @@ assert.strictEqual(dragNormal.mmrDragDetected, false);
 // 7. Test evaluateTalentVsEffort
 const talentEval = evaluateTalentVsEffort(agg);
 assert.ok(talentEval.category.length > 0);
-assert.ok(talentEval.talentRatio.includes('Talento'));
+assert.ok(talentEval.talentRatio.includes('/'), 'la mezcla de indicadores debe ser legible');
+assert.ok(/heur[íi]stico/i.test(talentEval.talentRatio), 'la mezcla debe declararse heurística');
 assert.ok(talentEval.trueDeservedRank.includes('Platino') || talentEval.trueDeservedRank.includes('Diamante'));
+assert.ok(/NO verificada/i.test(talentEval.trueDeservedRank), 'la estimación de rango debe marcarse no verificada');
+assert.strictEqual(talentEval.claimStatus, 'hipotesis_no_verificada');
+assert.ok(typeof talentEval.disclaimer === 'string' && /talento real/i.test(talentEval.disclaimer));
+assert.strictEqual(dragHigh.claimStatus, 'hipotesis_no_verificada');
+assert.ok(/hip[óo]tesis/i.test(dragHigh.diagnosis), 'el anclaje debe formularse como hipótesis');
 
 console.log('✓ Todos los tests unitarios de carrera y autodiagnóstico pasaron con éxito.');

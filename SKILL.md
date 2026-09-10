@@ -1,11 +1,13 @@
 ---
 name: valorant-analytics
-description: Advanced Valorant competitive match telemetry, player performance profiling, MMR discrepancy detection, tactical duel analysis, round economy breakdown, adaptive 15-minute Kovaaks aim routine generation, 360° autodiagnostic radar, and duo synergy auditing via Tracker.gg and OP.GG APIs.
+description: Advanced Valorant competitive match telemetry, player performance profiling, heuristic MMR-signal analysis (unverified hypothesis, not internal MMR), tactical duel analysis, round economy breakdown, adaptive 15-minute Kovaaks aim routine generation, 360° autodiagnostic radar, and duo synergy auditing via Tracker.gg and OP.GG APIs.
 ---
 
 # Valorant Analytics Skill (v2.0)
 
-> Comprehensive competitive FPS telemetry extraction, match diagnosis, hidden MMR evaluation, round economy conversion, mechanical profiling, 360° autodiagnostic radar, duo compatibility audit, and adaptive video/aim-routine coaching for Valorant.
+> Comprehensive competitive FPS telemetry extraction, match diagnosis, heuristic MMR-signal analysis (unverified hypothesis, never internal MMR), round economy conversion, mechanical profiling, 360° autodiagnostic radar, duo compatibility audit, and adaptive video/aim-routine coaching for Valorant.
+
+> **Scope & limits:** outputs from the autodiagnostic engine are descriptive heuristics, not measurements of Riot's internal MMR, real talent or deserved rank. They are tagged `hipotesis_no_verificada` and are pending validation with real telemetry and a player sample.
 
 ---
 
@@ -17,7 +19,7 @@ Activate this skill whenever the user asks to:
 3. **Analyze a Valorant match URL or match ID** (e.g. `tracker.gg/valorant/match/...` or raw UUID).
 4. **Evaluate a player's profile or smurf status** (e.g. `tracker.gg/valorant/profile/riot/...` or `op.gg/valorant/profile/...`).
 5. **Compare duo/teammate performance, agent suitability, or role impact** (e.g. Iso vs. Clove vs. Reyna vs. Jett).
-6. **Diagnose hidden MMR, RR point gains/losses, or lobby matchmaking disparities** (Ascendant/Diamond smurfs in Gold/Plat lobbies).
+6. **Flag possible signs of internal MMR anchoring ("MMR Drag") from aggregate stats as an unverified heuristic** (never as a proven fact), alongside lobby matchmaking disparities.
 7. **Break down round economy performance** (Pistol, Eco, Semi-Buy, Full Buy conversion rates).
 8. **Generate adaptive 15-minute Kovaaks routines & provide visual YouTube/TikTok tutorials** tailored to the specific mechanical failures of the match.
 9. **Deep weapon telemetry & distance-band efficiency** (Close 0-15m, Mid 15-30m, Long 30-50m, Head/Body/Leg distribution, and Spray vs. Tap SE/TP ratio).
@@ -57,7 +59,7 @@ node cli.js harvest [player_handle]
 # 9. Auditoría de Carrera y Horas Exactas en Partida:
 node cli.js career <profile.json|handle>
 
-# 10. Autodiagnóstico Integral de Rango Real y Talento vs Esfuerzo:
+# 10. Heuristic MMR Signal & Impact-vs-Volume Pattern (UNVERIFIED, not internal MMR):
 node cli.js diagnose <profile.json|handle>
 ```
 

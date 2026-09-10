@@ -1415,7 +1415,7 @@ check('MMR: apenas-sobre-umbral (KD 0.6001/ACS 200.01/DD -300) es evidencia lím
     // Contrario extremo: DD en el piso impide confianza alta en normalidad.
     const contra = evaluateMmrDrag({ competitive: { matches: 400, kd: '1.5', acs: '260', dd: '-280' }, currentRank: 'Diamond 1' });
     assert.notStrictEqual(contra.confidence, 'alta', 'evidencia contraria acota la confianza');
-    assert.ok(contra.diagnosis.includes('Indeterminada'), 'no se afirma normalidad contra evidencia contraria');
+    assert.ok(/SIN CONCLUSIÓN|extremo contrario/i.test(contra.diagnosis), 'no se afirma normalidad contra evidencia contraria');
   });
 
 check('identidad: equivalentes Unicode son la misma cuenta; formas no inflan muestra',
@@ -1802,6 +1802,90 @@ check('dsse: junction/reparse de directorio no se sigue (Windows junction / POSI
       assert.strictEqual(dsse.loadOrCreateKeystore(path.join(real, 'ks.json')).keys.length, 1, 'el directorio real es válido');
     } finally {
       fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+check('honestidad: el motor marca toda salida interpretativa como hipótesis no verificada',
+  () => {
+    const { evaluateMmrDrag, evaluateTalentVsEffort } = require(path.join(scriptsDir, 'autodiagnostic_engine.js'));
+    const mmrCases = [
+      evaluateMmrDrag({ competitive: { matches: 0 }, currentRank: 'Gold 2' }),
+      evaluateMmrDrag({ competitive: { matches: 400, kd: '0.4', acs: '120', dd: '-50' }, currentRank: 'Gold 2' }),
+      evaluateMmrDrag({ competitive: { matches: 400, kd: '1.5', acs: '260', dd: '30' }, currentRank: 'Gold 2' })
+    ];
+    for (const m of mmrCases) {
+      assert.strictEqual(m.claimStatus, 'hipotesis_no_verificada', 'MMR sin sello de hipótesis');
+      assert.ok(typeof m.disclaimer === 'string' && m.disclaimer.includes('NO mide el MMR interno'), 'MMR sin disclaimer explícito');
+      assert.ok(Array.isArray(m.limitations) && m.limitations.length >= 2, 'MMR sin limitaciones declaradas');
+    }
+    const detected = mmrCases[2];
+    assert.strictEqual(detected.mmrDragDetected, true, 'caso fuerte debe marcar señal');
+    assert.ok(/hipótesis/i.test(detected.diagnosis) && /NO demuestra/i.test(detected.diagnosis),
+      'el diagnóstico de anclaje debe formularse como hipótesis, no como hecho');
+    const talentCases = [
+      evaluateTalentVsEffort({ summary: { totalGeneral: { hours: 0 }, highestPeakRank: 'Unranked' }, accounts: [{ handle: 'A#1', isExcluded: false, competitive: { matches: 0 } }] }),
+      evaluateTalentVsEffort({ summary: { totalGeneral: { hours: 100 }, highestPeakRank: 'Gold 2' }, accounts: [{ handle: 'A#1', isExcluded: false, competitive: { matches: 5, kd: 0.3, acs: 100, dd: -300, hs: 0 }, peakRank: 'Gold 2' }] }),
+      evaluateTalentVsEffort({ summary: { totalGeneral: { hours: 100 }, highestPeakRank: 'Gold 2' }, accounts: [{ handle: 'A#1', isExcluded: false, competitive: { matches: 10, kd: 1.3, acs: 250, dd: 20, hs: 25 }, peakRank: 'Gold 2' }] })
+    ];
+    for (const t of talentCases) {
+      assert.strictEqual(t.claimStatus, 'hipotesis_no_verificada', 'talento sin sello de hipótesis');
+      assert.ok(typeof t.disclaimer === 'string' && t.disclaimer.includes('talento real'), 'talento sin disclaimer explícito');
+      assert.ok(Array.isArray(t.limitations) && t.limitations.length >= 2, 'talento sin limitaciones declaradas');
+    }
+    const favorable = talentCases[2];
+    assert.ok(/HIPÓTESIS/i.test(favorable.category), 'la categoría favorable debe declararse hipótesis');
+    assert.ok(/NO verificada/i.test(favorable.trueDeservedRank), 'la estimación de rango debe marcarse NO verificada');
+    assert.ok(!/demuestra/i.test(String(favorable.rationale)), 'la justificación no debe afirmar demostración');
+  });
+
+check('honestidad: docs y CLI no afirman MMR/talento/rango como hechos verificados',
+  () => {
+    const docs = ['README.md', 'README.es.md', 'README.en.md', 'standalone_prompt.md', 'SKILL.md'];
+    const banned = [/RANGO REAL MERECIDO/i, /Rango Merecido real/i, /True Deserved Rank/i, /Anclaje de Certeza Algorítmica Severo/i, /ha fijado el MMR interno/i];
+    const claimMarkers = [/hip[oó]tesis/i, /hypothesis/i, /no verificad/i, /unverified/i, /not validated/i];
+    for (const f of docs) {
+      const txt = fs.readFileSync(path.join(__dirname, f), 'utf8');
+      for (const b of banned) {
+        assert.ok(!b.test(txt), `${f} contiene una promesa sobreafirmada: ${b}`);
+      }
+      assert.ok(claimMarkers.some(r => r.test(txt)), `${f} debe declarar el carácter hipotético/no verificado`);
+    }
+    const mockFile = path.join(os.tmpdir(), `mock-claims-${process.pid}.json`);
+    fs.writeFileSync(mockFile, JSON.stringify({
+      platformInfo: { platformUserHandle: 'Claims#1' },
+      segments: [{
+        type: 'playlist',
+        attributes: { playlist: 'competitive' },
+        stats: {
+          timePlayed: { value: 72000 }, matchesPlayed: { value: 35 },
+          kDRatio: { displayValue: '1.25' }, headshotsPercentage: { displayValue: '22.0%' },
+          scorePerRound: { displayValue: '240.0' }, damageDeltaPerRound: { displayValue: '28' },
+          rank: { metadata: { tierName: 'Gold 3' } }, peakRank: { displayValue: 'Platinum 1' }
+        }
+      }]
+    }), 'utf8');
+    try {
+      const diagOut = cliOk(['diagnose', mockFile, 'Claims#1']);
+      assert.ok(/NO VERIFICAD/i.test(diagOut), 'CLI diagnose debe mostrar el aviso de no verificado');
+      assert.ok(/ALCANCE/i.test(diagOut), 'CLI diagnose debe mostrar el alcance/límites');
+      assert.ok(!/RANGO REAL MERECIDO/i.test(diagOut), 'CLI no debe usar el rótulo RANGO REAL MERECIDO');
+      assert.ok(!/DETECTADO \(ANCLADO\)/i.test(diagOut), 'CLI no debe afirmar anclaje detectado');
+    } finally {
+      if (fs.existsSync(mockFile)) fs.unlinkSync(mockFile);
+    }
+  });
+
+check('honestidad: los hitos de carrera se declaran escenario ilustrativo (no predicción)',
+  () => {
+    const career = {
+      summary: { totalCompetitive: { hours: 300 }, totalGeneral: { hours: 400 }, highestPeakRank: 'Diamond 1' },
+      accounts: [{ peakRank: 'Diamond 1', competitive: { hours: 12.5 }, handle: 'X#1', isExcluded: false }]
+    };
+    const tl = generateMilestonesTimeline(career, { mainAgent: 'Jett', speedrunHours: 12.5 });
+    assert.ok(tl.length > 0);
+    for (const m of tl) {
+      assert.strictEqual(m.tipo, 'ilustrativo', 'cada hito debe declararse ilustrativo');
+      assert.ok(/no predicci/i.test(m.contexto), 'cada hito debe declarar que no es predicción');
     }
   });
 

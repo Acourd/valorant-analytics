@@ -2,14 +2,21 @@
 'use strict';
 
 /**
- * autodiagnostic_engine.js - Motor de Autodiagnóstico de Rango Real y Aprendizaje
+ * autodiagnostic_engine.js - Señales heurísticas de rendimiento y patrón de MMR
  *
- * Diagnostica con precisión matemática:
- * 1. Brecha entre Rango Visual y Nivel Real de Habilidad (True Rank).
- * 2. Detección del fenómeno de "MMR Drag" (Anclaje de Certeza en cuentas antiguas).
- * 3. Clasificación objetiva: "Talento Táctico Adaptativo" vs "Grind de Esfuerzo" vs "Aim Demon".
- * 4. Modelado de Curva de Aprendizaje desde Cero FPS (Zero-Background Absorption).
- * 5. Cero dependencias externas (Node.js core).
+ * IMPORTANTE (HONESTIDAD DE DATOS):
+ * Este motor NO mide el MMR interno de Riot, ni el talento real, ni el rango
+ * merecido. Trabaja únicamente sobre agregados que el usuario aporta (partidas,
+ * KD, ACS, DDΔ, HS y horas). Por tanto sus salidas son HIPÓTESIS HEURÍSTICAS
+ * NO VERIFICADAS, marcadas como tales (`claimStatus`), y jamás deben
+ * presentarse como veredictos. Confirmar cualquier hipótesis de anclaje o de
+ * rango exigiría datos de RR por partida y validación empírica con telemetría
+ * real (pendiente).
+ *
+ * 1. Patrón compatible con brecha entre rango visual y rendimiento observado.
+ * 2. Señal compatible con posible "MMR Drag" (anclaje de certeza), no probada.
+ * 3. Descripción (no veredicto) de patrones de impacto vs volumen de juego.
+ * 4. Cero dependencias externas (Node.js core).
  */
 
 function toFiniteNumber(v) {
@@ -61,6 +68,16 @@ function stableEncode(value) {
   return `{${keys.map(k => `${JSON.stringify(k)}:${stableEncode(value[k])}`).join(',')}}`;
 }
 
+// Sello de honestidad presente en TODA salida con carga interpretativa. La
+// ausencia de estos campos en una respuesta debe considerarse un defecto.
+const CLAIM_STATUS = 'hipotesis_no_verificada';
+const EVIDENCE_DISCLAIMER = 'Hipótesis heurística basada en agregados (partidas, KD, ACS, DDΔ, HS y horas). NO mide el MMR interno de Riot, ni el talento real, ni el rango merecido; no está validada con telemetría real ni con datos de RR por partida.';
+const LIMITATIONS = [
+  'Sin datos de RR por partida ni evidencia del emparejamiento interno.',
+  'Sin validación empírica con telemetría real ni con una muestra de jugadores.',
+  'Los agregados pueden cambiar y no prueban causalidad.'
+];
+
 function evaluateMmrDrag(accountTelemetry) {
   if (!accountTelemetry || typeof accountTelemetry !== 'object') {
     throw new Error('evaluateMmrDrag requiere telemetría de cuenta (objeto con competitive/currentRank). Entrada recibida: ' + String(accountTelemetry));
@@ -81,8 +98,11 @@ function evaluateMmrDrag(accountTelemetry) {
       matchesEvaluated: matches,
       sampleSize: matches,
       confidence: 'nula',
+      claimStatus: CLAIM_STATUS,
+      disclaimer: EVIDENCE_DISCLAIMER,
+      limitations: LIMITATIONS,
       formula: 'MMR-drag requiere matches entero≥0, KD[0,10], ACS[0,1000], DD[-300,300] observados, rango canónico y ≥2 señales significativas (KD>0.3, ACS>100, DD>-300); detección con matches>=300 e impacto (KD≥1.15 o ACS≥230 o DD≥20) y rango contenido (Gold/Silver)',
-      diagnosis: 'DATOS INSUFICIENTES: sin muestra válida (partidas, métricas de impacto y rango con dominio verificado) no se puede evaluar anclaje de MMR ni emitir severidad.'
+      diagnosis: 'DATOS INSUFICIENTES: sin muestra válida (partidas, métricas de impacto y rango con dominio verificado) no se puede emitir ni siquiera una hipótesis de anclaje de MMR.'
     };
   }
 
@@ -106,23 +126,32 @@ function evaluateMmrDrag(accountTelemetry) {
       matchesEvaluated: matches,
       sampleSize: matches,
       confidence: 'baja',
+      claimStatus: CLAIM_STATUS,
+      disclaimer: EVIDENCE_DISCLAIMER,
+      limitations: LIMITATIONS,
       formula: 'MMR-drag exige ≥2 señales decisivas CON MARGEN (KD>0.75, ACS>250, DDΔ>15); en frontera exacta, igual o apenas-sobre-umbral solo se describe lo observado',
-      diagnosis: 'EVIDENCIA LÍMITE: métricas presentes pero sin fuerza decisiva; no se afirma ni descarta anclaje de MMR.'
+      diagnosis: 'EVIDENCIA LÍMITE: métricas presentes pero sin fuerza decisiva; no se afirma ni descarta ninguna hipótesis de anclaje.'
     };
   }
 
+  const mmrSignal = mmrDragDetected;
+  const diagnosis = mmrDragDetected
+    ? 'SEÑAL COMPATIBLE CON POSIBLE ANCLAJE DE MMR (hipótesis NO verificada): los indicadores individuales son fuertes para el rango observado. Esto NO demuestra que Riot aplique un anclaje; confirmarlo exigiría RR por partida y validación empírica.'
+    : (hasContraryExtreme
+      ? 'SIN CONCLUSIÓN (hipótesis NO verificada): las señales decisivas conviven con una métrica en el extremo contrario; no se afirma ni normalidad ni anclaje.'
+      : 'SIN SEÑAL DE ANCLAJE (no concluyente): no se observa la combinación asociada al patrón, pero la ausencia de señal NO confirma que el sistema de emparejamiento funcione con normalidad.');
+
   return {
-    mmrDragDetected,
+    mmrDragDetected: mmrSignal,
     severityScore,
     matchesEvaluated: matches,
     sampleSize: matches,
     confidence: calibratedConfidence,
-    formula: 'MMR-drag requiere matches>=300 con impacto (KD≥1.15 o ACS≥230 o DDΔ≥20) y rango contenido (Gold/Silver)',
-    diagnosis: mmrDragDetected
-      ? 'Anclaje de Certeza Algorítmica Severo: El sistema de Riot posee baja varianza para esta cuenta y frena las ganancias de RR a pesar de que los indicadores individuales (ACS/DDΔ/KD) corresponden a un elo superior.'
-      : (hasContraryExtreme
-        ? 'Varianza Indeterminada: las señales decisivas conviven con una métrica en el extremo contrario de su dominio (DDΔ muy negativo); la confianza queda acotada y no se afirma normalidad de varianza.'
-        : 'Varianza Normal: La cuenta responde adecuadamente a las fluctuaciones de rendimiento sin penalización excesiva por volumen histórico.')
+    claimStatus: CLAIM_STATUS,
+    disclaimer: EVIDENCE_DISCLAIMER,
+    limitations: LIMITATIONS,
+    formula: 'MMR-drag requiere matches>=300 con impacto (KD≥1.15 o ACS≥230 o DDΔ≥20) y rango contenido (Gold/Silver); salida heurística no verificada',
+    diagnosis
   };
 }
 
@@ -223,6 +252,9 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
       trueDeservedRank: 'Indeterminado (sin muestra)',
       sampleSize: 0,
       confidence: 'nula',
+      claimStatus: CLAIM_STATUS,
+      disclaimer: EVIDENCE_DISCLAIMER,
+      limitations: LIMITATIONS,
       formula: 'Clasificación por ACS/KD/DDΔ ponderados por partidas y horas totales; requiere ≥1 partida registrada',
       duplicatesSkipped,
       identityUncertain,
@@ -249,6 +281,9 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
       trueDeservedRank: 'Indeterminado (métricas ausentes)',
       sampleSize: totalCompMatches,
       confidence: 'nula',
+      claimStatus: CLAIM_STATUS,
+      disclaimer: EVIDENCE_DISCLAIMER,
+      limitations: LIMITATIONS,
       formula: 'Clasificación requiere kd[0,10], acs[0,1000], dd[-300,300] y hs[0,100] observados con parseo estricto; faltan: ' + missingMetrics.join(', '),
       metricsPresent,
       duplicatesSkipped,
@@ -283,6 +318,9 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
       trueDeservedRank: 'Indeterminado (evidencia límite)',
       sampleSize: jointMatches,
       confidence: 'baja',
+      claimStatus: CLAIM_STATUS,
+      disclaimer: EVIDENCE_DISCLAIMER,
+      limitations: LIMITATIONS,
       formula: 'Clasificación favorable exige evidencia CONCLUYENTE (≥2 de KD>0.9, ACS>225, HS>15) sobre ≥5 partidas CONJUNTAS; en pisos de validez (KD>0.3, ACS>100, DD>-300) o apenas-sobre-umbral solo se describe lo observado',
       metricsPresent,
       jointMatches,
@@ -303,33 +341,33 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
     };
   }
 
-  // Check fresh account spike (WubbaLubbaDub effect)
+  // Patrón de breakout (heurístico): cuenta joven con pico alto.
   const freshAccount = personal.find(a => (a.competitive?.matches || 0) > 0 && (a.competitive?.matches || 0) <= 30 && rankTier(a.peakRank) === 'diamond');
   const hasSmurfBreakout = Boolean(freshAccount);
 
-  let category = 'Talento Táctico Adaptativo (High Learning Velocity)';
+  let category = 'HIPÓTESIS DE TALENTO FORJADO CON ESFUERZO (no verificada)';
   let talentPct = 70;
   let effortPct = 30;
   let rationale = '';
 
   if (hasSmurfBreakout || (avgDd >= 25 && avgKd >= 1.20)) {
-    category = 'TALENTO TÁCTICO INDIVIDUAL (High-Impact Duelist)';
+    category = 'HIPÓTESIS DE TALENTO TÁCTICO INDIVIDUAL (no verificada)';
     talentPct = 75;
     effortPct = 25;
-    rationale = `Alcanzar Diamante 1 en tan solo ${freshAccount?.competitive?.hours ?? 10} horas en cuenta limpia con KD ${freshAccount?.competitive?.kd ?? '1.5+'} y DDΔ +${freshAccount?.competitive?.dd ?? '50+'} demuestra impacto individual nato y lectura de ángulos. No es volumen ciego.`;
+    rationale = `Los indicadores observados son compatibles con un pico temprano (pico ${peakRank} con ${freshAccount?.competitive?.matches ?? '≤30'} partidas), pero esto es una hipótesis descriptiva: no demuestra talento nato ni descarta volumen de juego.`;
   } else if (totalGenHours > 1200 && avgKd <= 1.05) {
-    category = 'Esfuerzo Puro (The Hard-Grinder)';
+    category = 'HIPÓTESIS DE VOLUMEN DE JUEGO (no verificada)';
     talentPct = 25;
     effortPct = 75;
-    rationale = 'Progresión construida principalmente a través de volumen masivo de horas por inercia estadística.';
+    rationale = 'El patrón es compatible con progresión sostenida por volumen de horas; no permite atribuir causalidad ni descartar aprendizaje acelerado.';
   } else {
-    category = 'Talento Forjado con Esfuerzo Enfocado';
+    category = 'HIPÓTESIS DE TALENTO FORJADO CON ESFUERZO (no verificada)';
     talentPct = 60;
     effortPct = 40;
-    rationale = 'Curva de absorción cognitiva acelerada: cada bloque de 50 horas equivale al aprendizaje de 150 horas de la media.';
+    rationale = 'Los agregados no separan talento de esfuerzo; esta mezcla es una etiqueta descriptiva, no un veredicto.';
   }
 
-  // Determine true deserved rank
+  // Estimación heurística de rango (NO verificada): cota orientativa, no real.
   let trueRank = 'Platino 2';
   if (rankTier(peakRank) === 'diamond' || (hasSmurfBreakout && avgDd >= 20)) {
     trueRank = 'Platino 3 – Diamante 1';
@@ -338,15 +376,19 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
   } else {
     trueRank = 'Oro 3 – Platino 1';
   }
+  const rankEstimate = `${trueRank} (estimación heurística, NO verificada)`;
 
   return {
     category,
-    talentRatio: `${talentPct}% Talento / ${effortPct}% Esfuerzo`,
+    talentRatio: `${talentPct}% indicadores de impacto / ${effortPct}% indicadores de volumen (heurístico, no verificado)`,
     zeroFpsBackground,
-    trueDeservedRank: trueRank,
+    trueDeservedRank: rankEstimate,
     sampleSize: jointMatches,
     confidence: identityUncertain ? (jointMatches >= 20 ? 'media' : 'baja') : (jointMatches >= 100 ? 'alta' : (jointMatches >= 20 ? 'media' : 'baja')),
-    formula: 'ACS/KD/DDΔ ponderados por partidas; talento si breakout en ≤30 partidas a Diamante o DDΔ≥25 con KD≥1.20; confianza por cobertura conjunta',
+    claimStatus: CLAIM_STATUS,
+    disclaimer: EVIDENCE_DISCLAIMER,
+    limitations: LIMITATIONS,
+    formula: 'ACS/KD/DDΔ ponderados por partidas; patrón de breakout en ≤30 partidas a Diamante o DDΔ≥25 con KD≥1.20; confianza por cobertura conjunta. Salida heurística no verificada',
     metricsPresent,
     jointMatches,
     duplicatesSkipped,
@@ -366,7 +408,7 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
       metric: 'Headshot Ratio (HS%)',
       currentValue: `${avgHs}%`,
       targetValue: '25% – 28%',
-      tacticalAdvice: 'Tu talento táctico con Iso te permite ganar duelos por ventaja de ángulo, timing y escudo. Para consolidar Diamante alto y subir a Ascendente, eleva la altura de mira (crosshair placement) para que el primer impacto castigue a la cabeza en vez de depender de 3 tiros al pecho.'
+      tacticalAdvice: 'Trabaja la altura de mira (crosshair placement) para que el primer impacto castigue a la cabeza en vez de depender de 3 tiros al pecho. Es una sugerencia biomecánica genérica, no una prescripción derivada de una medición causal.'
     }
   };
 }

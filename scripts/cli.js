@@ -779,15 +779,16 @@ try {
     const talentDiag = evaluateTalentVsEffort(agg);
 
     printBanner();
-    console.log(`🧠 AUTODIAGNÓSTICO INTEGRAL DE RANGO Y TALENTO: ${tel.handle}`);
+    console.log(`🧠 AUTODIAGNÓSTICO INTEGRAL (HEURÍSTICO, NO VERIFICADO): ${tel.handle}`);
     console.log(`------------------------------------------------------------------------`);
-    console.log(`🏷️ CATEGORIZACIÓN: ${talentDiag.category}`);
-    console.log(`⚖️ RATIO OBJETIVO:  ${talentDiag.talentRatio}`);
-    console.log(`🎯 RANGO REAL MERECIDO: ${talentDiag.trueDeservedRank} (Rango Visual Actual: ${tel.currentRank})`);
-    console.log(`\n🛡️ DIAGNÓSTICO DE MMR DRAG (CERTEZA ALGORÍTMICA):`);
-    console.log(`  • Estado:  ${mmrDiag.mmrDragDetected ? 'DETECTADO (ANCLADO)' : 'NORMAL'}`);
+    console.log(`🏷️ CATEGORÍA (hipótesis descriptiva): ${talentDiag.category}`);
+    console.log(`⚖️ MEZCLA DE INDICADORES: ${talentDiag.talentRatio}`);
+    console.log(`🎯 ESTIMACIÓN HEURÍSTICA DE RANGO (no verificada): ${talentDiag.trueDeservedRank} (Rango visual: ${tel.currentRank})`);
+    console.log(`\n🛡️ SEÑAL DE POSIBLE ANCLAJE DE MMR (hipótesis):`);
+    console.log(`  • Señal compatible: ${mmrDiag.mmrDragDetected ? 'SÍ (heurística)' : 'no concluyente'}`);
     console.log(`  • Detalle: ${mmrDiag.diagnosis}`);
-    console.log(`\n💡 CUELLO DE BOTELLA Y OPTIMIZACIÓN:`);
+    console.log(`\n⚠️  ALCANCE: ${talentDiag.disclaimer}`);
+    console.log(`\n💡 CUELLO DE BOTELLA Y OPTIMIZACIÓN (sugerencia genérica):`);
     console.log(`  • Factor: ${talentDiag.bottleneckOptimization.metric} (Actual: ${talentDiag.bottleneckOptimization.currentValue} ➔ Objetivo: ${talentDiag.bottleneckOptimization.targetValue})`);
     console.log(`  • Consejo: ${talentDiag.bottleneckOptimization.tacticalAdvice}`);
     console.log(`========================================================================\n`);
