@@ -1762,6 +1762,47 @@ check('dsse: sustitución entre inspección y apertura no redirige la lectura (a
     }
   });
 
+check('dsse: junction/reparse de directorio no se sigue (Windows junction / POSIX symlink dir)',
+  () => {
+    const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-junc-'));
+    try {
+      const real = path.join(base, 'real');
+      fs.mkdirSync(real, { mode: 0o700 });
+      const link = path.join(base, 'link');
+      let linkOk = true;
+      try {
+        // En Windows los junctions NO requieren privilegios; en POSIX un
+        // symlink de directorio (reparse equivalente).
+        fs.symlinkSync(real, link, process.platform === 'win32' ? 'junction' : 'dir');
+      } catch (e) {
+        linkOk = false;
+      }
+      if (!linkOk) {
+        assert.ok(true, 'entorno sin junctions/symlink de directorio: caso no aplicable');
+        return;
+      }
+      const kp = crypto.generateKeyPairSync('ed25519');
+      assert.throws(
+        () => dsse.registerTrustedKey(path.join(link, 'ks.json'), kp.publicKey.export({ type: 'spki', format: 'pem' }), 'junc'),
+        /enlace simbólico/,
+        'un directorio junction/reparse jamás se sigue para publicar'
+      );
+      assert.strictEqual(fs.readdirSync(real).length, 0, 'no se publicó nada a través del junction');
+      assert.throws(
+        () => dsse.loadOrCreateKeystore(path.join(link, 'ks.json')),
+        /enlace simbólico/,
+        'la lectura a través del junction falla cerrada'
+      );
+      // El directorio real (no reparse) sigue siendo usable directamente.
+      const kp2 = crypto.generateKeyPairSync('ed25519');
+      dsse.registerTrustedKey(path.join(real, 'ks.json'), kp2.publicKey.export({ type: 'spki', format: 'pem' }), 'directo');
+      assert.strictEqual(dsse.loadOrCreateKeystore(path.join(real, 'ks.json')).keys.length, 1, 'el directorio real es válido');
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben
 // reflejar EXACTAMENTE el número de casos registrados y ejecutados. Un
 // manifiesto desincronizado hace fallar la suite (imposible sobre-declarar
