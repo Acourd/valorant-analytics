@@ -198,8 +198,9 @@ check('cli.js duels: matriz 1v1 renderizada (regresión P0: contrato parseDuels)
 check('cli.js match: diagnóstico 360° completo con radar y fugas',
   () => {
     const out = cliOk(['match', sampleFile, 'TenZ#0001']);
-    assert.ok(out.includes('DIAGNÓSTICO 360°') && out.includes('RADAR DE DOMINIO'));
-    assert.ok(out.includes('FUGAS DE ELO'));
+    assert.ok(out.includes('RADAR DE DOMINIO'));
+    assert.ok(out.includes('OBSERVACIONES POR RONDA'), 'muestra ronda describe, no acusa causas');
+    assert.ok(!out.includes('FUGAS ATRIBUIBLES'), 'sin regla verificable no se acusan fugas');
   });
 
 check('cli.js duo: auditoría con carryAnalysis en consola',
@@ -1902,15 +1903,16 @@ check('honestidad: la política de evidencia no fuerza coaching ni diagnósticos
     assert.ok(!partial.allowedSections.includes('duel_matrix'), 'sin duelos no hay matriz');
     assert.ok(!partial.allowedSections.includes('weapon_telemetry'), 'sin zonas no hay telemetría de arma');
     assert.ok(partial.allowedSections.includes('aim_routine'), 'con HS%+ACS sí hay evidencia mecánica para la rutina');
-    const complete = classifyEvidence(fixture('telemetry_complete.json'));
-    assert.strictEqual(complete.level, 'complete');
-    for (const s of ['round_leaks', 'duel_matrix', 'weapon_telemetry', 'aim_routine']) {
-      assert.ok(complete.allowedSections.includes(s), `completo debe permitir ${s}`);
-    }
-    assert.strictEqual(complete.maxLeaks, 3);
-    assert.strictEqual(complete.observedRoundCount, 3, 'solo los eventos observados cuentan');
-    assert.strictEqual(complete.declaredObservations, 1, 'user_claim se conserva como observación declarada');
-    assert.ok(complete.dimensions.precision.available, 'con HS% la precisión es evaluable');
+    // Fichero aportado por el usuario: sus rondas son DECLARACIONES, no telemetría verificada.
+    const userProvided = classifyEvidence(fixture('telemetry_complete.json'));
+    assert.strictEqual(userProvided.level, 'aggregate', 'datos de fichero no son observados por adaptador');
+    assert.ok(!userProvided.allowedSections.includes('round_leaks'), 'declaraciones no acusan fugas');
+    assert.ok(!userProvided.allowedSections.includes('round_observations'), 'declaraciones no son eventos observados');
+    assert.ok(!userProvided.allowedSections.includes('duel_matrix'), 'duelos de fichero no están verificados');
+    assert.strictEqual(userProvided.declaredObservations, 3, 'user_claim/inference se cuentan como declaraciones');
+    assert.strictEqual(userProvided.observedRoundCount, 0, 'un JSON no puede portar procedencia observada');
+    assert.ok(userProvided.dimensions.precision.available, 'con HS% la precisión es evaluable');
+    assert.ok(userProvided.allowedSections.includes('weapon_telemetry'), 'con zonas válidas sí hay telemetría de arma');
     const none = classifyEvidence({ observed: {} });
     assert.strictEqual(none.level, 'insufficient');
     assert.ok(!none.allowedSections.includes('aggregate_radar'), 'sin métricas no hay radar');
@@ -1954,12 +1956,30 @@ check('honestidad: la política exige evidencia válida (rondas/duelos/zonas/por
     assert.strictEqual(fake.level, 'insufficient', 'rounds [{}] + weaponZones {} NO es complete');
     assert.ok(!fake.allowedSections.includes('round_leaks'), 'no debe habilitar fugas');
     assert.ok(!fake.allowedSections.includes('aim_routine'), 'no debe habilitar rutina');
-    // Rondas válidas sin telemetría mecánica: fugas sí, rutina/zonas no.
-    const roundsOnly = ep.classifyEvidence({ rounds: [{ n: 3, source: 'observed_event', event: 'plant' }], weaponZones: {} });
-    assert.strictEqual(roundsOnly.level, 'complete');
-    assert.ok(roundsOnly.allowedSections.includes('round_leaks'));
-    assert.ok(!roundsOnly.allowedSections.includes('aim_routine'));
-    assert.ok(!roundsOnly.allowedSections.includes('weapon_telemetry'));
+    // Procedencia VERIFICADA: un objeto con source:'observed_event' NO basta.
+    const plainObserved = ep.classifyEvidence({ rounds: [{ n: 3, source: 'observed_event', event: 'plant' }], weaponZones: {} });
+    assert.strictEqual(plainObserved.level, 'insufficient', 'source observado sin mint NO es evidencia');
+    assert.ok(!plainObserved.allowedSections.includes('round_observations'));
+    const minted = ep.classifyEvidence({
+      rounds: [ep.mintObservedEvent({ sourceRef: 'test-match', roundRef: 3, event: 'plant', detail: 'plant 5v4', context: { attackers: 5 } })],
+      weaponZones: {}
+    });
+    assert.strictEqual(minted.level, 'complete');
+    assert.ok(minted.allowedSections.includes('round_observations'), 'un evento observado describe la ronda');
+    assert.ok(!minted.allowedSections.includes('round_leaks'), 'describir no es acusar: sin regla no hay fuga');
+    assert.ok(!minted.allowedSections.includes('aim_routine'), 'sin evidencia mecánica no hay rutina');
+    // Fuga atribuible: exige regla pertinente + resultado + contexto.
+    const leak = ep.classifyEvidence({
+      rounds: [ep.mintObservedEvent({
+        sourceRef: 'test-match', roundRef: 9, event: 'position', detail: '5v3 post-plant',
+        leakRule: 'throw_numeric_advantage', outcome: 'lost', context: { advantage: 2, plant: true }
+      })],
+      weaponZones: {}
+    });
+    assert.ok(leak.allowedSections.includes('round_leaks'), 'regla+resultado+contexto sí habilita fuga');
+    assert.strictEqual(leak.maxLeaks, 1);
+    assert.throws(() => ep.mintObservedEvent({ sourceRef: 'test-match', roundRef: 2, event: 'damage', leakRule: 'throw_numeric_advantage', outcome: 'lost', context: { a: 1 } }), /pertinente/, 'el evento debe ser pertinente a la regla');
+    assert.throws(() => ep.mintObservedEvent({ sourceRef: '', roundRef: 2, event: 'damage' }), /sourceRef/, 'sin referencia de origen no se acuña');
     // Porcentaje inválido no cuenta como agregado.
     const badPct = ep.classifyEvidence({ observed: { hs: 150 } });
     assert.strictEqual(badPct.level, 'insufficient', 'HS 150 no es un porcentaje válido');
@@ -1986,7 +2006,7 @@ check('honestidad: rutas CLI con evidencia mínima/parcial omiten secciones no p
       fs.writeFileSync(partialFile, JSON.stringify(partial), 'utf8');
       const matchOut = cliOk(['match', partialFile, 'TenZ#0001']);
       assert.ok(/Nivel de evidencia: aggregate/i.test(matchOut), 'match parcial debe declarar nivel aggregate');
-      assert.ok(/FUGAS DE ELO: omitidas/i.test(matchOut), 'sin rondas no debe emitir fugas');
+      assert.ok(/Observaciones\/fugas omitidas/i.test(matchOut), 'sin eventos observados no se describe ni acusa');
       // Sin HS → sin evidencia mecánica → sin rutina.
       const noHs = JSON.parse(JSON.stringify(partial));
       noHs.data.segments.forEach(s => { if (s.stats) delete s.stats.hsAccuracy; });
@@ -2031,9 +2051,10 @@ check('honestidad: la política distingue procedencia y expone dimensiones evalu
     assert.strictEqual(inferred.level, 'aggregate', 'una inferencia NO habilita fugas');
     const unknownEvent = ep.classifyEvidence({ ...base, rounds: [{ n: 4, source: 'observed_event', event: 'texto_libre' }] });
     assert.ok(!unknownEvent.allowedSections.includes('round_leaks'), 'evento fuera de taxonomía no habilita fugas');
-    const observedRound = ep.classifyEvidence({ ...base, rounds: [{ n: 4, source: 'observed_event', event: 'kill', detail: '1K' }] });
-    assert.strictEqual(observedRound.level, 'complete', 'solo observed_event habilita complete');
-    assert.ok(observedRound.allowedSections.includes('round_leaks'));
+    const observedRound = ep.classifyEvidence({ ...base, rounds: [ep.mintObservedEvent({ sourceRef: 'm', roundRef: 4, event: 'kill', detail: '1K', context: { kills: 1 } })] });
+    assert.strictEqual(observedRound.level, 'complete', 'solo observed_event acuñado habilita complete');
+    assert.ok(observedRound.allowedSections.includes('round_observations'));
+    assert.ok(!observedRound.allowedSections.includes('round_leaks'), 'observar un evento no es acusar una fuga');
     // Dimensiones: disponibles solo con métrica+benchmark.
     const dims = ep.classifyEvidence({ observed: { hs: '25%' } }).dimensions;
     assert.ok(dims.precision.available);

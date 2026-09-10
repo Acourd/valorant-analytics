@@ -1,6 +1,6 @@
 {
   "source": "match_full",
-  "description": "Nivel completo: evidencia por ronda, duelos y zonas de daño (habilita fugas, matriz 1v1 y rutina).",
+  "description": "Nivel completo de reporte aportado por el usuario (declaraciones, NO telemetría verificada por adaptador): rondas, duelos y zonas.",
   "map": "Ascent",
   "mode": "competitive",
   "agent": "Iso",
@@ -13,10 +13,9 @@
     "fd": 1
   },
   "rounds": [
-    { "n": 7, "source": "observed_event", "event": "position", "detail": "Post-plant 5v3: sobre-asomo con ventaja numÃ©rica (telemetrÃa de posiciÃ³n)." },
-    { "n": 11, "source": "observed_event", "event": "damage", "detail": "RÃ¡faga larga a >30m contra Vandal (damage event)." },
-    { "n": 14, "source": "observed_event", "event": "position", "detail": "RepeticiÃ³n del patrÃ³n de la ronda 7." },
-    { "n": 15, "source": "user_claim", "event": "note", "detail": "El jugador afirma que se distrajo (declaraciÃ³n, no verificable)." }
+    { "n": 7, "source": "user_claim", "event": "position", "detail": "Post-plant 5v3: sobre-asomo con ventaja numÃ©rica (declarado)." },
+    { "n": 11, "source": "user_claim", "event": "damage", "detail": "RÃ¡faga larga a >30m contra Vandal (declarado)." },
+    { "n": 14, "source": "inference", "event": "position", "detail": "Inferencia de repeticiÃ³n del patrÃ³n de la ronda 7." }
   ],
   "duels": [
     { "opponent": "rival_1#LATAM", "agent": "Jett", "kills": 3, "deaths": 1 },

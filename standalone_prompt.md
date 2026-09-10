@@ -114,7 +114,9 @@ Ejemplo con ACS únicamente: Precisión Mecánica, KAST, Aperturas, Economía y 
 - Agentes rivales que castigaron sistemáticamente al usuario, solo si consta en los datos.
 
 #### 🚨 3. FUGAS / OBSERVACIONES (0 a 3; SOLO si hay evidencia por ronda)
-- Solo eventos OBSERVADOS en la telemetría habilitan fugas atribuidas. Las afirmaciones del usuario (`user_claim`) o las inferencias (`inference`) se listan como OBSERVACIONES DECLARADAS, nunca como evidencia táctica verificable.
+- Solo eventos OBSERVADOS en la telemetría de la partida describen rondas. Las afirmaciones del usuario (`user_claim`) o las inferencias (`inference`) son OBSERVACIONES DECLARADAS: nunca evidencia táctica verificable.
+- Una FUGA ("causa de derrota") SOLO se declara si concurren: (a) evento pertinente, (b) resultado de la ronda (ganada/perdida) y (c) contexto mínimo verificable, aplicando una regla específica. Si falta cualquiera, describe OBSERVACIONES por ronda y NO acuses causas.
+- Con un único evento aislado (un daño o una compra) se describe el evento, pero NO se habilita ninguna fuga.
 - Máximo 3 y MÍNIMO 0: si la evidencia no sostiene ninguna fuga, escribe "Sin fugas atribuibles con la evidencia disponible".
 - Cada fuga DEBE citar la evidencia concreta (número de ronda y/o evento). Sin cita de evidencia, NO se declara fuga.
 - La "Causa Raíz" solo se enuncia si la evidencia la sostiene; si es inferida, etiquétala como HIPÓTESIS e indica qué dato la confirmaría. Nunca fabriques causas.
