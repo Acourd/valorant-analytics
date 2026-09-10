@@ -107,9 +107,21 @@ function loadAttestIdentity() {
     created: new Date().toISOString()
   };
   fs.mkdirSync(path.dirname(idPath), { recursive: true });
-  const { writeKeystoreAtomic } = require('./dsse_attestation');
-  writeKeystoreAtomic(idPath, persisted);
-  return kp;
+  const { writeKeystoreAtomic, withFileLock } = require('./dsse_attestation');
+  const idLock = `${idPath}.lock`;
+  return withFileLock(idLock, (lockOwner) => {
+    try {
+      const existing = JSON.parse(fs.readFileSync(idPath, 'utf8'));
+      if (existing && existing.privateKey && existing.publicKey) {
+        return {
+          privateKey: crypto.createPrivateKey(existing.privateKey),
+          publicKey: crypto.createPublicKey(existing.publicKey)
+        };
+      }
+    } catch (e) { /* crear: ausente o corrupto */ }
+    writeKeystoreAtomic(idPath, persisted, { lockPath: idLock, owner: lockOwner });
+    return kp;
+  });
 }
 
 function printProvenance(source, matchData) {

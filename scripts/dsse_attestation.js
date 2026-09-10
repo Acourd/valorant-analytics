@@ -170,11 +170,11 @@ function loadOrCreateKeystore(keystorePath) {
   return { keys: [] };
 }
 
-function writeKeystoreAtomic(keystorePath, keystore) {
+function writeKeystoreAtomic(keystorePath, keystore, fence) {
   try {
     const lst = fs.lstatSync(keystorePath);
     if (lst.isSymbolicLink()) {
-      throw new Error(`El keystore es un enlace simbólico (${keystorePath}): elimínalo manualmente. Nunca se instala sobre un symlink.`);
+      throw new Error(`El keystore es un enlace simbólico. Nunca se instala sobre un symlink.`);
     }
   } catch (e) {
     if (e.code !== 'ENOENT') throw e;
@@ -189,6 +189,14 @@ function writeKeystoreAtomic(keystorePath, keystore) {
     fs.closeSync(fd);
     fd = null;
     try { fs.chmodSync(tmp, 0o600); } catch (e) { /* Windows: mejor esfuerzo */ }
+    if (fence && fence.lockPath && typeof fence.owner === 'string') {
+      let cur = null;
+      try { cur = fs.readFileSync(fence.lockPath, 'utf8'); } catch (_) {}
+      if (cur !== fence.owner) {
+        try { fs.unlinkSync(tmp); } catch (_) {}
+        throw new Error('Fencing: lock perdido antes del commit; se aborta la escritura sin tocar el destino.');
+      }
+    }
     fs.renameSync(tmp, keystorePath);
     try {
       const dirFd = fs.openSync(path.dirname(keystorePath), 'r');
@@ -204,15 +212,29 @@ function writeKeystoreAtomic(keystorePath, keystore) {
 function saveKeystore(keystorePath, keystore) {
   fs.mkdirSync(path.dirname(keystorePath), { recursive: true });
   const lockPath = `${keystorePath}.lock`;
-  return withFileLock(lockPath, () => writeKeystoreAtomic(keystorePath, keystore));
+  return withFileLock(lockPath, (owner) => writeKeystoreAtomic(keystorePath, keystore, { lockPath, owner }));
 }
+
+function currentThreadId() {
+  try {
+    const wt = require('worker_threads');
+    if (wt && typeof wt.threadId === 'number') return String(wt.threadId);
+  } catch (e) { /* continuar */ }
+  return 'm';
+}
+
+// Reentrancia serial por hilo/isolate: si ESTE hilo ya posee el lock (marco
+// exterior), un marco interior lo adopta sin tocar el archivo. Serial = seguro.
+// Otros hilos tienen su propio mapa (isolates separados) y jamás adoptan.
+const activeLocks = new Map();
 
 function withFileLock(lockPath, fn, options = {}) {
   const retries = options.retries || 100;
   const waitMs = options.waitMs || 50;
   const staleMs = options.staleMs || 30000;
+  const abandonFloorMs = Math.max(staleMs, 60000);
   const transient = new Set(['EEXIST', 'EPERM', 'EACCES', 'EBUSY']);
-  const owner = `${process.pid}:${Date.now()}:${crypto.randomBytes(4).toString('hex')}`;
+  const owner = `${process.pid}:${currentThreadId()}:${Date.now()}:${crypto.randomBytes(4).toString('hex')}`;
   const inspectLock = () => {
     let st;
     try {
@@ -223,16 +245,18 @@ function withFileLock(lockPath, fn, options = {}) {
     if (st.isSymbolicLink()) return { state: 'suspicious', reason: 'symlink' };
     let raw = '';
     try { raw = fs.readFileSync(lockPath, 'utf8'); } catch (e) { return { state: 'unreadable' }; }
-    const m = raw.trim().match(/^(\d+):(\d+):([0-9a-f]+)$/);
+    const m = raw.trim().match(/^(\d+):([A-Za-z0-9_-]+):(\d+):([0-9a-f]+)$/);
     if (!m) return { state: 'malformed', mtimeMs: st.mtimeMs };
     const ownerPid = parseInt(m[1], 10);
-    const ownerStamp = parseInt(m[2], 10);
+    const ownerTid = m[2];
+    const ownerStamp = parseInt(m[3], 10);
     let alive = null;
     try { process.kill(ownerPid, 0); alive = true; }
     catch (e) { alive = e.code === 'ESRCH' ? false : null; }
-    return { state: 'held', pid: ownerPid, stamp: ownerStamp, alive, mtimeMs: st.mtimeMs };
+    return { state: 'held', pid: ownerPid, tid: ownerTid, stamp: ownerStamp, alive, mtimeMs: st.mtimeMs };
   };
   let acquired = false;
+  let adoptedOwner = null;
   for (let i = 0; i < retries; i++) {
     try {
       // Creación atómica CON contenido: jamás existe un lock vacío observable.
@@ -252,13 +276,22 @@ function withFileLock(lockPath, fn, options = {}) {
         let cur = null;
         try { cur = fs.readFileSync(lockPath, 'utf8'); } catch (_) {}
         if (cur === owner) { acquired = true; break; }
+        if (activeLocks.has(lockPath)) {
+          // Reentrancia del MISMO hilo: el marco exterior (serial, sin
+          // concurrencia real) conserva la propiedad. Se adopta su token
+          // para fencing; el marco exterior conserva la limpieza.
+          adoptedOwner = activeLocks.get(lockPath);
+          acquired = true;
+          break;
+        }
         if (info.pid === process.pid) {
-          // Mismo proceso (otro hilo/worker): la identidad es el TOKEN COMPLETO,
-          // jamás el PID solo. Solo se recupera un lock propio abandonado cuando
-          // su mtime supera staleMs (hilo muerto); en otro caso se espera.
+          // Mismo proceso, OTRO hilo/worker (o hilo muerto): la identidad es el
+          // TOKEN COMPLETO, jamás el PID solo. Un holder vivo jamás se desaloja
+          // por mtime. Solo se recupera un lock abandonado cuyo mtime supera el
+          // piso absoluto (ningún hold legítimo, de escala ms, lo alcanza).
           try {
             const st = fs.lstatSync(lockPath);
-            if ((Date.now() - st.mtimeMs) > staleMs) {
+            if ((Date.now() - st.mtimeMs) > Math.max(staleMs, 60000)) {
               try { fs.unlinkSync(lockPath); } catch (_) {}
               continue;
             }
@@ -291,21 +324,28 @@ function withFileLock(lockPath, fn, options = {}) {
   if (!acquired) {
     throw new Error(`No se pudo adquirir el lock ${lockPath} tras ${retries} intentos.`);
   }
+  const effectiveOwner = adoptedOwner || owner;
+  if (!adoptedOwner) activeLocks.set(lockPath, owner);
   // Verificación de propiedad antes de entrar a la sección crítica (fencing).
   try {
-    if (fs.readFileSync(lockPath, 'utf8') !== owner) {
+    if (fs.readFileSync(lockPath, 'utf8') !== effectiveOwner) {
+      if (!adoptedOwner) activeLocks.delete(lockPath);
       throw new Error(`Lock perdido antes de entrar a sección crítica (${lockPath}).`);
     }
   } catch (e) {
     if (/Lock perdido/.test(e.message)) throw e;
+    if (!adoptedOwner) activeLocks.delete(lockPath);
     throw new Error(`No se pudo verificar propiedad del lock ${lockPath}.`);
   }
   try {
-    return fn();
+    return fn(effectiveOwner);
   } finally {
-    try {
-      if (fs.readFileSync(lockPath, 'utf8') === owner) fs.unlinkSync(lockPath);
-    } catch (e) { /* otro dueño o ya liberado */ }
+    if (!adoptedOwner) {
+      activeLocks.delete(lockPath);
+      try {
+        if (fs.readFileSync(lockPath, 'utf8') === effectiveOwner) fs.unlinkSync(lockPath);
+      } catch (e) { /* otro dueño o ya liberado */ }
+    }
   }
 }
 
@@ -316,7 +356,7 @@ function execSleep(ms) {
 
 function registerTrustedKey(keystorePath, publicKeyPem, label) {
   const lockPath = `${keystorePath}.lock`;
-  return withFileLock(lockPath, () => {
+  return withFileLock(lockPath, (owner) => {
     try {
       const lst = fs.lstatSync(keystorePath);
       if (lst.isSymbolicLink()) {
@@ -329,7 +369,7 @@ function registerTrustedKey(keystorePath, publicKeyPem, label) {
     const keyid = crypto.createHash('sha256').update(publicKeyPem).digest('hex').slice(0, 16);
     if (!ks.keys.some(k => k.keyid === keyid)) {
       ks.keys.push({ keyid, publicKeyPem, label: label || 'sin etiqueta', created: new Date().toISOString() });
-      writeKeystoreAtomic(keystorePath, ks);
+      writeKeystoreAtomic(keystorePath, ks, { lockPath, owner });
     }
     return keyid;
   });
