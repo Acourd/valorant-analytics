@@ -2148,6 +2148,15 @@ check('fuente Riot: validaciones, credenciales y atestación firmada',
     assert.ok(!rs.verifyAttestation(att, { payload: { tampered: true }, trustedKeys: [pub] }).valid, 'payload alterado no verifica');
     assert.ok(!rs.verifyAttestation({ ...att, host: 'evil.example.com' }, { payload, trustedKeys: [pub] }).valid, 'host no permitido');
     assert.ok(!rs.verifyAttestation({ ...att, fetchedAt: new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString() }, { payload, trustedKeys: [pub], maxAgeMs: 24 * 3600 * 1000 }).valid, 'caducada no verifica');
+    // Credenciales: nunca se registran ni viajan por la línea de comandos.
+    const riotSrc = fs.readFileSync(path.join(scriptsDir, 'riot_source.js'), 'utf8');
+    const httpSrc = fs.readFileSync(path.join(scriptsDir, 'http_fetch.js'), 'utf8');
+    assert.ok(!/console\.(log|error)\s*\(/.test(riotSrc), 'la fuente Riot no debe registrar nada');
+    assert.ok(!/console\.log/.test(httpSrc), 'el fetch no debe escribir logs de datos');
+    assert.ok(!/console\.[a-z]+\([^\n)]*headers/i.test(httpSrc), 'las cabeceras nunca se imprimen');
+    assert.ok(!/argv\[4\]/.test(httpSrc), 'las cabeceras no deben viajar por argv');
+    assert.ok(/VA_FETCH_HEADERS/.test(httpSrc), 'las cabeceras sensibles viajan por entorno');
+    assert.ok(!/console\.(log|error)/.test(riotSrc) && /RIOT_API_KEY|RIOT_RSO_TOKEN/.test(riotSrc), 'sin valores de token en el código');
   });
 
 check('fuente Riot: el adaptador solo emite verified_source con atestación válida',

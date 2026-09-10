@@ -26,7 +26,9 @@ const CHILD_SCRIPT = [
   'const url=process.argv[1];',
   "const ua=process.argv[2]||'';",
   'const timeout=parseInt(process.argv[3]||\'12000\',10);',
-  "const extraHeaders=process.argv[4]?JSON.parse(process.argv[4]):{};",
+  // Cabeceras sensibles (tokens) por ENTORNO, nunca por argv: no aparecen en
+  // la línea de comandos del proceso hijo ni en listados de procesos.
+  "const extraHeaders=process.env.VA_FETCH_HEADERS?JSON.parse(process.env.VA_FETCH_HEADERS):{};",
   "let u; try{ u=new URL(url); }catch(e){ console.error('URL invalida'); process.exit(2); }",
   "const headers=Object.assign({'User-Agent':ua,'Accept':'application/json'},extraHeaders);",
   "const req=https.get(u,{headers},res=>{",
@@ -48,13 +50,16 @@ function httpsGetJson(urlStr, options = {}) {
   const timeoutMs = options.timeoutMs || 12000;
   const userAgent = options.userAgent || DEFAULT_UA;
   const headersArg = options.headers ? JSON.stringify(options.headers) : '';
+  const childEnv = Object.assign({}, process.env);
+  if (headersArg) childEnv.VA_FETCH_HEADERS = headersArg;
+  else delete childEnv.VA_FETCH_HEADERS;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const out = execFileSync(
         process.execPath,
-        ['-e', CHILD_SCRIPT, urlStr, userAgent, String(timeoutMs), headersArg],
-        { encoding: 'utf8', timeout: timeoutMs + 5000, maxBuffer: 30 * 1024 * 1024 }
+        ['-e', CHILD_SCRIPT, urlStr, userAgent, String(timeoutMs)],
+        { encoding: 'utf8', timeout: timeoutMs + 5000, maxBuffer: 30 * 1024 * 1024, env: childEnv }
       );
       return JSON.parse(out);
     } catch (e) {
