@@ -1895,11 +1895,13 @@ check('honestidad: la política de evidencia no fuerza coaching ni diagnósticos
       assert.ok(minimal.forbiddenSections.includes(s), `${s} debe estar prohibido en mínimo`);
     }
     assert.strictEqual(minimal.maxLeaks, 0, 'sin evidencia por ronda no hay fugas');
-    assert.ok(minimal.missing.includes('eventos_por_ronda'), 'debe declarar la falta de evidencia por ronda');
+    assert.ok(minimal.missing.some(m => m.startsWith('eventos_por_ronda')), 'debe declarar la falta de evidencia por ronda');
     const partial = classifyEvidence(fixture('telemetry_partial.json'));
     assert.strictEqual(partial.level, 'aggregate', 'un marcador agregado sigue siendo evidencia agregada');
     assert.ok(!partial.allowedSections.includes('round_leaks'), 'sin rondas no se atribuyen fugas');
-    assert.ok(!partial.allowedSections.includes('aim_routine'), 'sin evidencia mecánica no hay rutina');
+    assert.ok(!partial.allowedSections.includes('duel_matrix'), 'sin duelos no hay matriz');
+    assert.ok(!partial.allowedSections.includes('weapon_telemetry'), 'sin zonas no hay telemetría de arma');
+    assert.ok(partial.allowedSections.includes('aim_routine'), 'con HS%+ACS sí hay evidencia mecánica para la rutina');
     const complete = classifyEvidence(fixture('telemetry_complete.json'));
     assert.strictEqual(complete.level, 'complete');
     for (const s of ['round_leaks', 'duel_matrix', 'weapon_telemetry', 'aim_routine']) {
@@ -1923,6 +1925,8 @@ check('honestidad: el prompt exige salida condicional y no fuerza conclusiones',
     assert.ok(!/TOP 3 FUGAS CR[ÍI]TICAS/i.test(prompt), 'no debe forzar siempre 3 fugas');
     assert.ok(!/15 MINUTOS EXACTOS/i.test(prompt), 'no debe forzar siempre la rutina de 15 minutos');
     assert.ok(/evidence_policy\.js/.test(prompt), 'el prompt debe referenciar la política de evidencia compartida');
+    assert.ok(/DIMENSIONAL/i.test(prompt) && /n\/d/.test(prompt) && /sin barra/i.test(prompt),
+      'el radar debe ser dimensional: n/d sin barra ni score cuando falte la métrica');
   });
 
 check('honestidad: los hitos de carrera se declaran escenario ilustrativo (no predicción)',
@@ -1936,6 +1940,79 @@ check('honestidad: los hitos de carrera se declaran escenario ilustrativo (no pr
     for (const m of tl) {
       assert.strictEqual(m.tipo, 'ilustrativo', 'cada hito debe declararse ilustrativo');
       assert.ok(/no predicci/i.test(m.contexto), 'cada hito debe declarar que no es predicción');
+    }
+  });
+
+check('honestidad: la política exige evidencia válida (rondas/duelos/zonas/porcentajes)',
+  () => {
+    const ep = require(path.join(scriptsDir, 'evidence_policy.js'));
+    // Repro del auditor: array no vacío pero vacío por dentro + objeto de zonas vacío.
+    const fake = ep.classifyEvidence({ rounds: [{}], weaponZones: {} });
+    assert.strictEqual(fake.level, 'insufficient', 'rounds [{}] + weaponZones {} NO es complete');
+    assert.ok(!fake.allowedSections.includes('round_leaks'), 'no debe habilitar fugas');
+    assert.ok(!fake.allowedSections.includes('aim_routine'), 'no debe habilitar rutina');
+    // Rondas válidas sin telemetría mecánica: fugas sí, rutina/zonas no.
+    const roundsOnly = ep.classifyEvidence({ rounds: [{ n: 3, event: 'post_plant' }], weaponZones: {} });
+    assert.strictEqual(roundsOnly.level, 'complete');
+    assert.ok(roundsOnly.allowedSections.includes('round_leaks'));
+    assert.ok(!roundsOnly.allowedSections.includes('aim_routine'));
+    assert.ok(!roundsOnly.allowedSections.includes('weapon_telemetry'));
+    // Porcentaje inválido no cuenta como agregado.
+    const badPct = ep.classifyEvidence({ observed: { hs: 150 } });
+    assert.strictEqual(badPct.level, 'insufficient', 'HS 150 no es un porcentaje válido');
+    // Zonas que suman 100 habilitan telemetría mecánica.
+    const zones = ep.classifyEvidence({ observed: { acs: 200 }, weaponZones: { head: 20, body: 70, leg: 10 } });
+    assert.ok(zones.allowedSections.includes('weapon_telemetry'));
+    assert.ok(zones.allowedSections.includes('aim_routine'));
+    assert.strictEqual(ep.isValidWeaponZones({ head: 10, body: 10, leg: 10 }), false, 'zonas que no suman 100 no son válidas');
+    // Duelo inválido no habilita la matriz.
+    const badDuel = ep.classifyEvidence({ observed: { acs: 200 }, duels: [{ opponent: '' }] });
+    assert.ok(!badDuel.allowedSections.includes('duel_matrix'));
+    const zeroDuel = ep.classifyEvidence({ observed: { acs: 200 }, duels: [{ opponent: 'x#1', kills: 0, deaths: 0 }] });
+    assert.ok(!zeroDuel.allowedSections.includes('duel_matrix'), 'un duelo 0-0 no es evidencia de duelo');
+  });
+
+check('honestidad: rutas CLI con evidencia mínima/parcial omiten secciones no permitidas',
+  () => {
+    const sampleFull = JSON.parse(fs.readFileSync(sampleFile, 'utf8'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-evidence-'));
+    try {
+      // Parcial: solo resúmenes (sin evidencia por ronda) → sin fugas.
+      const partial = { data: { segments: sampleFull.data.segments.filter(s => s.type === 'player-summary') } };
+      const partialFile = path.join(tmp, 'partial.json');
+      fs.writeFileSync(partialFile, JSON.stringify(partial), 'utf8');
+      const matchOut = cliOk(['match', partialFile, 'TenZ#0001']);
+      assert.ok(/Nivel de evidencia: aggregate/i.test(matchOut), 'match parcial debe declarar nivel aggregate');
+      assert.ok(/FUGAS DE ELO: omitidas/i.test(matchOut), 'sin rondas no debe emitir fugas');
+      // Sin HS → sin evidencia mecánica → sin rutina.
+      const noHs = JSON.parse(JSON.stringify(partial));
+      noHs.data.segments.forEach(s => { if (s.stats) delete s.stats.hsAccuracy; });
+      const noHsFile = path.join(tmp, 'no-hs.json');
+      fs.writeFileSync(noHsFile, JSON.stringify(noHs), 'utf8');
+      const aimOut = cliOk(['aim', noHsFile, 'TenZ#0001']);
+      assert.ok(/RUTINA OMITIDA/i.test(aimOut), 'sin evidencia mecánica no debe emitir rutina');
+      // Sin datos de duelo → sin matriz 1v1.
+      const duelOut = cliOk(['duels', noHsFile, 'TenZ#0001']);
+      assert.ok(/MATRIZ DE DUELOS OMITIDA/i.test(duelOut), 'sin duelos no debe emitir matriz');
+      // diagnose: perfil mínimo (solo ACS) → agregado, sin prescripción mecánica.
+      const minimalProfile = {
+        platformInfo: { platformUserHandle: 'Min#1' },
+        segments: [{ type: 'playlist', attributes: { playlist: 'competitive' }, stats: { scorePerRound: { displayValue: '210.0' } } }]
+      };
+      const minFile = path.join(tmp, 'profile-min.json');
+      fs.writeFileSync(minFile, JSON.stringify(minimalProfile), 'utf8');
+      const diagOut = cliOk(['diagnose', minFile, 'Min#1']);
+      assert.ok(/Nivel de evidencia: aggregate/i.test(diagOut), 'perfil con solo ACS es agregado');
+      assert.ok(/Cuello de botella\/optimización omitido/i.test(diagOut), 'sin HS no debe prescribir');
+      // diagnose: perfil vacío → insufficient, sin prescripción.
+      const emptyProfile = { platformInfo: { platformUserHandle: 'Empty#1' }, segments: [] };
+      const emptyFile = path.join(tmp, 'profile-empty.json');
+      fs.writeFileSync(emptyFile, JSON.stringify(emptyProfile), 'utf8');
+      const emptyOut = cliOk(['diagnose', emptyFile, 'Empty#1']);
+      assert.ok(/Nivel de evidencia: insufficient/i.test(emptyOut), 'perfil vacío es insuficiente');
+      assert.ok(!/CUELLO DE BOTELLA/.test(emptyOut), 'sin evidencia no se prescribe');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
 

@@ -98,14 +98,15 @@ Nivel de evidencia: [insufficient | aggregate | complete] | Datos faltantes: [..
 #### 📊 OBSERVACIONES (solo lo observado en la entrada)
 Métricas presentes y su fuente; sin extrapolar a causas.
 
-#### 📊 1. RADAR DE DOMINIO COMPETITIVO (solo si hay ≥1 métrica agregada)
-Evalúa de 0 a 100 con barras ASCII ([████████░░]); marca "n/d" lo que no exista:
+#### 📊 1. RADAR DE DOMINIO COMPETITIVO (DIMENSIONAL: solo con evidencia)
+Regla estricta: puntúa una dimensión SOLO si tienes su métrica Y su benchmark. Si falta la métrica, escribe `n/d` SIN barra y SIN puntuación; nunca estimes por analogía.
+Ejemplo con ACS únicamente: Precisión Mecánica, KAST, Aperturas, Economía y Clutch = `n/d` (ninguna dimensión se puntúa).
 
-• Precisión Mecánica (First-Bullet & HS%)  : [████████░░]  XX / 100  (HS: XX.X% | Benchmark: 25-35%+)
-• Macrogame & Control de Espacio (KAST)    : [███████░░░]  XX / 100  (KAST: XX.X% | ADR: XXX)
-• Duelos de Apertura & Impacto (FK/FD)     : [█████████░]  XX / 100  (FK: X | FD: X | Ratio: X.XX)
-• Disciplina Económica & Conversión        : [████████░░]  XX / 100  (Win% en Compras Fuertes: XX%)
-• Compostura en Situaciones Clutch (1vX)   : [██████░░░░]  XX / 100  (Clutches logrados: X)
+• Precisión Mecánica (HS%)    : si hay HS% → [████████░░] XX / 100 (Benchmark 25-35%+); si no → n/d (sin barra ni score)
+• Macrogame & Espacio (KAST)  : si hay KAST% → [████░░░░░░] XX / 100; si no → n/d
+• Aperturas & Impacto (FK/FD) : si hay FK y FD → [████░░░░░░] XX / 100; si no → n/d
+• Disciplina Económica        : si hay Win%/EconRating → [████░░░░░░] XX / 100; si no → n/d
+• Compostura en Clutch (1vX)  : si hay datos de clutch → [████░░░░░░] XX / 100; si no → n/d
 
 #### ⚔️ 2. MATRIZ DE DUELOS 1v1 (SOLO si hay evidencia de duelos)
 - Si no hay datos de duelos, OMITE esta sección (no la inventes).

@@ -50,8 +50,42 @@ const { resolveMatchDataResilient, parseTextScoreboard } = require('./universal_
 const { harvestProfiles, harvestMatch } = require('./browser_cache_harvester');
 const { extractAccountTelemetry, aggregateCareerTelemetry, generateMilestonesTimeline } = require('./career_telemetry');
 const { evaluateMmrDrag, evaluateTalentVsEffort } = require('./autodiagnostic_engine');
+const { classifyEvidence } = require('./evidence_policy');
 const { analyzeEconomy } = require('./economy_analyzer');
 const { generateCoachingReport } = require('./coaching_engine');
+
+// Deriva la evidencia de una partida para la política compartida. No crea
+// secciones: solo decide cuáles están permitidas por los datos disponibles.
+function extractMatchEvidence(matchData, playerHandle) {
+  const segments = (matchData && matchData.data && matchData.data.segments) || (matchData && matchData.segments) || [];
+  const summaries = segments.filter(s => s.type === 'player-summary');
+  const pick = summaries.find(s =>
+    s.metadata?.platformUserHandle === playerHandle ||
+    s.attributes?.platformUserIdentifier === playerHandle
+  ) || summaries[0];
+  const st = (pick && pick.stats) || {};
+  const val = k => (st[k] && (st[k].value !== undefined ? st[k].value : st[k].displayValue));
+  const observed = { kd: val('kdRatio'), acs: val('scorePerRound'), hs: val('hsAccuracy'), fk: val('firstKills'), fd: val('firstDeaths') };
+  const rounds = segments
+    .filter(s => s.type === 'player-round')
+    .map(s => ({ n: s.attributes && s.attributes.round, event: 'player_round', detail: `${(s.metadata && s.metadata.agentName) || ''} r${s.attributes && s.attributes.round}` }));
+  return { observed, rounds };
+}
+
+function deriveMatchEvidence(matchData, playerHandle) {
+  return classifyEvidence(extractMatchEvidence(matchData, playerHandle));
+}
+
+// Evidencia a partir de la telemetría de cuenta (perfil agregado).
+function deriveProfileEvidence(telemetry) {
+  const c = (telemetry && telemetry.competitive) || {};
+  return classifyEvidence({ observed: { kd: c.kd, acs: c.acs, hs: c.hs } });
+}
+
+function printEvidenceLimits(policy) {
+  console.log(`🧾 Nivel de evidencia: ${policy.level} | Secciones omitidas: ${policy.forbiddenSections.join(', ') || 'ninguna'}`);
+  if (policy.missing.length > 0) console.log(`   Datos faltantes: ${policy.missing.join('; ')}`);
+}
 
 function printBanner() {
   console.log(`\n========================================================================`);
@@ -290,22 +324,36 @@ try {
     validateLearningProfile(res);
 
     printBanner();
-    console.log(`🎯 DIAGNÓSTICO 360°: ${res.player} (${res.agent} - ${res.rank}) | Mapa: ${res.map}`);
+    const evidence = deriveMatchEvidence(matchData, player);
+    console.log(`🎯 DIAGNÓSTICO 360°: ${res.player} (${res.agent} - ${res.rank}) | Mapa: ${res.map} [descriptivo]`);
+    printEvidenceLimits(evidence);
     console.log(`------------------------------------------------------------------------`);
-    console.log(`📊 RADAR DE DOMINIO (5 PILARES):`);
-    console.log(`  • Precisión Mecánica:        ${res.radar.precisionMecanica}`);
-    console.log(`  • Macrogame y Espacio:       ${res.radar.macrogamePosicionamiento}`);
-    console.log(`  • Duelos de Apertura:        ${res.radar.duelosDeApertura}`);
-    console.log(`  • Disciplina Económica:      ${res.radar.disciplinaEconomica}`);
-    console.log(`  • Compostura en Clutch:      ${res.radar.composturaClutch}`);
-    console.log(`\n🚨 TOP FUGAS DE ELO (CAUSAS DE DERROTA):`);
-    (res.eloLeaks || []).forEach((l, i) => {
-      console.log(`  [#${i + 1}] ${l.issue}`);
-      console.log(`       Detalle:  ${l.detail}`);
-      console.log(`       Solución: ${l.solution}`);
-    });
-    console.log(`\n💡 REGLA MENTAL: ${res.prescripcionInmediata.reglaMental}`);
-    console.log(`🎯 RUTINA KOVAAKS: ${res.prescripcionInmediata.sesionKovaaks}`);
+    if (evidence.allowedSections.includes('aggregate_radar')) {
+      console.log(`📊 RADAR DE DOMINIO (5 PILARES):`);
+      console.log(`  • Precisión Mecánica:        ${res.radar.precisionMecanica}`);
+      console.log(`  • Macrogame y Espacio:       ${res.radar.macrogamePosicionamiento}`);
+      console.log(`  • Duelos de Apertura:        ${res.radar.duelosDeApertura}`);
+      console.log(`  • Disciplina Económica:      ${res.radar.disciplinaEconomica}`);
+      console.log(`  • Compostura en Clutch:      ${res.radar.composturaClutch}`);
+    } else {
+      console.log(`📊 Radar omitido: sin métricas agregadas validadas.`);
+    }
+    if (evidence.allowedSections.includes('round_leaks')) {
+      console.log(`\n🚨 TOP FUGAS DE ELO (CAUSAS DE DERROTA):`);
+      (res.eloLeaks || []).forEach((l, i) => {
+        console.log(`  [#${i + 1}] ${l.issue}`);
+        console.log(`       Detalle:  ${l.detail}`);
+        console.log(`       Solución: ${l.solution}`);
+      });
+    } else {
+      console.log(`\n🚨 TOP FUGAS DE ELO: omitidas — sin evidencia por ronda (no se atribuyen causas).`);
+    }
+    if (evidence.allowedSections.includes('aim_routine')) {
+      console.log(`\n💡 REGLA MENTAL: ${res.prescripcionInmediata.reglaMental}`);
+      console.log(`🎯 RUTINA KOVAAKS: ${res.prescripcionInmediata.sesionKovaaks}`);
+    } else {
+      console.log(`\n🎯 Rutina omitida: falta evidencia mecánica (HS%/zonas de daño).`);
+    }
     console.log(`========================================================================\n`);
 
   } else if (command === 'duo' || command === 'synergy') {
@@ -367,26 +415,40 @@ try {
   } else if (command === 'aim' || command === 'kovaaks') {
     const { target, player } = resolveTargetAndPlayer(args);
     const matchData = resolveMatchData(target, player);
-    const res = generateKovaaksRoutine(matchData, player);
+    const evidence = deriveMatchEvidence(matchData, player);
 
     printBanner();
-    console.log(`🎯 RUTINA KOVAAKS 15-MIN: ${res.player} | Mapa: ${res.map}`);
-    console.log(`HS%: ${res.hsPct}`);
-    console.log(`Sens: ${res.sensitivityRecommendation}`);
-    console.log(`------------------------------------------------------------------------`);
-    res.routine.forEach(sc => {
-      console.log(`  • [${sc.duration}] ${sc.scenario}${sc.aimLab ? ` | ${sc.aimLab}` : ''}`);
-      console.log(`       ${sc.category}: ${sc.instruction}`);
-    });
-    console.log(`========================================================================\n`);
+    if (!evidence.allowedSections.includes('aim_routine')) {
+      console.log(`🎯 RUTINA OMITIDA: falta evidencia mecánica (HS%/zonas de daño).`);
+      printEvidenceLimits(evidence);
+      console.log(`========================================================================\n`);
+    } else {
+      const res = generateKovaaksRoutine(matchData, player);
+      console.log(`🎯 RUTINA KOVAAKS 15-MIN: ${res.player} | Mapa: ${res.map}`);
+      console.log(`HS%: ${res.hsPct}`);
+      console.log(`Sens: ${res.sensitivityRecommendation}`);
+      console.log(`------------------------------------------------------------------------`);
+      res.routine.forEach(sc => {
+        console.log(`  • [${sc.duration}] ${sc.scenario}${sc.aimLab ? ` | ${sc.aimLab}` : ''}`);
+        console.log(`       ${sc.category}: ${sc.instruction}`);
+      });
+      console.log(`========================================================================\n`);
+    }
 
   } else if (command === 'duels' || command === 'matrix') {
     const { target, player } = resolveTargetAndPlayer(args);
     const matchData = resolveMatchData(target, player);
     const duelInfo = buildDuelTable(parseDuels(matchData, player), player);
+    const evidence = classifyEvidence({
+      ...extractMatchEvidence(matchData, player),
+      duels: (duelInfo.rows || []).map(r => ({ opponent: r.opponent, kills: r.kills, deaths: r.deaths }))
+    });
 
     printBanner();
-    if (duelInfo.error) {
+    if (!evidence.allowedSections.includes('duel_matrix')) {
+      console.log(`⚔️ MATRIZ DE DUELOS OMITIDA: sin datos de duelos válidos.`);
+      printEvidenceLimits(evidence);
+    } else if (duelInfo.error) {
       console.log(`⚠️ ${duelInfo.error}`);
     } else {
       const focusPlayer = duelInfo.target || player || 'Objetivo';
@@ -777,9 +839,11 @@ try {
     const agg = aggregateCareerTelemetry([{ telemetry: tel }]);
     const mmrDiag = evaluateMmrDrag(tel);
     const talentDiag = evaluateTalentVsEffort(agg);
+    const evidence = deriveProfileEvidence(tel);
 
     printBanner();
     console.log(`🧠 AUTODIAGNÓSTICO INTEGRAL (HEURÍSTICO, NO VERIFICADO): ${tel.handle}`);
+    printEvidenceLimits(evidence);
     console.log(`------------------------------------------------------------------------`);
     console.log(`🏷️ CATEGORÍA (hipótesis descriptiva): ${talentDiag.category}`);
     console.log(`⚖️ MEZCLA DE INDICADORES: ${talentDiag.talentRatio}`);
@@ -788,9 +852,13 @@ try {
     console.log(`  • Señal compatible: ${mmrDiag.mmrDragDetected ? 'SÍ (heurística)' : 'no concluyente'}`);
     console.log(`  • Detalle: ${mmrDiag.diagnosis}`);
     console.log(`\n⚠️  ALCANCE: ${talentDiag.disclaimer}`);
-    console.log(`\n💡 CUELLO DE BOTELLA Y OPTIMIZACIÓN (sugerencia genérica):`);
-    console.log(`  • Factor: ${talentDiag.bottleneckOptimization.metric} (Actual: ${talentDiag.bottleneckOptimization.currentValue} ➔ Objetivo: ${talentDiag.bottleneckOptimization.targetValue})`);
-    console.log(`  • Consejo: ${talentDiag.bottleneckOptimization.tacticalAdvice}`);
+    if (talentDiag.bottleneckOptimization && evidence.allowedSections.includes('aim_routine')) {
+      console.log(`\n💡 CUELLO DE BOTELLA Y OPTIMIZACIÓN (sugerencia genérica):`);
+      console.log(`  • Factor: ${talentDiag.bottleneckOptimization.metric} (Actual: ${talentDiag.bottleneckOptimization.currentValue} ➔ Objetivo: ${talentDiag.bottleneckOptimization.targetValue})`);
+      console.log(`  • Consejo: ${talentDiag.bottleneckOptimization.tacticalAdvice}`);
+    } else {
+      console.log(`\n💡 Cuello de botella/optimización omitido: falta evidencia mecánica (HS%) o muestra suficiente.`);
+    }
     console.log(`========================================================================\n`);
 
   } else {
