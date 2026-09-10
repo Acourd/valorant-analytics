@@ -383,7 +383,6 @@ function mintVerifiedEvent({ sourceRef, roundRef, event, detail, context }) {
 function observeVerifiedMatch(matchData, playerPuuid, options = {}) {
   const check = riotSource.verifyAttestation(options.attestation, {
     payload: matchData,
-    trustedKeys: options.trustedKeys,
     maxAgeMs: options.maxAgeMs
   });
   if (!check.valid) {

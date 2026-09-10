@@ -100,16 +100,38 @@ function fetchRiotMatchById(matchId, options = {}) {
   return { matchId: id, host, endpoint, fetchedAt: new Date().toISOString(), payload };
 }
 
-// Atestación local (Ed25519) del registro obtenido. La clave privada es del
-// proceso de ingesta; su pública se registra en el trust store.
-function createAttestation(record, privateKeyPem) {
+// Atestación local (Ed25519) del registro obtenido. La clave privada NO se
+// acepta como argumento: se carga SIEMPRE del almacén del operador
+// (RIOT_ATTESTATION_KEY, ruta a PEM 0600 fuera del repo). Un llamador externo
+// no puede firmar con una clave propia.
+function loadSigningKey() {
+  const p = process.env.RIOT_ATTESTATION_KEY;
+  if (!p) {
+    const err = new Error('Atestación no disponible: falta RIOT_ATTESTATION_KEY (clave privada del ingestor autorizado, 0600 fuera del repo).');
+    err.code = 'ATTESTATION_KEY_MISSING';
+    throw err;
+  }
+  const resolved = path.resolve(p);
+  let st;
+  try { st = fs.lstatSync(resolved); } catch (e) {
+    throw new Error(`No se pudo leer la clave de atestación (${resolved}): ${e.message} (fail-closed).`);
+  }
+  if (st.isSymbolicLink()) throw new Error('La clave de atestación no puede ser un enlace simbólico (fail-closed).');
+  if (!st.isFile()) throw new Error('La clave de atestación debe ser un archivo regular (fail-closed).');
+  if (process.platform !== 'win32' && (st.mode & 0o077) !== 0) {
+    throw new Error(`La clave de atestación tiene permisos inseguros (${(st.mode & 0o777).toString(8)}): exige 0600 (fail-closed).`);
+  }
+  return fs.readFileSync(resolved, 'utf8');
+}
+
+function createAttestation(record) {
   if (!record || typeof record !== 'object') throw new Error('createAttestation requiere un registro.');
   const matchId = validateMatchId(record.matchId);
   if (!ALLOWED_HOSTS.has(record.host)) throw new Error(`Host Riot no permitido: ${record.host}`);
   if (record.endpoint !== matchEndpoint(matchId)) throw new Error('El endpoint no corresponde al matchId.');
   const fetchedAt = String(record.fetchedAt || '');
   if (Number.isNaN(Date.parse(fetchedAt))) throw new Error('fetchedAt inválido (ISO-8601).');
-  if (!privateKeyPem) throw new Error('createAttestation requiere la clave privada del atestador.');
+  const privateKeyPem = loadSigningKey();
   const digest = payloadDigest(record.payload);
   const core = { v: 1, matchId, host: record.host, endpoint: record.endpoint, fetchedAt, payloadDigest: digest };
   const signature = crypto.sign(null, Buffer.from(canonicalStringify(core), 'utf8'), crypto.createPrivateKey(privateKeyPem)).toString('base64');
@@ -117,8 +139,8 @@ function createAttestation(record, privateKeyPem) {
   return { ...core, signerKeyId: keyIdOf(publicKeyPem), signature };
 }
 
-// Verificador: solo valida si host/endpoint/matchId/digest/firma/frescura
-// concurren. Devuelve { valid, reason }.
+// Verificador. La confianza NO llega por argumento: se carga del almacén del
+// operador (RIOT_ATTESTATION_TRUST). Un llamador no puede inyectar su clave.
 function verifyAttestation(attestation, options = {}) {
   const att = attestation;
   if (!att || typeof att !== 'object') return { valid: false, reason: 'atestación ausente' };
@@ -132,8 +154,9 @@ function verifyAttestation(attestation, options = {}) {
   if (options.payload !== undefined) {
     if (payloadDigest(options.payload) !== att.payloadDigest) return { valid: false, reason: 'digest del payload no coincide' };
   }
-  const trusted = Array.isArray(options.trustedKeys) ? options.trustedKeys : [];
-  if (trusted.length === 0) return { valid: false, reason: 'trust store vacío: sin fuente verificada' };
+  // La confianza SIEMPRE proviene del almacén del operador; jamás del llamador.
+  const trusted = loadTrustedKeys();
+  if (!Array.isArray(trusted) || trusted.length === 0) return { valid: false, reason: 'trust store del operador vacío: sin fuente verificada' };
   const core = { v: 1, matchId: att.matchId && att.matchId.trim().toLowerCase(), host: att.host, endpoint: att.endpoint, fetchedAt: att.fetchedAt, payloadDigest: att.payloadDigest };
   for (const pem of trusted) {
     let keyid;
@@ -141,7 +164,7 @@ function verifyAttestation(attestation, options = {}) {
     if (att.signerKeyId && keyid !== att.signerKeyId) continue;
     try {
       const ok = crypto.verify(null, Buffer.from(canonicalStringify(core), 'utf8'), crypto.createPublicKey(pem), Buffer.from(att.signature || '', 'base64'));
-      if (ok) return { valid: true, reason: 'firma verificada contra trust store' };
+      if (ok) return { valid: true, reason: 'firma verificada contra trust store del operador' };
     } catch (e) { /* probar siguiente */ }
   }
   return { valid: false, reason: 'firma no verificada' };
