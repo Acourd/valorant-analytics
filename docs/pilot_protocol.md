@@ -1,6 +1,6 @@
 # Protocolo del Piloto (#2) — Utilidad, claridad y accionabilidad
 
-> **Estado:** **BORRADOR DE PROTOCOLO — no ejecutar el piloto ni reclutar/recopilar datos** hasta completar los campos `PENDIENTE_DE_DEFINICIÓN` (contacto, canal, plazo de borrado, almacenamiento/acceso, transferencia, grabación y edad mínima).
+> **Estado:** BORRADOR DE PROTOCOLO — **reclutamiento y recolección bloqueados** hasta confirmar el **alias dedicado de contacto** (`pilot@<dominio-dedicado>`; correo exclusivo del piloto, nunca personal ni Discord como canal de datos). El resto de campos operativos ya están definidos (§3 y §7).
 > **No** requiere `verified_source`: el piloto mide **utilidad percibida y accionabilidad** de salidas heurísticas sobre datos aportados por el jugador (`normalized_input`), no la verdad del MMR ni del talento.
 > **Alcance:** 10–20 jugadores. **Duración:** 4–6 semanas.
 
@@ -20,7 +20,7 @@
 ## 2. Selección de 10–20 jugadores
 
 **Inclusión**
-- **Edad mínima: PENDIENTE_DE_DEFINICIÓN** (propuesta por defecto: 18+). Si se decide admitir 16–17: consentimiento del tutor + asentimiento del menor, documentados.
+- **Edad mínima: 18+** (se excluye a menores en esta fase; si se quisiera admitir 16–17 exigiría enmienda con tutor + asentimiento).
 - Juega competitivo con regularidad (≥ 5 partidas/semana) y usa Tracker.gg/OP.GG.
 - Dispone de datos que puede aportar (capturas, texto de marcador o JSON local).
 - Disposición a dar feedback estructurado y, opcional, seguimiento a 2 semanas.
@@ -51,12 +51,12 @@ Checklist que debe firmarse/aceptarse antes de la sesión:
 - [ ] **Terceros en capturas:** los marcadores incluyen handles de otros 9 jugadores (dato público, pero de terceros); se recortan/ocultan antes de compartirse y nunca se publican.
 - [ ] **No verificación de origen:** se informa que los datos son `normalized_input` (no verificados).
 - [ ] **Retirada/borrado:** el participante puede solicitarlo en cualquier momento.
-  - Contacto del responsable: **PENDIENTE_DE_DEFINICIÓN**.
-  - Canal de solicitud: **PENDIENTE_DE_DEFINICIÓN**.
-  - Plazo máximo de borrado: **PENDIENTE_DE_DEFINICIÓN**.
+  - Contacto/canal: **PENDIENTE_DE_DEFINICIÓN** — será un **alias dedicado** (`pilot@<dominio>`) exclusivo del piloto; **prohibido** usar correo personal o Discord como canal de datos.
+  - Acuse de recibo: **≤ 72 h**.
+  - Plazo máximo de borrado: **≤ 7 días naturales** desde la solicitud.
   - Alcance: datos crudos, notas del moderador y artefactos. **Incluye derivados**: si un hallazgo ya se agregó en un informe, no es reversible, pero el informe nunca es identificable.
-- [ ] **Grabación de audio/vídeo: PENDIENTE_DE_DEFINICIÓN.** Si se activa, exige consentimiento específico por escrito (y retención propia); si NO se activa, toda grabación queda **prohibida**.
-- [ ] **Edad mínima:** PENDIENTE_DE_DEFINICIÓN (propuesta: 18+). Si se admite 16–17: consentimiento del tutor **y** asentimiento del menor, documentados.
+- [ ] **Grabación de audio/vídeo: PROHIBIDA.** No se graba la sesión; solo notas del moderador (§6.1). Cualquier cambio futuro exige consentimiento específico por escrito y enmienda de este protocolo.
+- [ ] **Edad mínima: 18+** (sin menores en esta fase).
 
 Plantilla mínima: nombre/seudónimo, fecha, aceptación de los puntos anteriores, firma o confirmación por escrito.
 
@@ -144,20 +144,20 @@ Plantilla mínima: nombre/seudónimo, fecha, aceptación de los puntos anteriore
 ## 7. Privacidad y seguridad
 
 - Datos en local; sin subir capturas con datos personales a servicios externos.
-- **Almacenamiento:** PENDIENTE_DE_DEFINICIÓN (ubicación y control de acceso).
+- **Almacenamiento y acceso (definido):** carpeta **cifrada** (BitLocker/FileVault) en el equipo del coordinador, **sin nube**, o **USB cifrado**. Permisos por rol mediante **ACL nominales verificables** (coordinador y analista); subcarpetas `identidad/` y `sesiones/` con permisos distintos; **registro de accesos**. No se usa carpeta "compartida" sin control de acceso comprobable.
 - **Notas del moderador:** pueden contener PII; se anonimizan antes de compartirse o no salen del equipo del operador.
-- **Transferencia entre roles:** canal PENDIENTE_DE_DEFINICIÓN; se evita enviar capturas sin recortar.
+- **Transferencia entre roles (definida):** **USB cifrado o carpeta cifrada con permisos por rol** (ACL verificables); **nunca** correo/Discord para datos; solo registros pseudónimos y capturas recortadas; **log de transferencias** (quién, cuándo, qué).
 - **Anonimización de terceros:** antes de compartir cualquier captura, se recortan/ocultan los handles de los otros jugadores.
 - Anonimización antes de archivar; retención ≤ 6 meses; **retirada/borrado** según el procedimiento del §3 (incluye derivados no reversibles, nunca identificables).
 - Nada de credenciales Riot; la ingesta es `normalized_input`.
 - Los hallazgos se reportan agregados; sin identificar a nadie sin permiso.
-- **Grabación:** PENDIENTE_DE_DEFINICIÓN; prohibida salvo consentimiento específico por escrito.
+- **Grabación: PROHIBIDA** (no se graba audio/vídeo); solo notas del moderador sin PII. Cambios futuros exigen enmienda del protocolo y consentimiento específico.
 
 ### 7.1 Separación identidad ↔ registro pseudónimo (anti-reidentificación)
 
 - **Regla de oro:** el vínculo identidad/contacto vive **fuera** del registro de sesión.
   - El JSON de §6.1 es **pseudónimo** (`sessionId`): sin handle, nombre, email, Discord ni IP.
-  - La tabla de correspondencia (si existe) es un artefacto separado con acceso restringido: **PENDIENTE_DE_DEFINICIÓN**. Alternativa preferida: no almacenarla y usar un identificador efímero.
+  - La tabla de correspondencia (si existe) vive en `identidad/` con ACL solo-coordinador; alternativa preferida: no almacenarla y usar un identificador efímero.
 - **Generalización obligatoria** en el registro: banda de rango (bajo/medio/alto), banda de horas (`<5`, `5–10`, `>10`) y macro-región. **No** se guardan horarios ni fechas exactas de sesión.
 - **Notas del moderador:** sin PII directa ni cuasi-identificadores; se revisan y redactan antes de archivar; nunca citas textuales identificables.
 - **Muestra pequeña:** no se reportan celdas con combinaciones rango×región×horario cuando **n < 5**; los hallazgos se agregan por rangos amplios.
@@ -194,7 +194,7 @@ Roles: **Coordinador** (recluta/consentimiento), **Operador** (ejecuta reportes)
 | Auto-informe | Triangulación con artefactos del reporte y seguimiento |
 | Sobreinterpretar hipótesis | Moderador corrige; calibración de alcance + ítem inverso |
 | Privacidad | Anonimización (incluidos terceros en capturas), retención limitada, sin credenciales |
-| Grabación no consentida | Prohibida salvo consentimiento específico por escrito (PENDIENTE_DE_DEFINICIÓN) |
+| Grabación no consentida | **Prohibida** por política fija (solo notas del moderador) |
 | Confundir utilidad con acierto | Mensaje explícito: no se evalúa verdad del MMR/talento |
 
 ---
