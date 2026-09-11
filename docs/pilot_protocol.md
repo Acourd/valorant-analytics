@@ -1,6 +1,7 @@
 # Protocolo del Piloto (#2) — Utilidad, claridad y accionabilidad
 
-> **Estado:** borrador para ejecución. **No** requiere `verified_source`: el piloto mide **utilidad percibida y accionabilidad** de salidas heurísticas sobre datos aportados por el jugador (`normalized_input`), no la verdad del MMR ni del talento.
+> **Estado:** **BORRADOR DE PROTOCOLO — no ejecutar el piloto ni reclutar/recopilar datos** hasta completar los campos `PENDIENTE_DE_DEFINICIÓN` (contacto, canal, plazo de borrado, almacenamiento/acceso, transferencia, grabación y edad mínima).
+> **No** requiere `verified_source`: el piloto mide **utilidad percibida y accionabilidad** de salidas heurísticas sobre datos aportados por el jugador (`normalized_input`), no la verdad del MMR ni del talento.
 > **Alcance:** 10–20 jugadores. **Duración:** 4–6 semanas.
 
 ---
@@ -34,7 +35,7 @@
 - Región/idioma: diversidad razonable (ES/EN).
 - Apertura a registro anónimo y a ser contactados para la entrevista.
 
-**Reclutamiento:** comunidades de Valorant, Discord, red personal; sin incentivos que sesguen (retribución simbólica neutra o ninguna).
+**Reclutamiento:** comunidades de Valorant, Discord, red personal; sin incentivos que sesguen (retribución simbólica neutra o ninguna). Los datos de contacto del reclutamiento se mantienen **separados** del registro de sesión (§7.1).
 
 ---
 
@@ -112,7 +113,7 @@ Plantilla mínima: nombre/seudónimo, fecha, aceptación de los puntos anteriore
 {
   "sessionId": "anon-001",
   "fechaISO": "YYYY-MM-DD",
-  "perfil": { "rangoActual": "Oro 2", "rangoPico": "Platino 1", "horasSemana": 8, "region": "EU" },
+  "perfil": { "bandaRango": "medio", "bandaHoras": "5-10", "macroRegion": "EU", "nota": "sin handles, sin fechas exactas ni horarios" },
   "evidencia": { "tipo": "normalized_input", "partidasAportadas": 2 },
   "likert": { "utilidad": null, "claridad": null, "accionabilidad": null, "calibracionAlcance": null, "calibracionInversa": null, "senalRuido": null },
   "accion": { "recomendacionConcreta": "", "fechaPrevistaPrueba": "" },
@@ -151,6 +152,15 @@ Plantilla mínima: nombre/seudónimo, fecha, aceptación de los puntos anteriore
 - Nada de credenciales Riot; la ingesta es `normalized_input`.
 - Los hallazgos se reportan agregados; sin identificar a nadie sin permiso.
 - **Grabación:** PENDIENTE_DE_DEFINICIÓN; prohibida salvo consentimiento específico por escrito.
+
+### 7.1 Separación identidad ↔ registro pseudónimo (anti-reidentificación)
+
+- **Regla de oro:** el vínculo identidad/contacto vive **fuera** del registro de sesión.
+  - El JSON de §6.1 es **pseudónimo** (`sessionId`): sin handle, nombre, email, Discord ni IP.
+  - La tabla de correspondencia (si existe) es un artefacto separado con acceso restringido: **PENDIENTE_DE_DEFINICIÓN**. Alternativa preferida: no almacenarla y usar un identificador efímero.
+- **Generalización obligatoria** en el registro: banda de rango (bajo/medio/alto), banda de horas (`<5`, `5–10`, `>10`) y macro-región. **No** se guardan horarios ni fechas exactas de sesión.
+- **Notas del moderador:** sin PII directa ni cuasi-identificadores; se revisan y redactan antes de archivar; nunca citas textuales identificables.
+- **Muestra pequeña:** no se reportan celdas con combinaciones rango×región×horario cuando **n < 5**; los hallazgos se agregan por rangos amplios.
 
 ---
 
