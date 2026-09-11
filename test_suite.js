@@ -686,7 +686,7 @@ check('ingestor fail-closed: archivo inexistente y URL no canónica lanzan sin a
       const missing = path.join(tmp, 'no-existe.json');
       assert.throws(() => resolveMatchDataResilient(missing, 'Test#0001'), /no encontrado|no resoluble|Sin telemetría/i);
       assert.throws(() => resolveMatchDataResilient('../../examples/sample_match.json', 'Test#0001'), /canónico|no resoluble|Sin telemetría/i);
-      assert.throws(() => fetchMatch('../../examples/sample_match.json'), /canónico/);
+      assert.throws(() => fetchMatch('../../examples/sample_match.json'), /retirada|no es una fuente/);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -2378,6 +2378,33 @@ check('consensus: responde al perfil real y declara evidencia insuficiente',
     assert.ok(insufficient.missing.length > 0, 'debe declarar evidencia faltante');
     const src = fs.readFileSync(path.join(scriptsDir, 'consensus_arbiter.js'), 'utf8');
     assert.ok(!/primerosDuelos|gestionEconomica|spacingYTrades|radar\.supervivencia/.test(src), 'no debe consumir claves inexistentes del perfil');
+  });
+
+check('privacidad: ninguna ruta ejecutable contacta Tracker (stubs fail-closed)',
+  () => {
+    const offenders = [];
+    for (const f of fs.readdirSync(scriptsDir).filter(n => n.endsWith('.js'))) {
+      const src = fs.readFileSync(path.join(scriptsDir, f), 'utf8');
+      if (/api\.tracker\.gg/.test(src) || /tracker\.gg\/api/.test(src)) offenders.push(f);
+    }
+    assert.deepStrictEqual(offenders, [], `referencias a la API de Tracker: ${offenders.join(', ')}`);
+    for (const [file, arg] of [
+      ['fetch_match.js', 'https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04'],
+      ['fetch_profile.js', 'TenZ#0001']
+    ]) {
+      let code = 0;
+      let out = '';
+      try { execFileSync(process.execPath, [path.join(scriptsDir, file), arg], { encoding: 'utf8', timeout: 15000 }); }
+      catch (e) { code = e.status; out = String(e.stdout || '') + String(e.stderr || ''); }
+      assert.notStrictEqual(code, 0, `${file} debe fallar cerrado al ejecutarse directo`);
+      assert.ok(/retirad|Riot RSO|rutas admitidas/i.test(out), `${file} debe indicar rutas admitidas`);
+    }
+    for (const file of ['fetch_match.js', 'fetch_profile.js']) {
+      const src = fs.readFileSync(path.join(scriptsDir, file), 'utf8');
+      assert.ok(!/require\(['"]\.\/http_fetch['"]\)/.test(src), `${file} no debe importar la capa de red`);
+      assert.ok(!/require\(['"]https?['"]\)/.test(src), `${file} no debe importar https`);
+      assert.ok(!/api\.tracker\.gg/.test(src), `${file} sin endpoint de Tracker`);
+    }
   });
 
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben

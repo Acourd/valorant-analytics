@@ -29,7 +29,7 @@ const { evaluateLearningProfile } = require('./learning_profile');
 const { auditDuoSynergy } = require('./duo_synergy');
 const { parseDuels } = require('./duel_matrix');
 const { generateKovaaksRoutine } = require('./kovaaks_generator');
-const { extractMatchId, fetchMatch } = require('./fetch_match');
+const { extractMatchId } = require('./fetch_match');
 const { normalizeHandle } = require('./fetch_profile');
 const { analyzeWeaponTelemetry } = require('./weapon_telemetry');
 const {
@@ -232,8 +232,8 @@ function handleProfile(handle) {
   console.log(`  • OP.GG:     https://op.gg/es/valorant/profile/${encodeURIComponent(opggTag)}`);
   console.log(`  • Tracker:   https://tracker.gg/valorant/profile/riot/${trackerTag}/overview`);
   console.log(`  • VLR.gg:    https://www.vlr.gg/search/?q=${encodeURIComponent(name.trim())}`);
-  console.log(`\n💡 Tip: Para analizar una partida reciente de este jugador sin bloqueos de WAF,`);
-  console.log(`   descarga el JSON de la partida o copia los datos y ejecuta:`);
+  console.log(`\nℹ️ Enlaces informativos (no se consulta Tracker desde aquí).`);
+  console.log(`   Para analizar, aporta un JSON/export, el texto del marcador o una captura con confirmación:`);
   console.log(`   node cli.js match <partida.json> "${handle}"`);
   console.log(`========================================================================\n`);
 }
