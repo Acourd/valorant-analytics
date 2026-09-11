@@ -125,12 +125,21 @@ function validateLearningProfile(profile) {
   validateRadar(profile.radar);
 
   const leaks = profile.eloLeaks || profile.fugasDeElo;
-  if (!Array.isArray(leaks) || leaks.length === 0) {
-    throw new InvariantViolationError('PROFILE_LEAKS', 'El perfil debe contener al menos 1 fuga de ELO fundamentada', { profile });
+  if (!Array.isArray(leaks)) {
+    throw new InvariantViolationError('PROFILE_LEAKS', 'eloLeaks debe ser un array', { profile });
   }
-
-  if (!profile.prescripcionInmediata || typeof profile.prescripcionInmediata.reglaMental !== 'string') {
-    throw new InvariantViolationError('PROFILE_PRESCRIPTION', 'Prescripción inmediata de regla cognitiva ausente', { profile });
+  const provenance = profile.provenance || 'normalized_input';
+  const verified = provenance === 'verified_source';
+  if (verified && leaks.length === 0) {
+    throw new InvariantViolationError('PROFILE_LEAKS', 'Con fuente verificada el perfil debe contener al menos 1 fuga fundamentada', { profile });
+  }
+  if (!verified && leaks.length > 0) {
+    throw new InvariantViolationError('PROFILE_LEAKS_PROVENANCE', 'Datos no verificados no pueden incluir causas/fugas', { provenance, leaks: leaks.length });
+  }
+  if (verified) {
+    if (!profile.prescripcionInmediata || typeof profile.prescripcionInmediata.reglaMental !== 'string') {
+      throw new InvariantViolationError('PROFILE_PRESCRIPTION', 'Prescripción inmediata de regla cognitiva ausente', { profile });
+    }
   }
 
   return true;

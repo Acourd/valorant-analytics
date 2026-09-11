@@ -20,6 +20,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const AGENTS = [
   'Jett', 'Reyna', 'Raze', 'Phoenix', 'Yoru', 'Neon', 'Iso',
@@ -423,18 +424,46 @@ function resolveMatchDataResilient(source, playerHandle = 'kirtmy#000', options 
     if (!resolved.startsWith(path.resolve(cacheDir) + path.sep)) {
       throw new Error(`Ruta de caché fuera del perímetro permitido: "${matchId}".`);
     }
-    if (fs.existsSync(cacheFile)) {
-      try {
-        return JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
-      } catch (cacheErr) {
-        diagnostics.push(`Caché corrupta en ${cacheFile} (${cacheErr.message}); intentando red.`);
+    const CACHE_TTL_MS = 30 * 24 * 3600 * 1000;
+    const digestOf = data => crypto.createHash('sha256').update(JSON.stringify(data && data.segments ? data.segments : null)).digest('hex');
+    // Lectura ENDURECIDA: sin symlink, digest verificado, caducidad y procedencia
+    // normalizada. Una caché sin digest válido NUNCA se presenta como verificada.
+    let cached = null;
+    try {
+      const lst = fs.lstatSync(cacheFile);
+      if (lst.isSymbolicLink()) {
+        diagnostics.push(`Caché es un enlace simbólico (${cacheFile}); se ignora por perímetro.`);
+      } else if (!lst.isFile()) {
+        diagnostics.push(`Caché no es un archivo regular (${cacheFile}); se ignora.`);
+      } else {
+        const parsed = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+        const cm = (parsed && parsed.data && parsed.data.metadata) || {};
+        const segmentsOk = Array.isArray(parsed && parsed.data && parsed.data.segments);
+        const digestOk = typeof cm.cacheDigest === 'string' && cm.cacheDigest === digestOf(parsed.data);
+        const freshOk = typeof cm.cachedAt === 'string' && (Date.now() - Date.parse(cm.cachedAt)) <= CACHE_TTL_MS;
+        if (!segmentsOk) diagnostics.push('Caché sin segmentos válidos; se ignora.');
+        else if (!digestOk) diagnostics.push('Caché sin digest válido (posible manipulación); se ignora.');
+        else if (!freshOk) diagnostics.push('Caché caducada; se ignora.');
+        else {
+          parsed.data.metadata.provenance = 'normalized_input';
+          parsed.data.metadata.cached = true;
+          cached = parsed;
+        }
       }
+    } catch (e) {
+      if (e.code !== 'ENOENT') diagnostics.push(`Caché no legible (${cacheFile}): ${e.message}`);
     }
+    if (cached) return cached;
 
     try {
       const remoteData = fetchMatch(matchId);
       try {
         fs.mkdirSync(cacheDir, { recursive: true });
+        remoteData.data = remoteData.data || {};
+        remoteData.data.metadata = remoteData.data.metadata || {};
+        remoteData.data.metadata.cachedAt = new Date().toISOString();
+        remoteData.data.metadata.cacheDigest = digestOf(remoteData.data);
+        remoteData.data.metadata.provenance = 'normalized_input';
         fs.writeFileSync(cacheFile, JSON.stringify(remoteData, null, 2));
       } catch (persistErr) {
         diagnostics.push(`No se pudo persistir caché (${persistErr.message}); se responde en memoria.`);

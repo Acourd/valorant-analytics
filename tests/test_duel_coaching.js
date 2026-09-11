@@ -23,7 +23,8 @@ assert.ok(duels.duelMatrix[duels.target], 'La matriz del target debe existir');
 // 2. Learning Profile (Radar 360 y Fugas)
 const profile = evaluateLearningProfile(sample, 'TenZ#0001');
 assert.ok(profile.radar, 'Radar de 5 pilares debe estar presente');
-assert.ok(Array.isArray(profile.eloLeaks) && profile.eloLeaks.length > 0, 'Debe identificar fugas de ELO');
+assert.strictEqual(profile.provenance, 'normalized_input', 'la muestra local es normalized_input (no verificada)');
+assert.deepStrictEqual(profile.eloLeaks, [], 'datos normalizados no fabrican causas/fugas');
 assert.ok(profile.prescripcionInmediata.reglaMental, 'Regla mental debe estar definida');
 
 // 3. Coaching Report

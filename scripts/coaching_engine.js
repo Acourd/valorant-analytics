@@ -59,7 +59,7 @@ function generateCoachingReport(matchData, targetHandle) {
     throw new Error('generateCoachingReport requiere un objeto de telemetría válido.');
   }
   const { playerMap, duelMatrix, target } = parseDuels(matchData, targetHandle);
-  const effectiveTarget = target || (targetHandle ? Object.keys(playerMap).find(h => h.toLowerCase().includes(targetHandle.toLowerCase())) : Object.keys(playerMap)[0]);
+  const effectiveTarget = target || require('./data_contract').resolveExactHandle(Object.keys(playerMap), targetHandle, { allowFirstIfMissing: true });
   
   if (!effectiveTarget || !playerMap[effectiveTarget]) {
     return { error: `Player ${targetHandle || 'desconocido'} not found in match.` };

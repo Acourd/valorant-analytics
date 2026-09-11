@@ -51,6 +51,7 @@ const { harvestProfiles, harvestMatch } = require('./browser_cache_harvester');
 const { extractAccountTelemetry, aggregateCareerTelemetry, generateMilestonesTimeline } = require('./career_telemetry');
 const { evaluateMmrDrag, evaluateTalentVsEffort } = require('./autodiagnostic_engine');
 const { classifyEvidence, observeMatchTelemetry, observeDuelRows } = require('./evidence_policy');
+const { sourceProvenance, provenanceLabel } = require('./data_contract');
 const { analyzeEconomy } = require('./economy_analyzer');
 const { generateCoachingReport } = require('./coaching_engine');
 
@@ -187,12 +188,15 @@ function loadAttestIdentity() {
 
 function printProvenance(source, matchData) {
   const meta = (matchData && matchData.data && matchData.data.metadata) || {};
-  if (meta.synthetic || meta.wafContainment) {
-    console.log(`[FUENTE: SINTÉTICA --demo] Telemetría reconstruida. NO es una partida real: diagnóstico solo demostrativo.`);
+  const provenance = sourceProvenance(meta);
+  if (provenance === 'synthetic_demo') {
+    console.log(`[FUENTE: ${provenanceLabel(provenance)}] Telemetría reconstruida. NO es una partida real: solo demostrativo.`);
+  } else if (provenance === 'verified_source') {
+    console.log(`[FUENTE: ${provenanceLabel(provenance)}] ${typeof source === 'string' ? source : ''}`);
   } else if (typeof source === 'string' && fs.existsSync(source)) {
-    console.log(`[FUENTE: JSON local verificado: ${source}]`);
+    console.log(`[FUENTE: ${provenanceLabel(provenance)}] Archivo local: ${source}`);
   } else {
-    console.log(`[FUENTE: API Tracker.gg / caché local verificada]`);
+    console.log(`[FUENTE: ${provenanceLabel(provenance)}] Tracker.gg / caché local`);
   }
 }
 
@@ -237,7 +241,7 @@ function handleProfile(handle) {
 
 function buildDuelTable(matrixData, playerHandle) {
   const { playerMap, duelMatrix, target } = matrixData;
-  const effectiveTarget = target || (playerHandle ? Object.keys(playerMap).find(h => h.toLowerCase().includes(playerHandle.toLowerCase())) : Object.keys(playerMap)[0]);
+  const effectiveTarget = target || require('./data_contract').resolveExactHandle(Object.keys(playerMap), playerHandle, { allowFirstIfMissing: true });
   if (!effectiveTarget || !playerMap[effectiveTarget]) {
     return { error: `Jugador "${playerHandle || 'desconocido'}" no encontrado en la partida.`, rows: [], target: null };
   }

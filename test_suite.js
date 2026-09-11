@@ -2270,6 +2270,37 @@ check('fuente Riot: el trust store exige perímetro (0666, propietario, symlink)
     }
   });
 
+check('contrato: objetivo exacto o fail-closed (sin fallback al primer jugador)',
+  () => {
+    const { resolveExactHandle } = require(path.join(scriptsDir, 'data_contract.js'));
+    assert.throws(() => resolveExactHandle(['A#1', 'B#2'], 'C#3', { allowFirstIfMissing: false }), /no encontrado/i);
+    assert.strictEqual(resolveExactHandle(['A#1', 'B#2'], 'b#2'), 'B#2', 'coincidencia exacta insensible a mayúsculas');
+    assert.strictEqual(resolveExactHandle(['A#1', 'B#2'], undefined), 'A#1', 'sin objetivo, primer jugador solo si no se pidió');
+    assert.throws(() => resolveExactHandle([], 'A#1'), /sin jugadores/i);
+    // Repro del auditor: jugador inexistente NO analiza a aspas#0001 y sale != 0.
+    let code = 0;
+    let out = '';
+    try { cliOk(['match', sampleFile, 'NoExiste#9999']); }
+    catch (e) { code = e.status; out = String(e.stdout || '') + String(e.stderr || ''); }
+    assert.notStrictEqual(code, 0, 'objetivo inexistente debe fallar cerrado');
+    assert.ok(/NoExiste#9999|no encontrado/i.test(out), 'debe explicar que el objetivo no existe');
+    assert.ok(!/RADAR DE DOMINIO|OBSERVACIONES POR RONDA/.test(out), 'no debe emitir análisis de otro jugador');
+  });
+
+check('procedencia: fuentes locales se etiquetan como normalizadas (no verificadas)',
+  () => {
+    const { sourceProvenance, mayAssertCauses } = require(path.join(scriptsDir, 'data_contract.js'));
+    assert.strictEqual(sourceProvenance({}), 'normalized_input');
+    assert.strictEqual(sourceProvenance({ synthetic: true }), 'synthetic_demo');
+    assert.strictEqual(sourceProvenance({ provenance: 'verified_source' }), 'verified_source');
+    assert.strictEqual(mayAssertCauses('normalized_input'), false, 'datos locales no afirman causas');
+    assert.strictEqual(mayAssertCauses('verified_source'), true);
+    const out = cliOk(['match', sampleFile, 'TenZ#0001']);
+    assert.ok(/normalizad/i.test(out), 'el archivo local debe declararse normalizado');
+    assert.ok(!/JSON local verificado/i.test(out), 'no debe afirmar "JSON local verificado"');
+    assert.ok(!/cach[ée] local verificada/i.test(out), 'no debe afirmar "caché local verificada"');
+  });
+
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben
 // reflejar EXACTAMENTE el número de casos registrados y ejecutados. Un
 // manifiesto desincronizado hace fallar la suite (imposible sobre-declarar

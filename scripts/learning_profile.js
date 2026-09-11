@@ -11,6 +11,7 @@ const fs = require('fs');
 const { extractMatchId, fetchMatch } = require('./fetch_match');
 const { parseDuels } = require('./duel_matrix');
 const { analyzeEconomy } = require('./economy_analyzer');
+const { resolveExactHandle, sourceProvenance, provenanceLabel, mayAssertCauses } = require('./data_contract');
 
 function evaluateLearningProfile(matchData, targetHandle) {
   if (!matchData || typeof matchData !== 'object') {
@@ -32,12 +33,10 @@ function evaluateLearningProfile(matchData, targetHandle) {
     };
   });
 
-  let target = targetHandle ? Object.keys(playerMap).find(h => h.toLowerCase().includes(targetHandle.toLowerCase())) : Object.keys(playerMap)[0];
-  if (!target) target = Object.keys(playerMap)[0];
-  if (!target || !playerMap[target]) {
+  if (Object.keys(playerMap).length === 0) {
     throw new Error('No se encontraron jugadores válidos en la telemetría de la partida.');
   }
-
+  const target = resolveExactHandle(Object.keys(playerMap), targetHandle, { allowFirstIfMissing: true });
   const p = playerMap[target];
   if (!p) {
     throw new Error(`Jugador "${targetHandle}" no encontrado en la partida. Sin telemetría del objetivo no se emite diagnóstico.`);
@@ -127,11 +126,15 @@ function evaluateLearningProfile(matchData, targetHandle) {
     });
   }
 
+  const provenance = sourceProvenance(meta);
+  const causesAllowed = mayAssertCauses(provenance);
   const dataQuality = unknowns.length === 0 ? 'completa' : (unknowns.length >= 5 ? 'insuficiente' : 'parcial');
-  const finalLeaks = unknowns.length >= 5 ? [] : eloLeaks.slice(0, 3);
+  const finalLeaks = (causesAllowed && unknowns.length < 5) ? eloLeaks.slice(0, 3) : [];
   const dataWarning = unknowns.length >= 5
     ? 'ADVERTENCIA: telemetría del objetivo ausente. No se emiten fugas específicas: conecta datos reales de partida.'
-    : (unknowns.length > 0 ? `Métricas no disponibles y excluidas del diagnóstico: ${unknowns.join(', ')}.` : null);
+    : (!causesAllowed
+      ? `Procedencia: ${provenanceLabel(provenance)}. Se describen observaciones; NO se emiten causas/fugas (requieren fuente verificada).`
+      : (unknowns.length > 0 ? `Métricas no disponibles y excluidas del diagnóstico: ${unknowns.join(', ')}.` : null));
 
   // 3. Actionable Self-Improvement Prescription
   return {
@@ -141,6 +144,7 @@ function evaluateLearningProfile(matchData, targetHandle) {
     map: meta.mapName || 'Unknown',
     result: meta.result || 'Finished',
     dataQuality,
+    provenance,
     unknowns,
     warning: dataWarning,
     radar: {

@@ -28,10 +28,7 @@ function analyzeWeaponTelemetry(matchData, targetHandle) {
     p.metadata?.platformUserHandle || p.attributes?.platformUserIdentifier || 'Unknown'
   );
 
-  let target = targetHandle
-    ? handles.find(h => h.toLowerCase().includes(targetHandle.toLowerCase()))
-    : handles[0];
-  if (!target) target = handles[0] || 'Unknown';
+  const target = require('./data_contract').resolveExactHandle(handles, targetHandle, { allowFirstIfMissing: true });
 
   const playerSummary = playerSummaries.find(p => 
     (p.metadata?.platformUserHandle || p.attributes?.platformUserIdentifier) === target
