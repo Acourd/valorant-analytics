@@ -29,7 +29,7 @@ const { evaluateLearningProfile } = require('./learning_profile');
 const { auditDuoSynergy } = require('./duo_synergy');
 const { parseDuels } = require('./duel_matrix');
 const { generateKovaaksRoutine } = require('./kovaaks_generator');
-const { extractMatchId, fetchMatch } = require('./fetch_match');
+const { extractMatchId } = require('./fetch_match');
 const { normalizeHandle } = require('./fetch_profile');
 const { analyzeWeaponTelemetry } = require('./weapon_telemetry');
 const {
@@ -47,7 +47,6 @@ const { ConsensusArbiter } = require('./consensus_arbiter');
 const { RoutineSynthesizer } = require('./routine_synthesizer');
 const { generateSbom } = require('./sbom_manifest');
 const { resolveMatchDataResilient, parseTextScoreboard } = require('./universal_ingestor');
-const { harvestProfiles, harvestMatch } = require('./browser_cache_harvester');
 const { extractAccountTelemetry, aggregateCareerTelemetry, generateMilestonesTimeline } = require('./career_telemetry');
 const { evaluateMmrDrag, evaluateTalentVsEffort } = require('./autodiagnostic_engine');
 const { classifyEvidence, observeMatchTelemetry, observeDuelRows } = require('./evidence_policy');
@@ -233,8 +232,8 @@ function handleProfile(handle) {
   console.log(`  • OP.GG:     https://op.gg/es/valorant/profile/${encodeURIComponent(opggTag)}`);
   console.log(`  • Tracker:   https://tracker.gg/valorant/profile/riot/${trackerTag}/overview`);
   console.log(`  • VLR.gg:    https://www.vlr.gg/search/?q=${encodeURIComponent(name.trim())}`);
-  console.log(`\n💡 Tip: Para analizar una partida reciente de este jugador sin bloqueos de WAF,`);
-  console.log(`   descarga el JSON de la partida o copia los datos y ejecuta:`);
+  console.log(`\nℹ️ Enlaces informativos (no se consulta Tracker desde aquí).`);
+  console.log(`   Para analizar, aporta un JSON/export, el texto del marcador o una captura con confirmación:`);
   console.log(`   node cli.js match <partida.json> "${handle}"`);
   console.log(`========================================================================\n`);
 }
@@ -272,9 +271,8 @@ if (!command || command === '--help' || command === '-h') {
   console.log(`  node cli.js economy <partida_o_id> [jugador]      ➔ Desglose de Economía y Buy-Tiers`);
   console.log(`  node cli.js coaching <partida_o_id> [jugador]     ➔ Reporte Introspectivo y Recursos Tácticos`);
   console.log(`  node cli.js calibrate [jugador] [rango] [rol]     ➔ Calibración Instantánea Zero-Cloud`);
-  console.log(`  node cli.js harvest [jugador]                     ➔ Cosecha de Partidas desde Caché Local`);
-  console.log(`  node cli.js career <perfil_json|handle>           ➔ Auditoría de Horas y Trayectoria`);
-  console.log(`  node cli.js diagnose <perfil_json|handle>         ➜ Señal heurística de MMR y estimación de rango (hipótesis no verificada)`);
+  console.log(`  node cli.js career <perfil.json>           ➔ Auditoría de Horas y Trayectoria`);
+  console.log(`  node cli.js diagnose <perfil.json>         ➜ Señal heurística de MMR y estimación de rango (hipótesis no verificada)`);
   console.log(`  node cli.js parse <texto_o_archivo> [jugador]     ➔ Ingesta Universal Resiliente (Anti-WAF)`);
   console.log(`  node cli.js invariants <partida_o_id> [jugador]   ➔ Verificación Formal de Invariantes`);
   console.log(`  node cli.js attest <partida_o_id> [jugador]       ➔ Sobre DSSE in-toto firmado con Ed25519`);
@@ -542,6 +540,7 @@ try {
 
     printBanner();
     console.log(`🎯 CALIBRACIÓN INSTANTÁNEA ZERO-CLOUD (OFFLINE MODE): ${player}`);
+    console.log(`⚠️ SIMULACIÓN: valores ilustrativos; NO provienen de tu perfil ni de telemetría real.`);
     console.log(`Rango Objetivo: ${rank} | Rol Táctico: ${role}`);
     console.log(`------------------------------------------------------------------------`);
     console.log(`📊 RADAR DE RENDIMIENTO COMPETITIVO CALIBRADO:`);
@@ -772,16 +771,10 @@ try {
     console.log(`========================================================================\n`);
 
   } else if (command === 'harvest') {
-    const query = args[1];
     printBanner();
-    console.log(`🌾 COSECHA DETERMINISTA DE TELEMETRÍA (CACHE HARVESTER)`);
-    console.log(`------------------------------------------------------------------------`);
-    const hits = harvestProfiles(query);
-    console.log(`Entradas encontradas en caché local: ${hits.length}`);
-    hits.forEach((h, i) => {
-      console.log(`  [#${i + 1}] ${h.url.slice(0, 85)}...`);
-    });
-    console.log(`========================================================================\n`);
+    console.error('Comando retirado: harvest leía la caché del navegador del usuario (no consentido y no estable).');
+    console.error('Vías admitidas: node cli.js match <archivo.json> | node cli.js parse "<texto>" | captura con confirmación | Riot RSO (pendiente).');
+    process.exit(1);
 
   } else if (command === 'career') {
     const inputPath = args[1];
@@ -790,16 +783,10 @@ try {
 
     if (inputPath && fs.existsSync(inputPath)) {
       profileData = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
-    } else {
-      const hits = harvestProfiles(inputPath);
-      if (hits.length > 0) {
-        profileData = hits[0].json;
-        handleName = inputPath || 'Detectado en Caché';
-      }
     }
 
     if (!profileData) {
-      console.error('Error: No se encontró archivo o caché para evaluar carrera. Proporciona un archivo JSON o handle.');
+      console.error('Error: No se encontró el archivo JSON de perfil. Proporciona un JSON/export aportado explícitamente (la cosecha de caché y el handle fueron retirados).');
       process.exit(1);
     }
 
@@ -831,16 +818,10 @@ try {
 
     if (inputPath && fs.existsSync(inputPath)) {
       profileData = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
-    } else {
-      const hits = harvestProfiles(inputPath);
-      if (hits.length > 0) {
-        profileData = hits[0].json;
-        handleName = inputPath || 'Detectado en Caché';
-      }
     }
 
     if (!profileData) {
-      console.error('Error: Proporciona un JSON de perfil o handle rastreable en caché.');
+      console.error('Error: proporciona un JSON/export de perfil aportado explícitamente (la cosecha de caché local fue retirada).');
       process.exit(1);
     }
 

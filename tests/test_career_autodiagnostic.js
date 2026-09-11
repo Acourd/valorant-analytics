@@ -7,24 +7,10 @@
 
 const assert = require('assert');
 const path = require('path');
-const zlib = require('zlib');
 const { execSync } = require('child_process');
 
-const { decompressBuffer, getChromiumCachePaths } = require('../scripts/browser_cache_harvester');
 const { extractAccountTelemetry, aggregateCareerTelemetry, generateMilestonesTimeline, formatHours } = require('../scripts/career_telemetry');
 const { evaluateMmrDrag, evaluateTalentVsEffort } = require('../scripts/autodiagnostic_engine');
-
-// 1. Test decompressBuffer
-const sampleJson = JSON.stringify({ status: "success", data: { test: 123 } });
-const brotliBuf = zlib.brotliCompressSync(Buffer.from(sampleJson));
-const decompBrotli = decompressBuffer(brotliBuf);
-assert.ok(decompBrotli, 'Brotli debe descomprimirse con éxito');
-assert.strictEqual(JSON.parse(decompBrotli.toString('utf8')).data.test, 123);
-
-const gzipBuf = zlib.gzipSync(Buffer.from(sampleJson));
-const decompGzip = decompressBuffer(gzipBuf);
-assert.ok(decompGzip, 'Gzip debe descomprimirse con éxito');
-assert.strictEqual(JSON.parse(decompGzip.toString('utf8')).data.test, 123);
 
 // 2. Test formatHours
 assert.strictEqual(formatHours(3600), '1h');

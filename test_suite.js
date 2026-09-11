@@ -74,7 +74,6 @@ const {
   assembleRawMatchStructure,
   resolveMatchDataResilient
 } = require(path.join(scriptsDir, 'universal_ingestor.js'));
-const { decompressBuffer, getChromiumCachePaths, extractFromCacheDirectory } = require(path.join(scriptsDir, 'browser_cache_harvester.js'));
 const { extractAccountTelemetry, aggregateCareerTelemetry, generateMilestonesTimeline } = require(path.join(scriptsDir, 'career_telemetry.js'));
 const { evaluateMmrDrag, evaluateTalentVsEffort } = require(path.join(scriptsDir, 'autodiagnostic_engine.js'));
 
@@ -430,13 +429,12 @@ check('universal_ingestor: resolveMatchDataResilient intercepta WAF 403 con cont
     const fakeWafUrl = 'https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04';
     assert.throws(
       () => resolveMatchDataResilient(fakeWafUrl, 'kirtmy#000', { map: 'Ascent' }),
-      /Sin telemetría verificable/
+      /no soportada|Riot RSO/
     );
     const match = resolveMatchDataResilient(fakeWafUrl, 'kirtmy#000', { map: 'Ascent', allowSynthetic: true });
     assert.ok(match && match.data && match.data.segments);
     assert.strictEqual(match.data.segments.filter(s => s.type === 'player-summary').length, 10);
-    assert.strictEqual(match.data.metadata.wafContainment, true);
-    assert.strictEqual(match.data.metadata.synthetic, true);
+    assert.strictEqual(match.data.metadata.synthetic, true, 'demo explícito');
   });
 
 check('cli.js parse: dispatcher procesa archivo de volcado de texto sin errores',
@@ -457,17 +455,6 @@ check('cli.js match (WAF resilient): URL remota protegida ejecuta Zero-Crash con
     assert.ok(out.includes('DIAGNÓSTICO 360°') && out.includes('kirtmy#000'));
     assert.ok(out.includes('RADAR DE DOMINIO'));
     assert.ok(out.includes('SINTÉTICA'), 'modo demo debe declarar procedencia sintética');
-  });
-
-check('browser_cache_harvester: decompressBuffer y detección de rutas Chromium',
-  () => {
-    const raw = Buffer.from(JSON.stringify({ ok: true, timestamp: Date.now() }));
-    const zlib = require('zlib');
-    const br = zlib.brotliCompressSync(raw);
-    const dec = decompressBuffer(br);
-    assert.ok(dec && JSON.parse(dec.toString('utf8')).ok === true);
-    const paths = getChromiumCachePaths();
-    assert.ok(Array.isArray(paths));
   });
 
 check('career_telemetry: desglose de horas competitivas vs general y cronología de hitos',
@@ -549,21 +536,6 @@ check('cli.js career & diagnose: ejecución exitosa de los nuevos comandos con E
   });
 
 // ---- Blindaje adversarial v4.1: casos límite y edge cases ----
-
-check('harvester: cacheDir inexistente y data_1 truncado no lanzan (retornan [])',
-  () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'harv-edge-'));
-    try {
-      assert.deepStrictEqual(extractFromCacheDirectory(path.join(tmp, 'no-existe'), null), []);
-      const truncDir = path.join(tmp, 'trunc');
-      fs.mkdirSync(truncDir);
-      fs.writeFileSync(path.join(truncDir, 'data_1'), Buffer.alloc(100));
-      const res = extractFromCacheDirectory(truncDir, null);
-      assert.ok(Array.isArray(res), 'debe retornar array aunque el blockfile esté truncado');
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
-  });
 
 check('ingestor: options.matchId determinista y sin random en contrato',
   () => {
@@ -714,7 +686,7 @@ check('ingestor fail-closed: archivo inexistente y URL no canónica lanzan sin a
       const missing = path.join(tmp, 'no-existe.json');
       assert.throws(() => resolveMatchDataResilient(missing, 'Test#0001'), /no encontrado|no resoluble|Sin telemetría/i);
       assert.throws(() => resolveMatchDataResilient('../../examples/sample_match.json', 'Test#0001'), /canónico|no resoluble|Sin telemetría/i);
-      assert.throws(() => fetchMatch('../../examples/sample_match.json'), /canónico/);
+      assert.throws(() => fetchMatch('../../examples/sample_match.json'), /retirada|no es una fuente/);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -727,8 +699,7 @@ check('ingestor demo: --demo emite sintético con procedencia explícita',
     fm.fetchMatch = () => { throw new Error('Simulated WAF 403'); };
     try {
       const r = resolveMatchDataResilient('https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04', 'Test#0001', { allowSynthetic: true });
-      assert.strictEqual(r.data.metadata.synthetic, true);
-      assert.strictEqual(r.data.metadata.wafContainment, true);
+      assert.strictEqual(r.data.metadata.synthetic, true, 'demo declarado');
       assert.ok(Array.isArray(r.data.metadata.ingestionDiagnostics) && r.data.metadata.ingestionDiagnostics.length > 0);
       assert.throws(
         () => resolveMatchDataResilient('https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04', 'Test#0001'),
@@ -912,7 +883,7 @@ check('ingestor: IDs no-archivo no provocan sondas fs; parse sin entrada falla',
     fsMod.existsSync = (...a) => { probed.push('existsSync'); return origExists(...a); };
     fsMod.statSync = (...a) => { probed.push('statSync'); return origStat(...a); };
     try {
-      assert.throws(() => resolveMatchDataResilient('..%2f..%2fx', 'X#1'), /canónico/);
+      assert.throws(() => resolveMatchDataResilient('..%2f..%2fx', 'X#1'), /no resoluble/);
     } finally {
       fsMod.existsSync = origExists;
       fsMod.statSync = origStat;
@@ -2407,6 +2378,33 @@ check('consensus: responde al perfil real y declara evidencia insuficiente',
     assert.ok(insufficient.missing.length > 0, 'debe declarar evidencia faltante');
     const src = fs.readFileSync(path.join(scriptsDir, 'consensus_arbiter.js'), 'utf8');
     assert.ok(!/primerosDuelos|gestionEconomica|spacingYTrades|radar\.supervivencia/.test(src), 'no debe consumir claves inexistentes del perfil');
+  });
+
+check('privacidad: ninguna ruta ejecutable contacta Tracker (stubs fail-closed)',
+  () => {
+    const offenders = [];
+    for (const f of fs.readdirSync(scriptsDir).filter(n => n.endsWith('.js'))) {
+      const src = fs.readFileSync(path.join(scriptsDir, f), 'utf8');
+      if (/api\.tracker\.gg/.test(src) || /tracker\.gg\/api/.test(src)) offenders.push(f);
+    }
+    assert.deepStrictEqual(offenders, [], `referencias a la API de Tracker: ${offenders.join(', ')}`);
+    for (const [file, arg] of [
+      ['fetch_match.js', 'https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04'],
+      ['fetch_profile.js', 'TenZ#0001']
+    ]) {
+      let code = 0;
+      let out = '';
+      try { execFileSync(process.execPath, [path.join(scriptsDir, file), arg], { encoding: 'utf8', timeout: 15000 }); }
+      catch (e) { code = e.status; out = String(e.stdout || '') + String(e.stderr || ''); }
+      assert.notStrictEqual(code, 0, `${file} debe fallar cerrado al ejecutarse directo`);
+      assert.ok(/retirad|Riot RSO|rutas admitidas/i.test(out), `${file} debe indicar rutas admitidas`);
+    }
+    for (const file of ['fetch_match.js', 'fetch_profile.js']) {
+      const src = fs.readFileSync(path.join(scriptsDir, file), 'utf8');
+      assert.ok(!/require\(['"]\.\/http_fetch['"]\)/.test(src), `${file} no debe importar la capa de red`);
+      assert.ok(!/require\(['"]https?['"]\)/.test(src), `${file} no debe importar https`);
+      assert.ok(!/api\.tracker\.gg/.test(src), `${file} sin endpoint de Tracker`);
+    }
   });
 
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben

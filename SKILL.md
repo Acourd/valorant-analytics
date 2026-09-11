@@ -1,6 +1,6 @@
 ---
 name: valorant-analytics
-description: Advanced Valorant competitive match telemetry, player performance profiling, heuristic MMR-signal analysis (unverified hypothesis, not internal MMR), tactical duel analysis, round economy breakdown, adaptive 15-minute Kovaaks aim routine generation, 360° autodiagnostic radar, and duo synergy auditing via Tracker.gg and OP.GG APIs.
+description: Advanced Valorant competitive match telemetry, player performance profiling, heuristic MMR-signal analysis (unverified hypothesis, not internal MMR), tactical duel analysis, round economy breakdown, adaptive 15-minute Kovaaks aim routine generation, 360° autodiagnostic radar, and duo synergy auditing from user-provided JSON, scoreboard text or screenshots (no automated Tracker fetching).
 ---
 
 # Valorant Analytics Skill (v2.0)
@@ -16,8 +16,8 @@ description: Advanced Valorant competitive match telemetry, player performance p
 Activate this skill whenever the user asks to:
 1. **Generate a 360° autodiagnostic learning profile** to detect personal ELO leaks and receive immediate training prescriptions.
 2. **Audit duo or teammate synergy** (re-frag efficiency, carry load differential, role compatibility).
-3. **Analyze a Valorant match URL or match ID** (e.g. `tracker.gg/valorant/match/...` or raw UUID).
-4. **Evaluate a player's profile or smurf status** (e.g. `tracker.gg/valorant/profile/riot/...` or `op.gg/valorant/profile/...`).
+3. **Analyze a user-provided match JSON/export or pasted scoreboard text.**
+4. **Evaluate a player profile from a JSON/export the user provides.**
 5. **Compare duo/teammate performance, agent suitability, or role impact** (e.g. Iso vs. Clove vs. Reyna vs. Jett).
 6. **Flag possible signs of internal MMR anchoring ("MMR Drag") from aggregate stats as an unverified heuristic** (never as a proven fact), alongside lobby matchmaking disparities.
 7. **Break down round economy performance** (Pistol, Eco, Semi-Buy, Full Buy conversion rates).
@@ -53,14 +53,12 @@ node cli.js profile "Handle#Tag"
 # 7. Zero-Cloud Instant Offline Calibration Mode:
 node cli.js calibrate [player_handle] [target_rank] [role]
 
-# 8. Cosecha Determinista de Caché Local (Anti-WAF Cloudflare 403):
-node cli.js harvest [player_handle]
 
-# 9. Auditoría de Carrera y Horas Exactas en Partida:
-node cli.js career <profile.json|handle>
+# 8. Auditoría de Carrera y Horas Exactas en Partida:
+node cli.js career <profile.json>
 
-# 10. Heuristic MMR Signal & Impact-vs-Volume Pattern (UNVERIFIED, not internal MMR):
-node cli.js diagnose <profile.json|handle>
+# 9. Heuristic MMR Signal & Impact-vs-Volume Pattern (UNVERIFIED, not internal MMR):
+node cli.js diagnose <profile.json>
 ```
 
 ---

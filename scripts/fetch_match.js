@@ -1,12 +1,19 @@
 #!/usr/bin/env node
-/**
- * fetch_match.js - Valorant Match Telemetry Extractor (With Exponential Backoff)
- * Fetches match details from Tracker.gg internal API with custom headers, retry logic, and Unicode support.
- * Usage: node fetch_match.js <match_id_or_url> [output_file.json]
- */
+'use strict';
 
-const fs = require('fs');
-const { httpsGetJson } = require('./http_fetch');
+/**
+ * fetch_match.js - Utilidades LOCALES de match ID (SIN red).
+ *
+ * La descarga remota está RETIRADA: Tracker.gg no es una fuente estable,
+ * autorizada ni consentida. Este módulo solo conserva parsing puro:
+ *   - extractMatchId(source)
+ *   - CANONICAL_MATCH_ID
+ *   - parseMatchSummary(raw)
+ *
+ * Para obtener telemetría, aporta un JSON/export del usuario, el texto del
+ * marcador o una captura con confirmación. La vía autorizada es Riot RSO
+ * (pendiente de credenciales).
+ */
 
 function extractMatchId(input) {
   if (!input) return null;
@@ -16,29 +23,25 @@ function extractMatchId(input) {
 
 const CANONICAL_MATCH_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 
-function fetchMatchWithRetry(matchId, maxRetries = 3) {
-  if (!CANONICAL_MATCH_ID.test(String(matchId || ''))) {
-    throw new Error(`Match ID no canónico: "${matchId}". Se requiere UUID v4 de Tracker.gg (p. ej. cb4ebb70-4ecf-425d-8aaf-3bf9cf718631).`);
-  }
-  const url = `https://api.tracker.gg/api/v2/valorant/standard/matches/${matchId}`;
-  const data = httpsGetJson(url, { maxRetries, timeoutMs: 15000 });
-  if (data.errors && data.errors.length > 0 && !data.data) {
-    throw new Error(data.errors[0]?.message || 'API Error response');
-  }
-  return data;
+/**
+ * Stub fail-closed: la descarga remota fue retirada. No realiza ninguna
+ * petición de red.
+ */
+function fetchMatch() {
+  throw new Error('Descarga remota retirada: Tracker.gg no es una fuente estable, autorizada ni consentida. Aporta un JSON/export del usuario, texto del marcador o captura con confirmación; la vía autorizada es Riot RSO (pendiente de credenciales).');
 }
 
 function parseMatchSummary(data) {
   const meta = data.data?.metadata || {};
   const segments = data.data?.segments || [];
-  
+
   const mapName = meta.mapName || 'Unknown';
   const modeName = meta.modeName || 'Competitive';
   const timestamp = meta.timestamp || '';
-  
+
   const teamSummaries = segments.filter(s => s.type === 'team-summary');
   const playerSummaries = segments.filter(s => s.type === 'player-summary');
-  
+
   const teams = {};
   teamSummaries.forEach(t => {
     teams[t.attributes?.teamId] = {
@@ -46,7 +49,7 @@ function parseMatchSummary(data) {
       score: `${t.stats?.roundsWon?.value || 0}-${t.stats?.roundsLost?.value || 0}`
     };
   });
-  
+
   const players = playerSummaries.map(p => {
     const pMeta = p.metadata || {};
     const stats = p.stats || {};
@@ -85,43 +88,8 @@ function parseMatchSummary(data) {
 }
 
 if (require.main === module) {
-  const args = process.argv.slice(2);
-  if (!args[0]) {
-    console.error('Usage: node fetch_match.js <match_id_or_url> [output_file.json]');
-    process.exit(1);
-  }
-
-  const matchId = extractMatchId(args[0]);
-  console.log(`[valorant-analytics] Fetching telemetry for match: ${matchId}...`);
-  
-  try {
-    const raw = fetchMatchWithRetry(matchId);
-    if (args[1]) {
-      fs.writeFileSync(args[1], JSON.stringify(raw, null, 2));
-      console.log(`[valorant-analytics] Raw data saved to ${args[1]}`);
-    }
-    
-    const summary = parseMatchSummary(raw);
-    console.log(`\n=== MATCH SUMMARY: ${summary.map} (${summary.mode}) ===`);
-    console.log(`Date: ${summary.date}`);
-    console.log(`Teams: Red (${summary.teams.Red?.score || 'N/A'}) vs Blue (${summary.teams.Blue?.score || 'N/A'})`);
-    console.table(summary.players.map(p => ({
-      Handle: p.handle,
-      Team: p.team,
-      Agent: p.agent,
-      Rank: p.rank,
-      KDA: p.kda,
-      KD: p.kd,
-      ACS: p.acs,
-      ADR: p.adr,
-      'HS%': `${p.hsPct}%`,
-      'FK/FD': p.fk_fd,
-      KAST: p.kast
-    })));
-  } catch (e) {
-    console.error(`[valorant-analytics] Error:`, e.message);
-    process.exit(1);
-  }
+  console.error('Este script ya no descarga partidas (Tracker retirado). Rutas admitidas: JSON/export del usuario, texto del marcador, captura con confirmación o Riot RSO.');
+  process.exit(1);
 }
 
-module.exports = { extractMatchId, fetchMatch: fetchMatchWithRetry, parseMatchSummary, CANONICAL_MATCH_ID };
+module.exports = { extractMatchId, fetchMatch, parseMatchSummary, CANONICAL_MATCH_ID };

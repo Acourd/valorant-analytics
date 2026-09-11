@@ -138,7 +138,7 @@ console.log('7. Probando resolveMatchDataResilient ante bloqueo WAF (fail-closed
 const fakeWafUrl = 'https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04';
 assert.throws(
   () => resolveMatchDataResilient(fakeWafUrl, 'kirtmy#000', { map: 'Ascent' }),
-  /Sin telemetría verificable/,
+  /no soportada|Riot RSO/,
   'Sin allowSynthetic debe fallar en vez de fabricar análisis'
 );
 const resilientMatch = resolveMatchDataResilient(fakeWafUrl, 'kirtmy#000', { map: 'Ascent', allowSynthetic: true });
