@@ -2,7 +2,7 @@
 'use strict';
 
 /**
- * consensus_arbiter.js - Byzantine Multi-Lens Coaching Consensus Engine
+ * consensus_arbiter.js - Multi-Lens Coaching Consensus Engine (determinista)
  *
  * Arbitraje multi-lente sobre el CONTRATO REAL de `learning_profile`:
  *   - `radar` (claves precisionMecanica, duelosDeApertura, disciplinaEconomica,
@@ -118,7 +118,9 @@ class ConsensusArbiter {
   }
 
   /**
-   * Reconcilia los votos de los lentes con lógica de quórum BFT. Si algún
+   * Reconcilia los votos de los lentes con quórum DETERMINISTA entre 3 lentes
+ * locales. NO es tolerancia bizantina real: no hay nodos remotos, firmas
+ * cruzadas ni adversarios externos. Si algún
    * lente carece de evidencia observada, el veredicto lo declara.
    */
   synthesizeConsensus(profile) {
@@ -147,7 +149,7 @@ class ConsensusArbiter {
     );
 
     const quorumAchieved = criticalActions.length >= 2;
-    let verdict = quorumAchieved ? 'BYZANTINE_QUORUM_REACHED' : 'UNANIMOUS_STABILITY';
+    let verdict = quorumAchieved ? 'MULTI_LENS_QUORUM_REACHED' : 'UNANIMOUS_STABILITY';
     if (criticalActions.length === 0) verdict = 'ALL_LENSES_NOMINAL';
 
     return {

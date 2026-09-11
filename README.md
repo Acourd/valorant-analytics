@@ -178,7 +178,7 @@ El despachador maestro `cli.js` provee acceso unificado a todas las capacidades 
 | **Árbol Merkle** | `node cli.js merkle [partida.json]` | Construye el árbol Merkle de eventos discretos y emite pruebas de inclusión. |
 | **Session Guardian** | `node cli.js guardian [partida.json] [jugador]` | Monitorea fatiga neuromuscular acumulada y calcula índice de tilt cognitivo. |
 | **Deriva Táctica** | `node cli.js drift [partida.json] [jugador]` | Calcula divergencia de lado y entropía de Shannon en la distribución de rondas. |
-| **Consenso Bizantino** | `node cli.js consensus [partida.json] [jugador]` | Arbitraje BFT multi-lente tolerante a fallos para síntesis de rendimiento. |
+| **Consenso Multi-Lente** | `node cli.js consensus [partida.json] [jugador]` | Arbitraje determinista entre 3 lentes locales (NO es BFT real) para síntesis de rendimiento. |
 | **Manifiesto SBOM** | `node cli.js sbom` | Genera el manifiesto SBOM en formato CycloneDX v1.5 con 0 dependencias externas. |
 
 ---

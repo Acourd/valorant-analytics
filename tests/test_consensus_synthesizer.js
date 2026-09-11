@@ -8,7 +8,7 @@ const { RoutineSynthesizer } = require(path.join(__dirname, '..', 'scripts', 'ro
 
 console.log('[TEST] Iniciando verificación de Consensus Arbiter & Routine Synthesizer...');
 
-// 1. Consensus Arbiter (BFT Quorum)
+// 1. Consensus Arbiter (quórum determinista multi-lente)
 const arbiter = new ConsensusArbiter();
 const poorTelemetry = {
   provenance: 'normalized_input',
@@ -24,8 +24,8 @@ const poorTelemetry = {
 };
 
 const consensusResult = arbiter.synthesizeConsensus(poorTelemetry);
-assert.strictEqual(consensusResult.quorumAchieved, true, 'Quórum bizantino debe alcanzarse con múltiples áreas críticas');
-assert.strictEqual(consensusResult.verdict, 'BYZANTINE_QUORUM_REACHED');
+assert.strictEqual(consensusResult.quorumAchieved, true, 'Quórum multi-lente debe alcanzarse con múltiples áreas críticas');
+assert.strictEqual(consensusResult.verdict, 'MULTI_LENS_QUORUM_REACHED');
 assert.strictEqual(consensusResult.participatingLenses, 3);
 assert(consensusResult.synthesis.length === 3);
 

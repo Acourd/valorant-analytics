@@ -354,10 +354,10 @@ check('cli.js drift: cálculo de deriva táctica y entropía de Shanon',
     assert.ok(out.includes('Entropía de Quarters'));
   });
 
-check('cli.js consensus: arbitraje bizantino multi-lente con quórum BFT',
+check('cli.js consensus: arbitraje multi-lente determinista',
   () => {
     const out = cliOk(['consensus', sampleFile, 'TenZ#0001']);
-    assert.ok(out.includes('SÍNTESIS DE CONSENSO BIZANTINO'));
+    assert.ok(out.includes('SÍNTESIS DE CONSENSO MULTI-LENTE'));
     assert.ok(out.includes('Lentes Participantes:  3'));
   });
 
@@ -2392,7 +2392,7 @@ check('consensus: responde al perfil real y declara evidencia insuficiente',
       radar: { precisionMecanica: '30 / 100', duelosDeApertura: '28 / 100', disciplinaEconomica: '30 / 100', macrogamePosicionamiento: '35 / 100', composturaClutch: '30 / 100' }
     });
     assert.strictEqual(weak.quorumAchieved, true);
-    assert.strictEqual(weak.verdict, 'BYZANTINE_QUORUM_REACHED');
+    assert.strictEqual(weak.verdict, 'MULTI_LENS_QUORUM_REACHED');
     assert.ok(/normaliz/i.test(weak.provenanceLabel), 'procedencia visible');
     const strong = arbiter.synthesizeConsensus({
       provenance: 'normalized_input',

@@ -4,11 +4,11 @@ const assert = require('assert');
 const path = require('path');
 const { ConsensusArbiter, TacticalLens } = require(path.join(__dirname, '..', 'scripts', 'consensus_arbiter'));
 
-console.log('=== Test Suite: @valorant-analytics Byzantine Fault Tolerance Engine ===\n');
+console.log('=== Test Suite: @valorant-analytics Multi-Lens Deterministic Consensus ===\n');
 
-// 1. Simulación de lente bizantina maliciosa / equivocante
-class RogueByzantineLens extends TacticalLens {
-  constructor(name = 'RogueByzantineLens') {
+// 1. Simulación de lente DISIDENTE (no bizantino real)
+class RogueDisidentLens extends TacticalLens {
+  constructor(name = 'RogueDisidentLens') {
     super(name, 1.0);
     this.faultInjected = true;
   }
@@ -18,14 +18,14 @@ class RogueByzantineLens extends TacticalLens {
       lens: this.name,
       priority: 'ADVERSARIAL_DISRUPTION',
       confidence: 0.99,
-      recommendation: 'Inyección bizantina deliberada de prescripción contradictoria.'
+      recommendation: 'Recomendación contradictoria deliberada del lente disidente.'
     };
   }
 }
 
-// 2. Sistema 3+1 (3 honestos, 1 bizantino) -> Quórum sostenido
+// 2. Sistema 3+1 (3 lentes normales, 1 disidente) -> quórum determinista
 const arbiter = new ConsensusArbiter();
-arbiter.lenses.push(new RogueByzantineLens());
+arbiter.lenses.push(new RogueDisidentLens());
 
 const criticalTelemetry = {
   provenance: 'normalized_input',
@@ -43,9 +43,9 @@ const criticalTelemetry = {
 const res = arbiter.synthesizeConsensus(criticalTelemetry);
 assert.strictEqual(res.participatingLenses, 4);
 assert.strictEqual(res.quorumAchieved, true);
-assert.strictEqual(res.verdict, 'BYZANTINE_QUORUM_REACHED');
+assert.strictEqual(res.verdict, 'MULTI_LENS_QUORUM_REACHED');
 assert.notStrictEqual(res.actionablePriority, 'ADVERSARIAL_DISRUPTION');
-console.log('✓ Quórum bizantino BFT (3/4) toleró la inyección de 1 lente adversarial disidente');
+console.log('✓ Quórum multi-lente determinista (3/4) ignoró al lente disidente');
 
 // 3. Quórum con telemetría nominal
 const nominalTelemetry = {
@@ -68,5 +68,5 @@ assert.strictEqual(nomRes.verdict, 'ALL_LENSES_NOMINAL');
 assert.strictEqual(nomRes.actionablePriority, 'MAINTAIN_CURRENT_PLAYSTYLE');
 console.log('✓ Telemetría óptima reconocida sin falsos positivos en lentes tácticas');
 
-console.log('\nPASS @valorant-analytics/test_byzantine_fault — Tolerancia a fallos bizantinos verificada (Exit Code 0).');
+console.log('\nPASS @valorant-analytics/test_consensus_multilens — Consenso determinista multi-lente verificado (Exit Code 0).');
 process.exit(0);

@@ -3,7 +3,7 @@
  * cli.js - Master Universal CLI & Intelligent Dispatcher for valorant-analytics
  * v3.0: Sovereign Multi-Engine Architecture.
  * Includes Formal Invariant Validation, Ed25519 DSSE Attestation, Merkle Ledgers,
- * Preflight Sandboxing, Session Guardian, Drift Detection & Byzantine Consensus.
+ * Preflight Sandboxing, Session Guardian, Drift Detection & Multi-Lens Consensus.
  *
  * Usage:
  *   node cli.js "Derke#0001"                             ➔ Perfil Multi-Plataforma
@@ -17,7 +17,7 @@
  *   node cli.js merkle <archivo>                         ➔ Árbol Merkle de Telemetría
  *   node cli.js guardian <archivo> [jugador]             ➔ Monitor de Fatiga y Tilt
  *   node cli.js drift <archivo> [jugador]                ➔ Radar de Deriva y Entropía
- *   node cli.js consensus <archivo> [jugador]            ➔ Síntesis Bizantina Multi-Lente
+ *   node cli.js consensus <archivo> [jugador]            ➔ Síntesis Multi-Lente (determinista)
  *   node cli.js synthesize <archivo> [jugador]           ➔ Rutina Adaptativa Evolutiva
  *   node cli.js sbom                                     ➔ Manifiesto CycloneDX SBOM
  */
@@ -281,7 +281,7 @@ if (!command || command === '--help' || command === '-h') {
   console.log(`  node cli.js merkle <partida_o_id>                 ➔ Árbol Merkle de Eventos y Pruebas`);
   console.log(`  node cli.js guardian <partida_o_id> [jugador]     ➔ Monitor de Fatiga y Tilt`);
   console.log(`  node cli.js drift <partida_o_id> [jugador]        ➔ Radar de Deriva y Entropía`);
-  console.log(`  node cli.js consensus <partida_o_id> [jugador]    ➔ Síntesis Bizantina Multi-Lente`);
+  console.log(`  node cli.js consensus <partida_o_id> [jugador]    ➔ Síntesis Multi-Lente (determinista)`);
   console.log(`  node cli.js synthesize <partida_o_id> [jugador]   ➔ Rutina Adaptativa Evolutiva`);
   console.log(`  node cli.js sbom                                  ➔ Manifiesto CycloneDX SBOM`);
   console.log(`\nEJEMPLOS:`);
@@ -681,7 +681,7 @@ try {
     const report = arbiter.synthesizeConsensus(profile);
 
     printBanner();
-    console.log(`🧠 SÍNTESIS DE CONSENSO BIZANTINO MULTI-LENTE (BFT)`);
+    console.log(`🧠 SÍNTESIS DE CONSENSO MULTI-LENTE (determinista; 3 lentes locales)`);
     console.log(`Jugador: ${profile.player} | Veredicto: ${report.verdict} | Procedencia: ${report.provenanceLabel}`);
     console.log(`------------------------------------------------------------------------`);
     console.log(`  • Lentes Participantes:  ${report.participatingLenses}`);

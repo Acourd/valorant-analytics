@@ -178,7 +178,7 @@ The master dispatcher `cli.js` provides unified access to all platform engines:
 | **Merkle Tree** | `node cli.js merkle [match.json]` | Constructs discrete round Merkle trees and issues inclusion proofs. |
 | **Session Guardian** | `node cli.js guardian [match.json] [player]` | Monitors cumulative neuromuscular fatigue and calculates cognitive tilt index. |
 | **Tactical Drift** | `node cli.js drift [match.json] [player]` | Computes side divergence and Shannon entropy across round performance quarters. |
-| **Byzantine Consensus**| `node cli.js consensus [match.json] [player]` | Multi-lens BFT consensus arbiter to deliver unified performance verdicts. |
+| **Multi-Lens Consensus**| `node cli.js consensus [match.json] [player]` | Deterministic arbitration across 3 local lenses (not real BFT) to deliver unified performance verdicts. |
 | **CycloneDX SBOM** | `node cli.js sbom` | Exports an official CycloneDX v1.5 SBOM manifest with 0 external dependencies. |
 
 ---
