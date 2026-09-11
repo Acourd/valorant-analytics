@@ -37,8 +37,9 @@ function auditDuoSynergy(matchData, handle1, handle2) {
     };
   });
 
-  const p1Key = Object.keys(playerMap).find(h => h.toLowerCase().includes(handle1.toLowerCase()));
-  const p2Key = Object.keys(playerMap).find(h => h.toLowerCase().includes(handle2.toLowerCase()));
+  const { resolveExactHandle } = require('./data_contract');
+  const p1Key = resolveExactHandle(Object.keys(playerMap), handle1, { allowFirstIfMissing: false });
+  const p2Key = resolveExactHandle(Object.keys(playerMap), handle2, { allowFirstIfMissing: false });
 
   if (!p1Key || !p2Key) {
     throw new Error(`Could not find both players in match data. Found: ${p1Key || 'None'} and ${p2Key || 'None'}`);

@@ -28,8 +28,7 @@ function analyzeEconomy(matchData, targetHandle) {
     };
   });
 
-  let target = targetHandle ? Object.keys(playerMap).find(h => h.toLowerCase().includes(targetHandle.toLowerCase())) : Object.keys(playerMap)[0];
-  if (!target) target = Object.keys(playerMap)[0];
+  const target = require('./data_contract').resolveExactHandle(Object.keys(playerMap), targetHandle, { allowFirstIfMissing: true });
 
   const userLoadouts = loadoutSegments.filter(l => (l.metadata?.platformUserHandle || l.attributes?.platformUserIdentifier) === target);
 

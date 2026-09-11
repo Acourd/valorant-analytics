@@ -7,7 +7,7 @@
 [![Versión](https://img.shields.io/badge/versión-4.5_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
 [![Runtime](https://img.shields.io/badge/runtime-Node.js_18%2B_Nativo-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Dependencias](https://img.shields.io/badge/dependencias-0_npm_(Core)-38BDF8.svg?style=for-the-badge&logo=codeforces&logoColor=white)](package.json)
-[![Pruebas](https://img.shields.io/badge/tests-115%2F115_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
+[![Pruebas](https://img.shields.io/badge/tests-121%2F121_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
 [![Auditoría](https://img.shields.io/badge/auditoría-100%2F100_Verificado-8B5CF6.svg?style=for-the-badge&logo=codereview&logoColor=white)](opencode_tester.js)
 [![Licencia](https://img.shields.io/badge/licencia-MIT-6B7280.svg?style=for-the-badge)](LICENSE)
 
@@ -178,7 +178,7 @@ El despachador maestro `cli.js` provee acceso unificado a todas las capacidades 
 | **Árbol Merkle** | `node cli.js merkle [partida.json]` | Construye el árbol Merkle de eventos discretos y emite pruebas de inclusión. |
 | **Session Guardian** | `node cli.js guardian [partida.json] [jugador]` | Monitorea fatiga neuromuscular acumulada y calcula índice de tilt cognitivo. |
 | **Deriva Táctica** | `node cli.js drift [partida.json] [jugador]` | Calcula divergencia de lado y entropía de Shannon en la distribución de rondas. |
-| **Consenso Bizantino** | `node cli.js consensus [partida.json] [jugador]` | Arbitraje BFT multi-lente tolerante a fallos para síntesis de rendimiento. |
+| **Consenso Multi-Lente** | `node cli.js consensus [partida.json] [jugador]` | Arbitraje determinista entre 3 lentes locales (NO es BFT real) para síntesis de rendimiento. |
 | **Manifiesto SBOM** | `node cli.js sbom` | Genera el manifiesto SBOM en formato CycloneDX v1.5 con 0 dependencias externas. |
 
 ---
@@ -202,7 +202,7 @@ Si utilizas **Google Gemini (Gems)** o **OpenAI (Custom GPTs)**, el archivo [`st
 - **Red solo bajo demanda explícita:** los comandos `fetch_profile` / `fetch_match` (y URLs remotas en `match`) consultan la API pública de Tracker.gg con reintento y backoff; todo lo demás (JSON local, scoreboards, caché) es 100% offline. Un perfil privado devuelve error instructivo, jamás datos inventados.
 - **Zero Dependencias NPM:** Diseñado exclusivamente sobre las librerías estándar de Node.js (`fs`, `path`, `zlib`, `crypto`, `child_process`). Cero descargas externas.
 - **Compatibilidad Multiplataforma:** Probado y garantizado en Windows 11 (PowerShell/CMD), macOS (zsh) y Linux (bash).
-- **Garantía Determinista:** 115 pruebas automatizadas verificadas con Exit Code 0 (`node test_suite.js`) y puntuación perfecta de 100/100 en auditorías de código agéntico (`node opencode_tester.js`).
+- **Garantía Determinista:** 121 pruebas automatizadas verificadas con Exit Code 0 (`node test_suite.js`) y puntuación perfecta de 100/100 en auditorías de código agéntico (`node opencode_tester.js`).
 
 ---
 

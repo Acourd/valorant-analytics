@@ -1,98 +1,93 @@
 #!/usr/bin/env node
 /**
  * kovaaks_generator.js - Adaptive 15-Minute Kovaaks Aim Routine Generator
- * Generates custom Kovaaks training playlists based on match telemetry, map geometry,
- * and specific mechanical bottlenecks (horizontal micro-adjustments, vertical tracking, dynamic clicks).
- * 
+ *
+ * Genera la rutina SOLO si existe evidencia mecánica observada para una
+ * debilidad con umbral documentado y ejercicio disponible (contrato único
+ * `routine_contract`). Sin HS% por defecto, sin sensibilidad inventada y sin
+ * mapa por defecto: si falta evidencia devuelve RUTINA OMITIDA con faltantes.
+ *
  * Usage: node kovaaks_generator.js <match_id_or_json_file> [target_player_handle]
  */
 
 const fs = require('fs');
 const { extractMatchId, fetchMatch } = require('./fetch_match');
 const { parseDuels } = require('./duel_matrix');
+const { resolveExactHandle, sourceProvenance, provenanceLabel, observedNumber } = require('./data_contract');
+const { buildEvidence, canGenerateRoutine, KOVAAKS_SCENARIOS } = require('./routine_contract');
+const { analyzeWeaponTelemetry } = require('./weapon_telemetry');
 
 function generateKovaaksRoutine(matchData, targetHandle) {
-  const meta = matchData.data?.metadata || {};
-  const segments = matchData.data?.segments || [];
-  const mapName = meta.mapName || 'Ascent';
+  if (!matchData || !matchData.data) {
+    throw new Error('Datos de partida inválidos: estructura matchData.data ausente.');
+  }
+  const meta = matchData.data.metadata || {};
+  const segments = matchData.data.segments || [];
 
+  // Resolución canónica exacta: objetivo inexistente/ambiguo => fail-closed.
   const { playerMap, target } = parseDuels(matchData, targetHandle);
-  const p = target ? playerMap[target] : Object.values(playerMap)[0];
-  const stats = p ? (segments.find(s => s.type === 'player-summary' && (s.metadata?.platformUserHandle === p.handle || s.attributes?.platformUserIdentifier === p.handle))?.stats || {}) : {};
+  const handle = target || resolveExactHandle(Object.keys(playerMap), targetHandle, { allowFirstIfMissing: true });
 
-  const hsPct = parseFloat(stats.hsAccuracy?.displayValue || stats.headshotsPercentage?.displayValue || '30%');
-  const fk = stats.firstKills?.value || 0;
-  const fd = stats.firstDeaths?.value || 0;
-  const losesOpenings = fd > fk;
-  const isVerticalMap = ['Abyss', 'Split', 'Icebox'].includes(mapName);
+  const summary = segments.find(s => s.type === 'player-summary' &&
+    (s.metadata?.platformUserHandle === handle || s.attributes?.platformUserIdentifier === handle));
+  const stats = (summary && summary.stats) || {};
 
-  const playlist = [];
+  const mechanical = {
+    hsPct: observedNumber(stats, ['hsAccuracy', 'headshotsPercentage']),
+    fk: observedNumber(stats, ['firstKills']),
+    fd: observedNumber(stats, ['firstDeaths']),
+    acs: observedNumber(stats, ['scorePerRound'])
+  };
 
-  // Phase 1: Micro-Calibration & Dynamic Clicking (5 mins)
-  // Prioridad biomecánica: si pierde aperturas (FD>FK) → velocidad de micro-ajuste
-  // y cambio de objetivo; si el HS% es bajo → corrección de primer tiro.
-  if (hsPct < 30 && losesOpenings) {
-    playlist.push({
-      scenario: 'Valorant Microshot Speed / 1w4ts reload',
-      aimLab: 'Sixshot (Aim Lab)',
-      duration: '5 mins (5 sets)',
-      category: 'Dynamic Clicking & Opening Duel Speed',
-      instruction: 'Estás perdiendo duelos de apertura (FD>FK): prioriza la transición entre objetivos a la altura de la cabeza y el 1-tap confirmado antes de desplazarte.'
-    });
-  } else if (hsPct < 30) {
-    playlist.push({
-      scenario: 'Pasu Small Reload / 1wall6targets extra small',
-      aimLab: 'Microshot (Aim Lab)',
-      duration: '5 mins (5 sets)',
-      category: 'Dynamic Clicking & Micro-correction',
-      instruction: 'Enfócate en mover el codo suavemente para el desplazamiento inicial y frena con los dedos. Cero disparos precipitados.'
-    });
-  } else {
-    playlist.push({
-      scenario: 'Valorant Microshot Speed / 1w4ts reload',
-      aimLab: 'Sixshot (Aim Lab)',
-      duration: '5 mins (5 sets)',
-      category: 'Static Speed & Crosshair Snapping',
-      instruction: 'Acelera la transición entre objetivos estáticos a la altura de la cabeza. Confirma el 1-tap antes de mover la mira.'
-    });
+  let weapon = null;
+  try {
+    weapon = analyzeWeaponTelemetry(matchData, handle);
+  } catch (e) {
+    weapon = null;
   }
 
-  // Phase 2: Map Geometry & Vertical/Horizontal Stability (5 mins)
-  if (isVerticalMap) {
-    playlist.push({
-      scenario: 'Vertical Smoothness Training / Popcorn Small',
-      aimLab: 'Smoothsphere (Aim Lab)',
-      duration: '5 mins (5 sets)',
-      category: 'Vertical Control & Forearm Gliding',
-      instruction: `Ajuste para ${mapName}: alivia la presión del antebrazo sobre la alfombrilla para permitir micro-ajustes verticales hacia arriba y abajo sin atascos.`
-    });
-  } else {
-    playlist.push({
-      scenario: 'Close Fast Strafes Easy / Thin Aiming Long',
-      aimLab: 'Strafetrack (Aim Lab)',
-      duration: '5 mins (5 sets)',
-      category: 'Smooth Horizontal Tracking & Counter-Strafe Reading',
-      instruction: 'Sigue objetivos en movimiento horizontal manteniendo el pulso constante sin temblor en 1600 DPI.'
-    });
+  const provenance = sourceProvenance(meta);
+  const evidence = buildEvidence({ profile: { player: handle, provenance, mechanical }, weapon, matchProvenance: provenance, player: handle });
+  const gate = canGenerateRoutine(evidence);
+
+  const base = {
+    player: handle,
+    map: meta.mapName || null,
+    provenance,
+    provenanceLabel: provenanceLabel(provenance),
+    thresholds: gate.thresholds
+  };
+
+  if (!gate.canGenerate) {
+    return {
+      ...base,
+      omitted: true,
+      reason: 'RUTINA OMITIDA',
+      omittedReason: gate.omittedReason,
+      missingMetrics: gate.missingMetrics,
+      requiredData: gate.requiredData,
+      weaknesses: [],
+      routine: [],
+      sensitivityRecommendation: null,
+      sensitivityNote: 'Sin datos de sensibilidad observados: no se emite recomendación.'
+    };
   }
 
-  // Phase 3: High-Reactivity Target Switching & Iso Entry Flow (5 mins)
-  playlist.push({
-    scenario: 'KinTargetSwitch / PatTargetSwitch 360',
-    aimLab: 'Gridshot (Aim Lab)',
-    duration: '5 mins (5 sets)',
-    category: 'Target Switching & Multi-Kill Flow',
-    instruction: 'Simula los dobles contactos de Iso tras abrir con escudo. Elimina el primer objetivo y transfórmalo de inmediato al segundo con un barrido limpio.'
-  });
+  const routine = [];
+  for (const w of gate.weaknesses) {
+    for (const sc of (KOVAAKS_SCENARIOS[w.area] || [])) {
+      routine.push({ ...sc, focus: w.area, reason: w.reason, enablingMetric: w.enablingMetric, threshold: w.threshold });
+    }
+  }
 
   return {
-    player: p?.handle || targetHandle,
-    map: mapName,
-    hsPct: `${hsPct}%`,
-    firstDuels: { firstKills: fk, firstDeaths: fd, entryRating: Math.round((fk / Math.max(1, fk + fd)) * 100) },
-    sensitivityRecommendation: hsPct >= 35 ? 'Mantener 0.110 (176 eDPI) para máxima precisión de primer disparo.' : 'Probar 0.114 - 0.115 (182-184 eDPI) si notas que el brazo se fatiga en Kovaaks.',
-    platforms: ['Kovaaks', 'Aim Lab'],
-    routine: playlist
+    ...base,
+    omitted: false,
+    weaknesses: gate.weaknesses,
+    hsPct: mechanical.hsPct === null ? null : `${mechanical.hsPct}%`,
+    routine,
+    sensitivityRecommendation: null,
+    sensitivityNote: 'Sin datos de sensibilidad observados: no se emite recomendación.'
   };
 }
 
@@ -111,18 +106,25 @@ if (require.main === module) {
     matchData = fetchMatch(matchId);
   }
 
-  const handle = args[1];
-  const res = generateKovaaksRoutine(matchData, handle);
+  const res = generateKovaaksRoutine(matchData, args[1]);
 
-  console.log(`\n=== ADAPTIVE 15-MIN KOVAAKS AIM ROUTINE (AIM LAB): ${res.player} ===`);
-  console.log(`Map Reference: ${res.map} | Match HS%: ${res.hsPct}`);
-  console.log(`Hardware/Sens Advice: ${res.sensitivityRecommendation}`);
-  console.log(`\n--- 15-MINUTE WORKOUT PLAN ---`);
-  res.routine.forEach((r, idx) => {
-    console.log(`\n[Bloque ${idx + 1}] 🎯 ${r.scenario} | ${r.aimLab} (${r.duration})`);
-    console.log(`  Enfoque: ${r.category}`);
-    console.log(`  Técnica: ${r.instruction}`);
-  });
+  if (res.omitted) {
+    console.log(`\n=== ${res.reason}: ${res.player || 'objetivo'} ===`);
+    console.log(`Procedencia: ${res.provenanceLabel}`);
+    console.log(`Motivo: ${res.omittedReason}`);
+    console.log(`Métricas faltantes: ${res.missingMetrics.join(', ') || 'ninguna'}`);
+    console.log(`Datos requeridos: ${res.requiredData.join('; ') || 'ninguna'}`);
+  } else {
+    console.log(`\n=== ADAPTIVE 15-MIN KOVAAKS AIM ROUTINE (AIM LAB): ${res.player} ===`);
+    console.log(`Procedencia: ${res.provenanceLabel} | Mapa: ${res.map || 'n/d'} | HS%: ${res.hsPct || 'n/d'}`);
+    console.log(`Sensibilidad: ${res.sensitivityNote}`);
+    res.routine.forEach((r, idx) => {
+      console.log(`\n[Bloque ${idx + 1}] ${r.scenario} | ${r.aimLab} (${r.duration})`);
+      console.log(`  Enfoque: ${r.category}`);
+      console.log(`  Motivo: ${r.reason}`);
+      console.log(`  Técnica: ${r.instruction}`);
+    });
+  }
 }
 
 module.exports = { generateKovaaksRoutine };

@@ -25,7 +25,7 @@ console.log('✓ CLI: match command verified');
 
 // 2. weapons
 const outWeapons = cliOk(['weapons', sampleFile, 'TenZ#0001']);
-assert.ok(outWeapons.includes('TELEMETRÍA DE ARMAS') && outWeapons.includes('DISTANCIA Y CONVERSIÓN'));
+assert.ok(outWeapons.includes('TELEMETRÍA DE ARMAS') && outWeapons.includes('DISTANCIA: n/d'));
 console.log('✓ CLI: weapons command verified');
 
 // 3. duo
@@ -34,7 +34,7 @@ assert.ok(outDuo.includes('AUDITORÍA DE DÚO'));
 console.log('✓ CLI: duo command verified');
 
 // 4. aim
-const outAim = cliOk(['aim', sampleFile, 'TenZ#0001']);
+const outAim = cliOk(['aim', sampleFile, 'aspas#0001']);
 assert.ok(outAim.includes('RUTINA KOVAAKS 15-MIN'));
 console.log('✓ CLI: aim command verified');
 

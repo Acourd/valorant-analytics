@@ -11,6 +11,7 @@ const fs = require('fs');
 const { extractMatchId, fetchMatch } = require('./fetch_match');
 const { parseDuels } = require('./duel_matrix');
 const { analyzeEconomy } = require('./economy_analyzer');
+const { resolveExactHandle, sourceProvenance, provenanceLabel, mayAssertCauses, observedNumber } = require('./data_contract');
 
 function evaluateLearningProfile(matchData, targetHandle) {
   if (!matchData || typeof matchData !== 'object') {
@@ -32,12 +33,10 @@ function evaluateLearningProfile(matchData, targetHandle) {
     };
   });
 
-  let target = targetHandle ? Object.keys(playerMap).find(h => h.toLowerCase().includes(targetHandle.toLowerCase())) : Object.keys(playerMap)[0];
-  if (!target) target = Object.keys(playerMap)[0];
-  if (!target || !playerMap[target]) {
+  if (Object.keys(playerMap).length === 0) {
     throw new Error('No se encontraron jugadores válidos en la telemetría de la partida.');
   }
-
+  const target = resolveExactHandle(Object.keys(playerMap), targetHandle, { allowFirstIfMissing: true });
   const p = playerMap[target];
   if (!p) {
     throw new Error(`Jugador "${targetHandle}" no encontrado en la partida. Sin telemetría del objetivo no se emite diagnóstico.`);
@@ -82,12 +81,14 @@ function evaluateLearningProfile(matchData, targetHandle) {
 
   // Pillar D: Economic Discipline & Buy Conversion
   let economyScore = 75; // Baseline
+  let economyObserved = false;
   try {
     const econ = analyzeEconomy(matchData, target);
     const fullTier = econ.tiers.find(t => t.tier?.toLowerCase().includes('full'));
     if (fullTier) {
       const fullWinPct = parseFloat(fullTier.winPct);
       economyScore = Math.min(100, Math.round(fullWinPct * 0.8 + 20));
+      economyObserved = true;
     }
   } catch(e) {}
 
@@ -127,11 +128,39 @@ function evaluateLearningProfile(matchData, targetHandle) {
     });
   }
 
+  const provenance = sourceProvenance(meta);
+  const causesAllowed = mayAssertCauses(provenance);
+  // Evidencia mecánica OBSERVADA (null cuando no existe): es la única fuente
+  // que habilita rutinas; no se rellenan valores plausibles.
+  const mechanical = {
+    hsPct: observedNumber(st, ['hsAccuracy', 'headshotsPercentage']),
+    kd: observedNumber(st, ['kdRatio']) !== null
+      ? observedNumber(st, ['kdRatio'])
+      : ((observedNumber(st, ['kills']) !== null && observedNumber(st, ['deaths']) !== null)
+        ? Number((observedNumber(st, ['kills']) / Math.max(1, observedNumber(st, ['deaths']))).toFixed(2))
+        : null),
+    fk: observedNumber(st, ['firstKills']),
+    fd: observedNumber(st, ['firstDeaths']),
+    acs: observedNumber(st, ['scorePerRound']),
+    adr: observedNumber(st, ['damagePerRound']),
+    kast: observedNumber(st, ['kast']),
+    clutches: observedNumber(st, ['clutches'])
+  };
+  // Qué pilares tienen métrica OBSERVADA (consensus no usa los no observados).
+  const pillarsObserved = {
+    precision: mechanical.hsPct !== null || mechanical.kd !== null,
+    macro: mechanical.kast !== null && mechanical.adr !== null,
+    openings: mechanical.fk !== null && mechanical.fd !== null,
+    economy: economyObserved,
+    clutch: mechanical.clutches !== null
+  };
   const dataQuality = unknowns.length === 0 ? 'completa' : (unknowns.length >= 5 ? 'insuficiente' : 'parcial');
-  const finalLeaks = unknowns.length >= 5 ? [] : eloLeaks.slice(0, 3);
+  const finalLeaks = (causesAllowed && unknowns.length < 5) ? eloLeaks.slice(0, 3) : [];
   const dataWarning = unknowns.length >= 5
     ? 'ADVERTENCIA: telemetría del objetivo ausente. No se emiten fugas específicas: conecta datos reales de partida.'
-    : (unknowns.length > 0 ? `Métricas no disponibles y excluidas del diagnóstico: ${unknowns.join(', ')}.` : null);
+    : (!causesAllowed
+      ? `Procedencia: ${provenanceLabel(provenance)}. Se describen observaciones; NO se emiten causas/fugas (requieren fuente verificada).`
+      : (unknowns.length > 0 ? `Métricas no disponibles y excluidas del diagnóstico: ${unknowns.join(', ')}.` : null));
 
   // 3. Actionable Self-Improvement Prescription
   return {
@@ -141,6 +170,9 @@ function evaluateLearningProfile(matchData, targetHandle) {
     map: meta.mapName || 'Unknown',
     result: meta.result || 'Finished',
     dataQuality,
+    provenance,
+    mechanical,
+    pillarsObserved,
     unknowns,
     warning: dataWarning,
     radar: {

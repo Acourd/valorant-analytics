@@ -20,6 +20,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const AGENTS = [
   'Jett', 'Reyna', 'Raze', 'Phoenix', 'Yoru', 'Neon', 'Iso',
@@ -45,6 +46,64 @@ const RANKS = [
   'Radiant'
 ];
 
+function sha256Text(text) {
+  return crypto.createHash('sha256').update(String(text)).digest('hex');
+}
+
+/**
+ * Construye un match SOLO con campos observados (normalized_input): sin
+ * roster por defecto, sin rondas, sin daño, sin economía ni equipos
+ * inventados. Lo ausente se declara en `metadata.missing`.
+ */
+function buildObservedMatch(players, options = {}) {
+  const matchId = options.matchId || `observed-${sha256Text(options.sourceText || JSON.stringify(players)).slice(0, 16)}`;
+  const missing = [];
+  if (!options.rounds) missing.push('rounds');
+  missing.push('teams', 'eventos de ronda (player-round/damage/kills)');
+  const anyMetric = players.some(p => ['kills', 'deaths', 'assists', 'acs', 'adr', 'hsAccuracy'].some(k => p[k] !== null && p[k] !== undefined));
+  if (!anyMetric) missing.push('metricas del marcador');
+
+  const segments = players.map(p => {
+    const stats = {};
+    if (p.kills !== null && p.kills !== undefined) stats.kills = { value: p.kills };
+    if (p.deaths !== null && p.deaths !== undefined) stats.deaths = { value: p.deaths };
+    if (p.assists !== null && p.assists !== undefined) stats.assists = { value: p.assists };
+    if (p.kills !== null && p.kills !== undefined && p.deaths !== null && p.deaths !== undefined) {
+      stats.kdRatio = { displayValue: (p.kills / Math.max(1, p.deaths)).toFixed(2) };
+    }
+    if (p.acs !== null && p.acs !== undefined) stats.scorePerRound = { displayValue: String(p.acs) };
+    if (p.adr !== null && p.adr !== undefined) stats.damagePerRound = { displayValue: String(p.adr) };
+    if (p.hsAccuracy !== null && p.hsAccuracy !== undefined) {
+      stats.hsAccuracy = { displayValue: `${p.hsAccuracy}%` };
+      stats.headshotsPercentage = { displayValue: `${p.hsAccuracy}%` };
+    }
+    if (p.rank) stats.rank = { displayValue: p.rank };
+    return {
+      type: 'player-summary',
+      attributes: { platformUserIdentifier: p.handle },
+      metadata: { platformUserHandle: p.handle, agentName: p.agent || null },
+      stats
+    };
+  });
+
+  return {
+    data: {
+      metadata: {
+        matchId,
+        mapName: options.mapName || null,
+        modeName: null,
+        rounds: options.rounds || null,
+        timestamp: null,
+        ingestionType: 'Observed scoreboard (normalized_input)',
+        provenance: 'normalized_input',
+        derived: { synthesizedRounds: false },
+        missing
+      },
+      segments
+    }
+  };
+}
+
 function parseTextScoreboard(rawText, options = {}) {
   if (!rawText || typeof rawText !== 'string') {
     throw new Error('parseTextScoreboard requiere una cadena de texto no vacía.');
@@ -52,62 +111,65 @@ function parseTextScoreboard(rawText, options = {}) {
 
   const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const players = [];
-  const mapName = options.map || detectMap(rawText) || 'Ascent';
-  const roundsPlayed = options.rounds || 24;
+  const mapName = options.map || detectMap(rawText) || null;
 
   for (const line of lines) {
     const handleMatch = line.match(/([a-zA-Z0-9_\- ]+#[a-zA-Z0-9]+)/);
     if (!handleMatch) continue;
 
     const handle = handleMatch[1].trim();
-    
-    let detectedAgent = 'Iso';
+
+    let agent = null;
     for (const ag of AGENTS) {
-      const regex = new RegExp(`\\b${ag}\\b`, 'i');
-      if (regex.test(line)) {
-        detectedAgent = ag;
-        break;
-      }
+      if (new RegExp(`\\b${ag}\\b`, 'i').test(line)) { agent = ag; break; }
     }
 
-    let detectedRank = 'Gold 2';
+    let rank = null;
     for (const rk of RANKS) {
-      if (line.toLowerCase().includes(rk.toLowerCase())) {
-        detectedRank = rk;
-        break;
-      }
+      if (line.toLowerCase().includes(rk.toLowerCase())) { rank = rk; break; }
     }
 
     let remainder = line.replace(handleMatch[0], '');
-    if (detectedRank) {
-      remainder = remainder.replace(new RegExp(detectedRank.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), '');
+    if (rank) {
+      remainder = remainder.replace(new RegExp(rank.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), '');
     }
-    if (detectedAgent) {
-      remainder = remainder.replace(new RegExp(`\\b${detectedAgent}\\b`, 'i'), '');
+    if (agent) {
+      remainder = remainder.replace(new RegExp(`\\b${agent}\\b`, 'i'), '');
     }
 
     const numbers = (remainder.match(/\b\d+(\.\d+)?%?\b/g) || []).map(n => n.replace('%', ''));
-    const kills = numbers[0] !== undefined ? parseInt(numbers[0], 10) : 16;
-    const deaths = numbers[1] !== undefined ? parseInt(numbers[1], 10) : 14;
-    const assists = numbers[2] !== undefined ? parseInt(numbers[2], 10) : 4;
-    const acs = numbers[3] !== undefined ? parseFloat(numbers[3]) : 210;
-    const adr = numbers[4] !== undefined ? parseFloat(numbers[4]) : 145;
-    const hs = numbers[5] !== undefined ? parseFloat(numbers[5]) : 24;
+    const num = i => (numbers[i] !== undefined && Number.isFinite(Number(numbers[i]))) ? Number(numbers[i]) : null;
 
     players.push({
       handle,
-      agent: detectedAgent,
-      rank: detectedRank,
-      kills,
-      deaths,
-      assists,
-      acs,
-      adr,
-      hsAccuracy: hs
+      agent,
+      rank,
+      kills: num(0),
+      deaths: num(1),
+      assists: num(2),
+      acs: num(3),
+      adr: num(4),
+      hsAccuracy: num(5)
     });
   }
 
-  return assembleRawMatchStructure(players, mapName, roundsPlayed, options.targetPlayer);
+  // La síntesis de rondas/daño/economía SOLO existe en modo demo explícito.
+  if (options.demo === true) {
+    return assembleRawMatchStructure(
+      players,
+      mapName || options.map || 'Ascent',
+      options.rounds || 24,
+      options.targetPlayer || (players[0] && players[0].handle) || null,
+      { ...options, demo: true }
+    );
+  }
+
+  return buildObservedMatch(players, {
+    mapName,
+    matchId: options.matchId,
+    rounds: options.rounds,
+    sourceText: rawText
+  });
 }
 
 function detectMap(text) {
@@ -117,8 +179,11 @@ function detectMap(text) {
   return null;
 }
 
-function assembleRawMatchStructure(extractedPlayers, mapName, roundsPlayed = 24, targetHandle = 'kirtmy#000', options = {}) {
-  const matchId = options.matchId || `resilient-${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 8)}`;
+function assembleRawMatchStructure(extractedPlayers, mapName, roundsPlayed = 24, targetHandle = null, options = {}) {
+  if (options.demo !== true) {
+    throw new Error('assembleRawMatchStructure es el constructor SINTÉTICO de demostración: requiere { demo: true }. Para datos observados usa parseTextScoreboard (normalized_input).');
+  }
+  const matchId = options.matchId || `demo-${sha256Text(`${mapName}|${roundsPlayed}|${targetHandle}|${(extractedPlayers || []).map(p => p && p.handle).join(',')}`).slice(0, 16)}`;
   const defaultRoster = [
     { handle: targetHandle, agent: 'Iso', rank: 'Gold 2', kills: 18, deaths: 15, assists: 4, acs: 238, adr: 156.4, hs: 24.2, fk: 3, fd: 2 },
     { handle: 'Chronicle#0001', agent: 'Sova', rank: 'Gold 3', kills: 16, deaths: 14, assists: 9, acs: 215, adr: 142.1, hs: 22.0, fk: 2, fd: 1 },
@@ -370,7 +435,7 @@ function assembleRawMatchStructure(extractedPlayers, mapName, roundsPlayed = 24,
   };
 }
 
-function resolveMatchDataResilient(source, playerHandle = 'kirtmy#000', options = {}) {
+function resolveMatchDataResilient(source, playerHandle = null, options = {}) {
   const diagnostics = [];
 
   // 0. Si ya es un objeto de partida en memoria, retornarlo directamente
@@ -423,18 +488,46 @@ function resolveMatchDataResilient(source, playerHandle = 'kirtmy#000', options 
     if (!resolved.startsWith(path.resolve(cacheDir) + path.sep)) {
       throw new Error(`Ruta de caché fuera del perímetro permitido: "${matchId}".`);
     }
-    if (fs.existsSync(cacheFile)) {
-      try {
-        return JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
-      } catch (cacheErr) {
-        diagnostics.push(`Caché corrupta en ${cacheFile} (${cacheErr.message}); intentando red.`);
+    const CACHE_TTL_MS = 30 * 24 * 3600 * 1000;
+    const digestOf = data => crypto.createHash('sha256').update(JSON.stringify(data && data.segments ? data.segments : null)).digest('hex');
+    // Lectura ENDURECIDA: sin symlink, digest verificado, caducidad y procedencia
+    // normalizada. Una caché sin digest válido NUNCA se presenta como verificada.
+    let cached = null;
+    try {
+      const lst = fs.lstatSync(cacheFile);
+      if (lst.isSymbolicLink()) {
+        diagnostics.push(`Caché es un enlace simbólico (${cacheFile}); se ignora por perímetro.`);
+      } else if (!lst.isFile()) {
+        diagnostics.push(`Caché no es un archivo regular (${cacheFile}); se ignora.`);
+      } else {
+        const parsed = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+        const cm = (parsed && parsed.data && parsed.data.metadata) || {};
+        const segmentsOk = Array.isArray(parsed && parsed.data && parsed.data.segments);
+        const digestOk = typeof cm.cacheDigest === 'string' && cm.cacheDigest === digestOf(parsed.data);
+        const freshOk = typeof cm.cachedAt === 'string' && (Date.now() - Date.parse(cm.cachedAt)) <= CACHE_TTL_MS;
+        if (!segmentsOk) diagnostics.push('Caché sin segmentos válidos; se ignora.');
+        else if (!digestOk) diagnostics.push('Caché sin digest válido (posible manipulación); se ignora.');
+        else if (!freshOk) diagnostics.push('Caché caducada; se ignora.');
+        else {
+          parsed.data.metadata.provenance = 'normalized_input';
+          parsed.data.metadata.cached = true;
+          cached = parsed;
+        }
       }
+    } catch (e) {
+      if (e.code !== 'ENOENT') diagnostics.push(`Caché no legible (${cacheFile}): ${e.message}`);
     }
+    if (cached) return cached;
 
     try {
       const remoteData = fetchMatch(matchId);
       try {
         fs.mkdirSync(cacheDir, { recursive: true });
+        remoteData.data = remoteData.data || {};
+        remoteData.data.metadata = remoteData.data.metadata || {};
+        remoteData.data.metadata.cachedAt = new Date().toISOString();
+        remoteData.data.metadata.cacheDigest = digestOf(remoteData.data);
+        remoteData.data.metadata.provenance = 'normalized_input';
         fs.writeFileSync(cacheFile, JSON.stringify(remoteData, null, 2));
       } catch (persistErr) {
         diagnostics.push(`No se pudo persistir caché (${persistErr.message}); se responde en memoria.`);
@@ -454,7 +547,7 @@ function resolveMatchDataResilient(source, playerHandle = 'kirtmy#000', options 
       console.log(`   Acción: Generando reconstrucción de telemetría matemáticamente invariante para ${playerHandle}.`);
       console.log(`   ADVERTENCIA: datos SINTÉTICOS, no son la partida real. Solo demostración.\n`);
 
-      const synthetic = assembleRawMatchStructure([], options.map || 'Ascent', 24, playerHandle);
+      const synthetic = assembleRawMatchStructure([], options.map || 'Ascent', 24, playerHandle, { ...options, demo: true });
       synthetic.data.metadata.matchId = matchId;
       synthetic.data.metadata.wafContainment = true;
       synthetic.data.metadata.synthetic = true;

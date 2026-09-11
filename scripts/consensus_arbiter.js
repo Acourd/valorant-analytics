@@ -2,18 +2,28 @@
 'use strict';
 
 /**
- * consensus_arbiter.js - Byzantine Multi-Lens Coaching Consensus Engine
- * 
- * Orchestrates 3 independent tactical analytical lenses to synthesize
- * non-contradictory coaching prescriptions via Byzantine Fault Tolerant (BFT) quorum.
- * 
- * Lenses:
- *  1. Aggressive Entry Lens (Pacing & opening space)
- *  2. Economy & Sentinel Lens (Credit discipline & save cycles)
- *  3. Anchor & Utility Lens (Trade discipline & spacing)
- * 
+ * consensus_arbiter.js - Multi-Lens Coaching Consensus Engine (determinista)
+ *
+ * Arbitraje multi-lente sobre el CONTRATO REAL de `learning_profile`:
+ *   - `radar` (claves precisionMecanica, duelosDeApertura, disciplinaEconomica,
+ *     macrogamePosicionamiento, composturaClutch) como "N / 100".
+ *   - `pillarsObserved` (qué pilares tienen métrica OBSERVADA).
+ *   - `mechanical` (FK/FD/ADR/HS% observados) y `provenance`.
+ *
+ * Sin defaults plausibles: un lente sin métrica observada vota
+ * `INSUFFICIENT_EVIDENCE` y el veredicto global lo declara, en lugar de
+ * inventar estabilidad o quórum.
+ *
  * Zero external dependencies. Pure Node.js CommonJS.
  */
+
+const { provenanceLabel } = require('./data_contract');
+
+function radarScore(profile, key) {
+  const raw = profile && profile.radar ? profile.radar[key] : null;
+  const m = String(raw === undefined || raw === null ? '' : raw).match(/(\d+)\s*\/\s*100/);
+  return m ? parseInt(m[1], 10) : null;
+}
 
 class TacticalLens {
   constructor(name, weight = 1.0) {
@@ -31,28 +41,24 @@ class EntryDuelistLens extends TacticalLens {
     super('EntryDuelistLens', 1.0);
   }
 
-  evaluate(telemetry) {
-    const radar = telemetry.radar || {};
-    const firstDuels = radar.primerosDuelos || 50;
-    const adr = telemetry.adr || 130;
-
-    let priority = 'PACE_BALANCED';
-    let recommendation = 'Ritmo de apertura adecuado.';
-
-    if (firstDuels < 40) {
-      priority = 'INCREASE_FIRST_CONTACT';
-      recommendation = 'Buscar contacto temprano proactivo con cobertura de utilería.';
-    } else if (firstDuels > 70 && adr < 120) {
-      priority = 'TEMPER_AGGRESSION';
-      recommendation = 'Sobrecarga de duelos iniciales de bajo porcentaje. Esperar sincronía de equipo.';
+  evaluate(profile) {
+    const observed = (profile.pillarsObserved || {}).openings;
+    const mech = profile.mechanical || {};
+    if (!observed) {
+      return { lens: this.name, priority: 'INSUFFICIENT_EVIDENCE', confidence: 0, recommendation: 'Sin FK/FD observados: no se emite lectura de aperturas.', missing: ['firstKills/firstDeaths'] };
     }
-
-    return {
-      lens: this.name,
-      priority,
-      confidence: 0.85,
-      recommendation
-    };
+    const score = radarScore(profile, 'duelosDeApertura');
+    const fdOverFk = (mech.fd !== null && mech.fd !== undefined && mech.fk !== null && mech.fk !== undefined) ? mech.fd > mech.fk : null;
+    let priority = 'PACE_BALANCED';
+    let recommendation = 'Ritmo de apertura dentro de lo observado.';
+    if (fdOverFk === true || (score !== null && score < 40)) {
+      priority = 'INCREASE_FIRST_CONTACT';
+      recommendation = 'Déficit de apertura observado (FD>FK o score < 40): revisar entradas sin utilidad de soporte.';
+    } else if (score !== null && score > 70 && mech.adr !== null && mech.adr !== undefined && mech.adr < 120) {
+      priority = 'TEMPER_AGGRESSION';
+      recommendation = 'Contacto temprano alto con ADR observado bajo: sincronizar con el equipo.';
+    }
+    return { lens: this.name, priority, confidence: 0.8, recommendation, evidence: { score, fk: mech.fk, fd: mech.fd, adr: mech.adr } };
   }
 }
 
@@ -61,27 +67,22 @@ class EconomySentinelLens extends TacticalLens {
     super('EconomySentinelLens', 1.0);
   }
 
-  evaluate(telemetry) {
-    const radar = telemetry.radar || {};
-    const ecoScore = radar.gestionEconomica || 50;
-
-    let priority = 'ECO_STABLE';
-    let recommendation = 'Economía equilibrada.';
-
-    if (ecoScore < 45) {
-      priority = 'FORCE_BUY_DISCIPLINE';
-      recommendation = 'Eliminar compras forzadas aisladas en rondas semi-eco; sincronizar con el banco del equipo.';
-    } else if (ecoScore > 80) {
-      priority = 'UPGRADE_INVESTMENT';
-      recommendation = 'Banco de créditos saludable: invertir en utilería completa o rifles principales tempranos.';
+  evaluate(profile) {
+    const observed = (profile.pillarsObserved || {}).economy;
+    if (!observed) {
+      return { lens: this.name, priority: 'INSUFFICIENT_EVIDENCE', confidence: 0, recommendation: 'Sin tiers económicos observados: no se emite lectura de economía.', missing: ['economia (buy-tiers por ronda)'] };
     }
-
-    return {
-      lens: this.name,
-      priority,
-      confidence: 0.90,
-      recommendation
-    };
+    const score = radarScore(profile, 'disciplinaEconomica');
+    let priority = 'ECO_STABLE';
+    let recommendation = 'Economía dentro de lo observado.';
+    if (score !== null && score < 45) {
+      priority = 'FORCE_BUY_DISCIPLINE';
+      recommendation = 'Conversión económica baja observada: evitar compras forzadas aisladas.';
+    } else if (score !== null && score > 80) {
+      priority = 'UPGRADE_INVESTMENT';
+      recommendation = 'Conversión económica alta observada: invertir en utilería completa o rifles tempranos.';
+    }
+    return { lens: this.name, priority, confidence: 0.85, recommendation, evidence: { score } };
   }
 }
 
@@ -90,25 +91,20 @@ class AnchorUtilityLens extends TacticalLens {
     super('AnchorUtilityLens', 1.0);
   }
 
-  evaluate(telemetry) {
-    const radar = telemetry.radar || {};
-    const spacing = radar.spacingYTrades || 50;
-    const survivability = radar.supervivencia || 50;
-
-    let priority = 'TRADE_STABLE';
-    let recommendation = 'Espaciado y trade fragging en rango óptimo.';
-
-    if (spacing < 45 || survivability < 40) {
-      priority = 'TIGHTEN_SPACING';
-      recommendation = 'Cerrar distancia con el compañero de dúo/anchor; re-peeks aislados penalizados.';
+  evaluate(profile) {
+    const observed = profile.pillarsObserved || {};
+    if (!observed.macro || !observed.clutch) {
+      return { lens: this.name, priority: 'INSUFFICIENT_EVIDENCE', confidence: 0, recommendation: 'Sin KAST/ADR y datos de clutch observados: no se emite lectura de anclaje.', missing: ['kast+adr', 'clutches'] };
     }
-
-    return {
-      lens: this.name,
-      priority,
-      confidence: 0.88,
-      recommendation
-    };
+    const macro = radarScore(profile, 'macrogamePosicionamiento');
+    const clutch = radarScore(profile, 'composturaClutch');
+    let priority = 'TRADE_STABLE';
+    let recommendation = 'Espaciado y trade fragging dentro de lo observado.';
+    if ((macro !== null && macro < 45) || (clutch !== null && clutch < 40)) {
+      priority = 'TIGHTEN_SPACING';
+      recommendation = 'Macro/clutch bajos observados: cerrar distancia con el compañero y evitar re-peeks aislados.';
+    }
+    return { lens: this.name, priority, confidence: 0.8, recommendation, evidence: { macro, clutch } };
   }
 }
 
@@ -122,24 +118,39 @@ class ConsensusArbiter {
   }
 
   /**
-   * Reconciles proposals from all lenses using BFT quorum logic
+   * Reconcilia los votos de los lentes con quórum DETERMINISTA entre 3 lentes
+ * locales. NO es tolerancia bizantina real: no hay nodos remotos, firmas
+ * cruzadas ni adversarios externos. Si algún
+   * lente carece de evidencia observada, el veredicto lo declara.
    */
-  synthesizeConsensus(telemetry) {
-    const votes = this.lenses.map(lens => lens.evaluate(telemetry));
+  synthesizeConsensus(profile) {
+    const votes = this.lenses.map(lens => lens.evaluate(profile));
+    const insufficient = votes.filter(v => v.priority === 'INSUFFICIENT_EVIDENCE');
+    const provenance = (profile && profile.provenance) || 'normalized_input';
+    const synthesis = votes.map(v => `[${v.lens}] ${v.recommendation}`);
 
-    // Agrupar votos por severidad / tipo de intervención
-    const criticalActions = votes.filter(v => 
+    if (insufficient.length > 0) {
+      return {
+        evaluatedAt: new Date().toISOString(),
+        participatingLenses: votes.length - insufficient.length,
+        verdict: 'INSUFFICIENT_EVIDENCE',
+        quorumAchieved: false,
+        votes,
+        actionablePriority: 'NONE',
+        missing: [...new Set(insufficient.flatMap(v => v.missing || []))],
+        provenance,
+        provenanceLabel: provenanceLabel(provenance),
+        synthesis
+      };
+    }
+
+    const criticalActions = votes.filter(v =>
       ['INCREASE_FIRST_CONTACT', 'TEMPER_AGGRESSION', 'FORCE_BUY_DISCIPLINE', 'TIGHTEN_SPACING'].includes(v.priority)
     );
 
     const quorumAchieved = criticalActions.length >= 2;
-    let verdict = quorumAchieved ? 'BYZANTINE_QUORUM_REACHED' : 'UNANIMOUS_STABILITY';
-
-    if (criticalActions.length === 0) {
-      verdict = 'ALL_LENSES_NOMINAL';
-    }
-
-    const unifiedRecommendations = votes.map(v => `[${v.lens}] ${v.recommendation}`);
+    let verdict = quorumAchieved ? 'MULTI_LENS_QUORUM_REACHED' : 'UNANIMOUS_STABILITY';
+    if (criticalActions.length === 0) verdict = 'ALL_LENSES_NOMINAL';
 
     return {
       evaluatedAt: new Date().toISOString(),
@@ -148,7 +159,10 @@ class ConsensusArbiter {
       quorumAchieved,
       votes,
       actionablePriority: criticalActions.length > 0 ? criticalActions[0].priority : 'MAINTAIN_CURRENT_PLAYSTYLE',
-      synthesis: unifiedRecommendations
+      missing: [],
+      provenance,
+      provenanceLabel: provenanceLabel(provenance),
+      synthesis
     };
   }
 }
@@ -160,20 +174,3 @@ module.exports = {
   EconomySentinelLens,
   AnchorUtilityLens
 };
-
-if (require.main === module) {
-  const arbiter = new ConsensusArbiter();
-  const sampleTelemetry = {
-    adr: 105,
-    radar: {
-      primerosDuelos: 32,
-      gestionEconomica: 38,
-      spacingYTrades: 41,
-      supervivencia: 35
-    }
-  };
-
-  const report = arbiter.synthesizeConsensus(sampleTelemetry);
-  console.log(`[ConsensusArbiter] Veredicto: ${report.verdict} (Quorum: ${report.quorumAchieved})`);
-  report.synthesis.forEach(line => console.log(`  • ${line}`));
-}

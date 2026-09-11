@@ -3,7 +3,7 @@
  * cli.js - Master Universal CLI & Intelligent Dispatcher for valorant-analytics
  * v3.0: Sovereign Multi-Engine Architecture.
  * Includes Formal Invariant Validation, Ed25519 DSSE Attestation, Merkle Ledgers,
- * Preflight Sandboxing, Session Guardian, Drift Detection & Byzantine Consensus.
+ * Preflight Sandboxing, Session Guardian, Drift Detection & Multi-Lens Consensus.
  *
  * Usage:
  *   node cli.js "Derke#0001"                             ➔ Perfil Multi-Plataforma
@@ -17,7 +17,7 @@
  *   node cli.js merkle <archivo>                         ➔ Árbol Merkle de Telemetría
  *   node cli.js guardian <archivo> [jugador]             ➔ Monitor de Fatiga y Tilt
  *   node cli.js drift <archivo> [jugador]                ➔ Radar de Deriva y Entropía
- *   node cli.js consensus <archivo> [jugador]            ➔ Síntesis Bizantina Multi-Lente
+ *   node cli.js consensus <archivo> [jugador]            ➔ Síntesis Multi-Lente (determinista)
  *   node cli.js synthesize <archivo> [jugador]           ➔ Rutina Adaptativa Evolutiva
  *   node cli.js sbom                                     ➔ Manifiesto CycloneDX SBOM
  */
@@ -51,6 +51,7 @@ const { harvestProfiles, harvestMatch } = require('./browser_cache_harvester');
 const { extractAccountTelemetry, aggregateCareerTelemetry, generateMilestonesTimeline } = require('./career_telemetry');
 const { evaluateMmrDrag, evaluateTalentVsEffort } = require('./autodiagnostic_engine');
 const { classifyEvidence, observeMatchTelemetry, observeDuelRows } = require('./evidence_policy');
+const { sourceProvenance, provenanceLabel } = require('./data_contract');
 const { analyzeEconomy } = require('./economy_analyzer');
 const { generateCoachingReport } = require('./coaching_engine');
 
@@ -187,12 +188,15 @@ function loadAttestIdentity() {
 
 function printProvenance(source, matchData) {
   const meta = (matchData && matchData.data && matchData.data.metadata) || {};
-  if (meta.synthetic || meta.wafContainment) {
-    console.log(`[FUENTE: SINTÉTICA --demo] Telemetría reconstruida. NO es una partida real: diagnóstico solo demostrativo.`);
+  const provenance = sourceProvenance(meta);
+  if (provenance === 'synthetic_demo') {
+    console.log(`[FUENTE: ${provenanceLabel(provenance)}] Telemetría reconstruida. NO es una partida real: solo demostrativo.`);
+  } else if (provenance === 'verified_source') {
+    console.log(`[FUENTE: ${provenanceLabel(provenance)}] ${typeof source === 'string' ? source : ''}`);
   } else if (typeof source === 'string' && fs.existsSync(source)) {
-    console.log(`[FUENTE: JSON local verificado: ${source}]`);
+    console.log(`[FUENTE: ${provenanceLabel(provenance)}] Archivo local: ${source}`);
   } else {
-    console.log(`[FUENTE: API Tracker.gg / caché local verificada]`);
+    console.log(`[FUENTE: ${provenanceLabel(provenance)}] Tracker.gg / caché local`);
   }
 }
 
@@ -237,7 +241,7 @@ function handleProfile(handle) {
 
 function buildDuelTable(matrixData, playerHandle) {
   const { playerMap, duelMatrix, target } = matrixData;
-  const effectiveTarget = target || (playerHandle ? Object.keys(playerMap).find(h => h.toLowerCase().includes(playerHandle.toLowerCase())) : Object.keys(playerMap)[0]);
+  const effectiveTarget = target || require('./data_contract').resolveExactHandle(Object.keys(playerMap), playerHandle, { allowFirstIfMissing: true });
   if (!effectiveTarget || !playerMap[effectiveTarget]) {
     return { error: `Jugador "${playerHandle || 'desconocido'}" no encontrado en la partida.`, rows: [], target: null };
   }
@@ -277,7 +281,7 @@ if (!command || command === '--help' || command === '-h') {
   console.log(`  node cli.js merkle <partida_o_id>                 ➔ Árbol Merkle de Eventos y Pruebas`);
   console.log(`  node cli.js guardian <partida_o_id> [jugador]     ➔ Monitor de Fatiga y Tilt`);
   console.log(`  node cli.js drift <partida_o_id> [jugador]        ➔ Radar de Deriva y Entropía`);
-  console.log(`  node cli.js consensus <partida_o_id> [jugador]    ➔ Síntesis Bizantina Multi-Lente`);
+  console.log(`  node cli.js consensus <partida_o_id> [jugador]    ➔ Síntesis Multi-Lente (determinista)`);
   console.log(`  node cli.js synthesize <partida_o_id> [jugador]   ➔ Rutina Adaptativa Evolutiva`);
   console.log(`  node cli.js sbom                                  ➔ Manifiesto CycloneDX SBOM`);
   console.log(`\nEJEMPLOS:`);
@@ -414,24 +418,27 @@ try {
     const { target, player } = resolveTargetAndPlayer(args);
     const matchData = resolveMatchData(target, player);
     const evidence = deriveMatchEvidence(matchData, player, target);
+    const res = generateKovaaksRoutine(matchData, player);
 
     printBanner();
-    if (!evidence.allowedSections.includes('aim_routine')) {
-      console.log(`🎯 RUTINA OMITIDA: falta evidencia mecánica (HS%/zonas de daño).`);
+    if (res.omitted) {
+      console.log(`🎯 RUTINA OMITIDA: ${res.omittedReason}`);
+      console.log(`   Procedencia: ${res.provenanceLabel}`);
+      console.log(`   Métricas faltantes: ${res.missingMetrics.join(', ') || 'ninguna'}`);
+      console.log(`   Datos requeridos: ${res.requiredData.join('; ') || 'ninguna'}`);
       printEvidenceLimits(evidence);
-      console.log(`========================================================================\n`);
     } else {
-      const res = generateKovaaksRoutine(matchData, player);
-      console.log(`🎯 RUTINA KOVAAKS 15-MIN: ${res.player} | Mapa: ${res.map}`);
-      console.log(`HS%: ${res.hsPct}`);
-      console.log(`Sens: ${res.sensitivityRecommendation}`);
+      console.log(`🎯 RUTINA KOVAAKS 15-MIN (${res.provenanceLabel}): ${res.player} | Mapa: ${res.map || 'n/d'}`);
+      console.log(`HS%: ${res.hsPct || 'n/d'}`);
+      console.log(`Sens: ${res.sensitivityNote}`);
       console.log(`------------------------------------------------------------------------`);
       res.routine.forEach(sc => {
         console.log(`  • [${sc.duration}] ${sc.scenario}${sc.aimLab ? ` | ${sc.aimLab}` : ''}`);
         console.log(`       ${sc.category}: ${sc.instruction}`);
+        console.log(`       Motivo: ${sc.reason}`);
       });
-      console.log(`========================================================================\n`);
     }
+    console.log(`========================================================================\n`);
 
   } else if (command === 'duels' || command === 'matrix') {
     const { target, player } = resolveTargetAndPlayer(args);
@@ -465,21 +472,17 @@ try {
     const { target, player } = resolveTargetAndPlayer(args);
     const matchData = resolveMatchData(target, player);
     const result = analyzeWeaponTelemetry(matchData, player);
-    validateWeaponTelemetry(result);
+    if (result.zoneMetrics.observed) validateWeaponTelemetry(result);
 
     printBanner();
-    console.log(`🎯 TELEMETRÍA DE ARMAS Y BANDAS DE IMPACTO: ${result.player} (${result.agent})`);
+    console.log(`🎯 TELEMETRÍA DE ARMAS E IMPACTOS: ${result.player} (${result.agent || 'n/d'})`);
     console.log(`Distribución de Zonas: Cabeza ${result.hitZoneDistribution.head} | Cuerpo ${result.hitZoneDistribution.body} | Piernas ${result.hitZoneDistribution.leg}`);
-    console.log(`Disciplina de Disparo: ${result.metrics.firingDiscipline} (SE/TP Ratio: ${result.metrics.sprayTapRatio})`);
+    console.log(`Disciplina de Disparo: ${result.metrics.firingDiscipline || 'n/d'} (SE/TP Ratio: ${result.metrics.sprayTapRatio === null ? 'n/d' : result.metrics.sprayTapRatio})`);
     console.log(`------------------------------------------------------------------------`);
-    console.log(`DISTANCIA Y CONVERSIÓN POR TIER:`);
-    result.distanceBands.forEach(d => {
-      console.log(`  • ${d.name}`);
-      console.log(`     Duelos: ${d.duels} | Daño: ${d.totalDamage} | HS: ${d.hsAccuracy} [${d.conversionRating}]`);
-    });
+    console.log(`DISTANCIA: ${result.distanceNote}`);
     console.log(`------------------------------------------------------------------------`);
     console.log(`DIAGNÓSTICO TÁCTICO: ${result.recoilDiagnosis.analisisTactico}`);
-    console.log(`RUTINA ASOCIADA: ${result.recoilDiagnosis.kovaaksPrescription}`);
+    console.log(`RUTINA ASOCIADA: ${result.recoilDiagnosis.kovaaksPrescription || 'RUTINA OMITIDA (sin eventos de daño observados)'}`);
     console.log(`========================================================================\n`);
 
   } else if (command === 'economy' || command === 'eco') {
@@ -672,41 +675,47 @@ try {
 
   } else if (command === 'consensus') {
     const { target, player } = resolveTargetAndPlayer(args);
-    const effectivePlayer = player || 'TenZ#0001';
-    const matchData = resolveMatchData(target, effectivePlayer);
-    const profile = evaluateLearningProfile(matchData, effectivePlayer);
+    const matchData = resolveMatchData(target, player);
+    const profile = evaluateLearningProfile(matchData, player);
     const arbiter = new ConsensusArbiter();
     const report = arbiter.synthesizeConsensus(profile);
 
     printBanner();
-    console.log(`⚖️ SÍNTESIS DE CONSENSO BIZANTINO MULTI-LENTE (BFT)`);
-    console.log(`Jugador: ${effectivePlayer} | Veredicto: ${report.verdict}`);
+    console.log(`🧠 SÍNTESIS DE CONSENSO MULTI-LENTE (determinista; 3 lentes locales)`);
+    console.log(`Jugador: ${profile.player} | Veredicto: ${report.verdict} | Procedencia: ${report.provenanceLabel}`);
     console.log(`------------------------------------------------------------------------`);
     console.log(`  • Lentes Participantes:  ${report.participatingLenses}`);
     console.log(`  • Quórum Alcanzado:      ${report.quorumAchieved ? 'SÍ' : 'NO'}`);
     console.log(`  • Prioridad de Acción:   ${report.actionablePriority}`);
-    console.log(`\n📋 SÍNTESIS UNIFICADA DE LENTES:`);
+    if (report.missing && report.missing.length > 0) console.log(`  • Evidencia faltante:    ${report.missing.join('; ')}`);
+    console.log(`\n🔍 SÍNTESIS UNIFICADA DE LENTES:`);
     report.synthesis.forEach(s => console.log(`  • ${s}`));
     console.log(`========================================================================\n`);
 
   } else if (command === 'synthesize') {
     const { target, player } = resolveTargetAndPlayer(args);
-    const effectivePlayer = player || 'TenZ#0001';
-    const matchData = resolveMatchData(target, effectivePlayer);
-    const profile = evaluateLearningProfile(matchData, effectivePlayer);
+    const matchData = resolveMatchData(target, player);
+    const profile = evaluateLearningProfile(matchData, player);
     const synthesizer = new RoutineSynthesizer({ targetDurationMinutes: 15 });
     const routine = synthesizer.synthesizeRoutine(profile);
 
     printBanner();
-    console.log(`🧬 RUTINA EVOLUTIVA ADAPTATIVA: ${routine.player} (${routine.totalRoutineMinutes} min)`);
-    console.log(`------------------------------------------------------------------------`);
-    console.log(`ÁREAS DE DEBILIDAD DETECTADAS:`);
-    routine.identifiedWeaknesses.forEach(w => console.log(`  [${w.area}] ${w.reason}`));
-    console.log(`\nEJERCICIOS SINTETIZADOS:`);
-    routine.drillPlan.forEach((d, i) => {
-      console.log(`  ${i + 1}. [${d.focus}] ${d.scenario} x${d.reps} (${d.durationPerRep}) - Dificultad: ${d.difficultyMultiplier}x`);
-    });
-    console.log(`\n💡 CONSEJO NEUROMUSCULAR: ${routine.neuroMuscleAdvice}`);
+    if (routine.omitted) {
+      console.log(`🧬 RUTINA OMITIDA: ${routine.omittedReason}`);
+      console.log(`   Procedencia: ${routine.provenanceLabel}`);
+      console.log(`   Métricas faltantes: ${routine.missingMetrics.join(', ') || 'ninguna'}`);
+      console.log(`   Datos requeridos: ${routine.requiredData.join('; ') || 'ninguna'}`);
+    } else {
+      console.log(`🧬 RUTINA EVOLUTIVA ADAPTATIVA (${routine.provenanceLabel}): ${routine.player} (${routine.totalRoutineMinutes} min)`);
+      console.log(`------------------------------------------------------------------------`);
+      console.log(`ÁREAS DE DEBILIDAD DETECTADAS (métrica observada + umbral documentado):`);
+      routine.identifiedWeaknesses.forEach(w => console.log(`  [${w.area}] ${w.reason}`));
+      console.log(`\nEJERCICIOS SINTETIZADOS:`);
+      routine.drillPlan.forEach((d, i) => {
+        console.log(`  ${i + 1}. [${d.focus}] ${d.scenario} x${d.reps} (${d.durationPerRep}) - Dificultad: ${d.difficultyMultiplier}x`);
+      });
+      console.log(`\n💡 CONSEJO NEUROMUSCULAR: ${routine.neuroMuscleAdvice}`);
+    }
     console.log(`========================================================================\n`);
 
   } else if (command === 'sbom') {

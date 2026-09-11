@@ -61,8 +61,18 @@ nAts#0001	Cypher	Gold 2	11	17	7	152	99	21%
 const parsedMatch = parseTextScoreboard(rawScoreboard, {
   map: 'Haven',
   rounds: 24,
-  targetPlayer: 'kirtmy#000'
+  targetPlayer: 'kirtmy#000',
+  demo: true
 });
+
+const observedOnly = parseTextScoreboard(rawScoreboard, { map: 'Haven', rounds: 24, targetPlayer: 'kirtmy#000' });
+assert.strictEqual(observedOnly.data.metadata.provenance, 'normalized_input', 'Procedencia normalizada');
+assert.strictEqual(observedOnly.data.segments.filter(s => s.type === 'player-round').length, 0, 'No se fabrican rondas');
+assert.strictEqual(observedOnly.data.segments.filter(s => s.type === 'team-summary').length, 0, 'No se fabrican equipos');
+assert.strictEqual(observedOnly.data.segments.filter(s => s.type === 'player-round-damage').length, 0, 'No se fabrica daño');
+assert.ok(observedOnly.data.metadata.missing.includes('teams'), 'Debe declarar equipos ausentes');
+assert.throws(() => assembleRawMatchStructure([], 'Ascent', 24, 'kirtmy#000'), /demo: true/, 'Síntesis sin flag explícito debe fallar');
+console.log('   ✓ Modo observado sin fabricación verificado.');
 
 assert.ok(parsedMatch.data && parsedMatch.data.segments, 'Estructura de match inválida');
 assert.strictEqual(parsedMatch.data.metadata.mapName, 'Haven');
@@ -95,8 +105,8 @@ console.log('   ✓ Invariante de convergencia de zonas de impacto (100%) verifi
 console.log('3. Analizando telemetría de armas y bandas de impacto...');
 const weaponTelem = analyzeWeaponTelemetry(parsedMatch, 'kirtmy#000');
 assert.strictEqual(validateWeaponTelemetry(weaponTelem), true);
-assert.strictEqual(weaponTelem.distanceBands.length, 3, 'Deben existir 3 bandas: Close, Mid, Long');
-assert.ok(weaponTelem.distanceBands[0].duels > 0, 'Banda corta debe tener duelos registrados');
+assert.strictEqual(weaponTelem.distanceBands, null, 'Sin posiciones no se infieren bandas de distancia');
+assert.ok(/n\/d/.test(weaponTelem.distanceNote), 'La distancia debe declararse n/d');
 assert.ok(weaponTelem.metrics.sprayTapRatio >= 0, 'Ratio SE/TP debe ser no-negativo');
 console.log(`   ✓ Telemetría de armas válida: Head=${weaponTelem.hitZoneDistribution.head}, SE/TP Ratio=${weaponTelem.metrics.sprayTapRatio}`);
 
@@ -117,9 +127,10 @@ console.log(`   ✓ Radar 360° verificado: Mecánica=${profile.radar.precisionM
 
 // 6. Rutina Kovaaks
 console.log('6. Generando prescripción Kovaaks adaptativa...');
-const kovaaks = generateKovaaksRoutine(parsedMatch, 'kirtmy#000');
-assert.strictEqual(kovaaks.routine.length, 3, 'Debe constar de 3 bloques');
-assert.ok(kovaaks.firstDuels, 'Debe incluir telemetría de duelos tempranos');
+const kovaaks = generateKovaaksRoutine(parsedMatch, 'Chronicle#0001');
+assert.strictEqual(kovaaks.omitted, false, 'Con HS observado bajo umbral debe generar rutina');
+assert.ok(kovaaks.routine.length >= 1, 'Debe constar de al menos 1 bloque fundamentado');
+assert.ok(/normali/i.test(kovaaks.provenanceLabel), 'Procedencia visible en la rutina');
 console.log('   ✓ Prescripción Kovaaks de 15 minutos generada con éxito.');
 
 // 7. Resiliencia Táctica: fail-closed por defecto, sintético solo con allowSynthetic explícito

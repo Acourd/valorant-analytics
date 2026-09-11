@@ -28,10 +28,10 @@ function parseDuels(matchData, targetHandle) {
     };
   });
 
-  // If targetHandle is provided, filter or find closest match
+  // Objetivo EXACTO si se pidió; ausente/ambiguo => fail-closed.
   let target = null;
   if (targetHandle) {
-    target = Object.keys(playerMap).find(h => h.toLowerCase().includes(targetHandle.toLowerCase()));
+    target = require('./data_contract').resolveExactHandle(Object.keys(playerMap), targetHandle, { allowFirstIfMissing: false });
   }
 
   // Find round kills from player-round-kills segments

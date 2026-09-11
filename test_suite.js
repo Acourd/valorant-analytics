@@ -141,14 +141,21 @@ check('parseDuels: target case-insensitive, matriz killer->victim con conteos',
   });
 
 // ---- Unidad: kovaaks ----
-check('generateKovaaksRoutine: 3 bloques, 15 min totales, telemetría FK/FD',
+check('generateKovaaksRoutine: aspas (debilidad observada) genera rutina; TenZ (sin debilidad) la omite',
   () => {
-    const r = generateKovaaksRoutine(sample, 'TenZ#0001');
-    assert.strictEqual(r.routine.length, 3);
-    assert.ok(r.routine.every(b => b.duration.startsWith('5 mins')));
-    assert.ok(r.player, 'sin jugador resuelto');
-    assert.ok(typeof r.firstDuels.entryRating === 'number' && r.firstDuels.entryRating >= 0 && r.firstDuels.entryRating <= 100);
-    assert.ok(r.hsPct.endsWith('%'));
+    const weak = generateKovaaksRoutine(sample, 'aspas#0001');
+    assert.strictEqual(weak.omitted, false, 'aspas debe generar rutina (HS/leg fuera de umbral)');
+    assert.ok(weak.routine.length > 0);
+    assert.ok(weak.routine.every(b => b.duration.startsWith('5 mins')));
+    assert.ok(weak.player, 'sin jugador resuelto');
+    assert.strictEqual(weak.provenance, 'normalized_input');
+    assert.ok(/normali/i.test(weak.provenanceLabel), 'procedencia visible');
+    assert.strictEqual(weak.sensitivityRecommendation, null, 'sin sensibilidad inventada');
+    const strong = generateKovaaksRoutine(sample, 'TenZ#0001');
+    assert.strictEqual(strong.omitted, true, 'TenZ no cruza umbral: debe omitirse');
+    assert.strictEqual(strong.reason, 'RUTINA OMITIDA');
+    assert.ok(Array.isArray(strong.missingMetrics));
+    assert.ok(strong.requiredData.length > 0 || /umbral/i.test(strong.omittedReason), 'debe explicar la omisión');
   });
 
 // ---- Unidad: duo_synergy ----
@@ -211,10 +218,15 @@ function withIsolatedCache(fn) {
   }
 }
 
-check('cli.js aim: dispatcher ejecuta la rutina sin TypeError (regresión P0)',
+check('cli.js aim: rutina solo con evidencia (aspas) y RUTINA OMITIDA sin debilidad (TenZ)',
   () => {
-    const out = cliOk(['aim', sampleFile, 'TenZ#0001']);
-    assert.ok(out.includes('RUTINA KOVAAKS 15-MIN'), 'cabecera aim ausente');
+    const weakOut = cliOk(['aim', sampleFile, 'aspas#0001']);
+    assert.ok(weakOut.includes('RUTINA KOVAAKS 15-MIN'), 'cabecera aim ausente con evidencia');
+    assert.ok(/normali/i.test(weakOut), 'debe mostrar procedencia');
+    assert.ok(/Motivo:/i.test(weakOut), 'debe citar el motivo/umbral');
+    const strongOut = cliOk(['aim', sampleFile, 'TenZ#0001']);
+    assert.ok(/RUTINA OMITIDA/i.test(strongOut), 'sin debilidad debe omitirse');
+    assert.ok(/Métricas faltantes|Datos requeridos/i.test(strongOut), 'debe mostrar faltantes');
   });
 
 check('cli.js duels: matriz 1v1 renderizada (regresión P0: contrato parseDuels)',
@@ -255,18 +267,22 @@ check('analyzeWeaponTelemetry: cálculo de zonas (Head/Body/Leg) y SE/TP spray r
     assert.ok(res.recoilDiagnosis && res.recoilDiagnosis.kovaaksPrescription);
   });
 
-check('analyzeWeaponTelemetry: categorización en 3 bandas de distancia (Close/Mid/Long)',
+check('analyzeWeaponTelemetry: zonas observadas y distancia n/d (sin inferir por loadout)',
   () => {
     const res = analyzeWeaponTelemetry(sample, 'TenZ#0001');
-    assert.strictEqual(res.distanceBands.length, 3);
-    assert.ok(res.distanceBands.every(b => typeof b.duels === 'number' && typeof b.totalDamage === 'number'));
+    assert.strictEqual(res.distanceBands, null, 'sin posiciones no se infieren bandas');
+    assert.ok(/n\/d/.test(res.distanceNote), 'debe declarar distancia n/d');
+    assert.strictEqual(res.zoneMetrics.observed, true, 'debe haber impacto observado');
+    assert.ok(typeof res.zoneMetrics.legPct === 'number');
+    assert.ok(!/loadout/i.test(JSON.stringify(res.distanceBands || '')), 'jamás distancia por loadout');
   });
 
-check('cli.js weapons: telemetría de armas y bandas de impacto en consola',
+check('cli.js weapons: telemetría de impactos y distancia n/d en consola',
   () => {
     const out = cliOk(['weapons', sampleFile, 'TenZ#0001']);
-    assert.ok(out.includes('TELEMETRÍA DE ARMAS') && out.includes('DISTANCIA Y CONVERSIÓN'));
+    assert.ok(out.includes('TELEMETRÍA DE ARMAS') && out.includes('DISTANCIA: n/d'));
     assert.ok(out.includes('SE/TP Ratio'));
+    assert.ok(!out.includes('Close Range'), 'no debe inventar bandas de distancia');
   });
 
 check('cli.js calibrate: modo zero-cloud offline diagnóstico instantáneo',
@@ -338,18 +354,22 @@ check('cli.js drift: cálculo de deriva táctica y entropía de Shanon',
     assert.ok(out.includes('Entropía de Quarters'));
   });
 
-check('cli.js consensus: arbitraje bizantino multi-lente con quórum BFT',
+check('cli.js consensus: arbitraje multi-lente determinista',
   () => {
     const out = cliOk(['consensus', sampleFile, 'TenZ#0001']);
-    assert.ok(out.includes('SÍNTESIS DE CONSENSO BIZANTINO'));
+    assert.ok(out.includes('SÍNTESIS DE CONSENSO MULTI-LENTE'));
     assert.ok(out.includes('Lentes Participantes:  3'));
   });
 
-check('cli.js synthesize: rutina evolutiva adaptativa según debilidades de match',
+check('cli.js synthesize: rutina evolutiva con evidencia (aspas) y RUTINA OMITIDA sin debilidad (TenZ)',
   () => {
-    const out = cliOk(['synthesize', sampleFile, 'TenZ#0001']);
-    assert.ok(out.includes('RUTINA EVOLUTIVA ADAPTATIVA'));
-    assert.ok(out.includes('EJERCICIOS SINTETIZADOS'));
+    const weakOut = cliOk(['synthesize', sampleFile, 'aspas#0001']);
+    assert.ok(weakOut.includes('RUTINA EVOLUTIVA ADAPTATIVA'));
+    assert.ok(weakOut.includes('EJERCICIOS SINTETIZADOS'));
+    assert.ok(/normali/i.test(weakOut), 'debe mostrar procedencia');
+    const strongOut = cliOk(['synthesize', sampleFile, 'TenZ#0001']);
+    assert.ok(/RUTINA OMITIDA/i.test(strongOut), 'sin debilidad debe omitirse');
+    assert.ok(/Métricas faltantes|Datos requeridos/i.test(strongOut), 'debe mostrar faltantes');
   });
 
 check('cli.js sbom: manifiesto CycloneDX v1.5 con 0 dependencias externas',
@@ -369,15 +389,18 @@ TenZ#0001	Omen	Platinum 1	19	16	4	225	150	28%
     `.trim();
     const match = parseTextScoreboard(raw, { map: 'Haven', rounds: 24, targetPlayer: 'kirtmy#000' });
     assert.strictEqual(match.data.metadata.mapName, 'Haven');
+    assert.strictEqual(match.data.metadata.provenance, 'normalized_input');
     const summaries = match.data.segments.filter(s => s.type === 'player-summary');
-    assert.strictEqual(summaries.length, 10);
+    assert.strictEqual(summaries.length, 3, 'solo los jugadores observados en el texto');
+    assert.strictEqual(match.data.segments.filter(s => s.type === 'player-round').length, 0, 'no se fabrican rondas');
+    assert.strictEqual(match.data.segments.filter(s => s.type === 'team-summary').length, 0, 'no se fabrican equipos');
     const k = summaries.find(s => s.metadata.platformUserHandle === 'kirtmy#000');
     assert.ok(k && k.stats.kills.value === 21 && k.stats.deaths.value === 14);
   });
 
 check('universal_ingestor: assembleRawMatchStructure genera 10 jugadores, 2 equipos y zonas al 100%',
   () => {
-    const synthetic = assembleRawMatchStructure([], 'Ascent', 24, 'kirtmy#000');
+    const synthetic = assembleRawMatchStructure([], 'Ascent', 24, 'kirtmy#000', { demo: true });
     assert.strictEqual(synthetic.data.segments.filter(s => s.type === 'team-summary').length, 2);
     const summaries = synthetic.data.segments.filter(s => s.type === 'player-summary');
     assert.strictEqual(summaries.length, 10);
@@ -394,7 +417,7 @@ check('universal_ingestor: assembleRawMatchStructure genera 10 jugadores, 2 equi
 
 check('universal_ingestor: cumplimiento formal de invariant_validator sobre telemetría sintetizada',
   () => {
-    const synthetic = assembleRawMatchStructure([], 'Ascent', 24, 'kirtmy#000');
+    const synthetic = assembleRawMatchStructure([], 'Ascent', 24, 'kirtmy#000', { demo: true });
     const p = evaluateLearningProfile(synthetic, 'kirtmy#000');
     assert.strictEqual(validateLearningProfile(p), true);
     assert.strictEqual(validateRadar(p.radar), true);
@@ -544,7 +567,7 @@ check('harvester: cacheDir inexistente y data_1 truncado no lanzan (retornan [])
 
 check('ingestor: options.matchId determinista y sin random en contrato',
   () => {
-    const r = assembleRawMatchStructure([], 'Ascent', 24, 'Test#0001', { matchId: 'resilient-test-001' });
+    const r = assembleRawMatchStructure([], 'Ascent', 24, 'Test#0001', { matchId: 'resilient-test-001', demo: true });
     assert.strictEqual(r.data.metadata.matchId, 'resilient-test-001');
     assert.strictEqual(r.data.segments.filter(s => s.type === 'player-summary').length, 10);
     assert.strictEqual(r.data.metadata.rounds, 24);
@@ -2268,6 +2291,122 @@ check('fuente Riot: el trust store exige perímetro (0666, propietario, symlink)
     } else {
       assert.ok(true, 'win32: integración chmod/symlink no aplicable; predicado puro cubierto');
     }
+  });
+
+check('contrato: objetivo exacto o fail-closed (sin fallback al primer jugador)',
+  () => {
+    const { resolveExactHandle } = require(path.join(scriptsDir, 'data_contract.js'));
+    assert.throws(() => resolveExactHandle(['A#1', 'B#2'], 'C#3', { allowFirstIfMissing: false }), /no encontrado/i);
+    assert.strictEqual(resolveExactHandle(['A#1', 'B#2'], 'b#2'), 'B#2', 'coincidencia exacta insensible a mayúsculas');
+    assert.strictEqual(resolveExactHandle(['A#1', 'B#2'], undefined), 'A#1', 'sin objetivo, primer jugador solo si no se pidió');
+    assert.throws(() => resolveExactHandle([], 'A#1'), /sin jugadores/i);
+    // Repro del auditor: jugador inexistente NO analiza a aspas#0001 y sale != 0.
+    let code = 0;
+    let out = '';
+    try { cliOk(['match', sampleFile, 'NoExiste#9999']); }
+    catch (e) { code = e.status; out = String(e.stdout || '') + String(e.stderr || ''); }
+    assert.notStrictEqual(code, 0, 'objetivo inexistente debe fallar cerrado');
+    assert.ok(/NoExiste#9999|no encontrado/i.test(out), 'debe explicar que el objetivo no existe');
+    assert.ok(!/RADAR DE DOMINIO|OBSERVACIONES POR RONDA/.test(out), 'no debe emitir análisis de otro jugador');
+  });
+
+check('procedencia: fuentes locales se etiquetan como normalizadas (no verificadas)',
+  () => {
+    const { sourceProvenance, mayAssertCauses } = require(path.join(scriptsDir, 'data_contract.js'));
+    assert.strictEqual(sourceProvenance({}), 'normalized_input');
+    assert.strictEqual(sourceProvenance({ synthetic: true }), 'synthetic_demo');
+    assert.strictEqual(sourceProvenance({ provenance: 'verified_source' }), 'verified_source');
+    assert.strictEqual(mayAssertCauses('normalized_input'), false, 'datos locales no afirman causas');
+    assert.strictEqual(mayAssertCauses('verified_source'), true);
+    const out = cliOk(['match', sampleFile, 'TenZ#0001']);
+    assert.ok(/normalizad/i.test(out), 'el archivo local debe declararse normalizado');
+    assert.ok(!/JSON local verificado/i.test(out), 'no debe afirmar "JSON local verificado"');
+    assert.ok(!/cach[ée] local verificada/i.test(out), 'no debe afirmar "caché local verificada"');
+  });
+
+check('rutinas: sin evidencia mecánica se omiten con procedencia y faltantes (sin defaults)',
+  () => {
+    const { RoutineSynthesizer } = require(path.join(scriptsDir, 'routine_synthesizer.js'));
+    const synth = new RoutineSynthesizer();
+    const omitted = synth.synthesizeRoutine({ player: 'X#1', provenance: 'normalized_input' });
+    assert.strictEqual(omitted.omitted, true);
+    assert.strictEqual(omitted.reason, 'RUTINA OMITIDA');
+    assert.deepStrictEqual(omitted.drillPlan, []);
+    assert.ok(omitted.missingMetrics.includes('hsPct'), 'debe declarar hsPct faltante');
+    assert.ok(omitted.requiredData.length > 0, 'debe declarar datos requeridos');
+    assert.ok(/normali/i.test(omitted.provenanceLabel), 'procedencia visible');
+    assert.ok(!omitted.identifiedWeaknesses.some(w => w.area === 'PISTOL_PRECISION'), 'sin debilidad por defecto');
+    // Datos parciales (solo ACS) tampoco habilitan recomendaciones.
+    const partial = synth.synthesizeRoutine({ player: 'X#1', provenance: 'normalized_input', mechanical: { acs: 240 } });
+    assert.strictEqual(partial.omitted, true);
+    assert.ok(partial.missingMetrics.includes('hsPct'));
+    // Perfiles opuestos → resultados distintos.
+    const weak = synth.synthesizeRoutine({ player: 'W#1', provenance: 'normalized_input', mechanical: { hsPct: 14, fk: 4, fd: 3 } });
+    const strong = synth.synthesizeRoutine({ player: 'S#1', provenance: 'normalized_input', mechanical: { hsPct: 36, fk: 4, fd: 4 } });
+    assert.strictEqual(weak.omitted, false, 'métricas débiles generan rutina');
+    assert.ok(weak.drillPlan.length > 0);
+    assert.ok(weak.drillPlan.every(d => d.enablingMetric && d.threshold !== undefined), 'cada ejercicio cita métrica y umbral');
+    assert.strictEqual(strong.omitted, true, 'métricas fuertes no generan rutina');
+    assert.notDeepStrictEqual(weak.identifiedWeaknesses, strong.identifiedWeaknesses);
+  });
+
+check('rutinas: objetivo inexistente sale con exit 1 y sin rutina de otro jugador',
+  () => {
+    for (const cmd of ['aim', 'synthesize']) {
+      let code = 0;
+      let out = '';
+      try { cliOk([cmd, sampleFile, 'NoExiste#9999']); }
+      catch (e) { code = e.status; out = String(e.stdout || '') + String(e.stderr || ''); }
+      assert.strictEqual(code, 1, `${cmd}: objetivo inexistente debe salir 1`);
+      assert.ok(/no encontrado/i.test(out), `${cmd}: debe explicar el objetivo ausente`);
+      assert.ok(!/RUTINA KOVAAKS 15-MIN|RUTINA EVOLUTIVA ADAPTATIVA/.test(out), `${cmd}: no debe emitir rutina de otro jugador`);
+    }
+  });
+
+check('ingestor: modo observado sin fabricación y demo explícito',
+  () => {
+    const raw = 'A#1\tIso\tGold 2\t21\t14\t5\t245\t162\t26%';
+    const observed = parseTextScoreboard(raw);
+    assert.strictEqual(observed.data.metadata.provenance, 'normalized_input');
+    assert.strictEqual(observed.data.metadata.mapName, null, 'sin mapa detectado no se inventa');
+    assert.strictEqual(observed.data.segments.filter(s => s.type === 'player-round').length, 0, 'sin rondas fabricadas');
+    assert.strictEqual(observed.data.segments.filter(s => s.type === 'team-summary').length, 0, 'sin equipos fabricados');
+    assert.strictEqual(observed.data.segments.filter(s => s.type === 'player-round-damage').length, 0, 'sin daño fabricado');
+    assert.strictEqual(observed.data.segments.filter(s => s.type === 'player-round-kills').length, 0, 'sin kills fabricadas');
+    const sc = observed.data.segments.find(s => s.type === 'player-summary');
+    assert.ok(!('kast' in sc.stats), 'no se inventan métricas ausentes');
+    assert.ok(observed.data.metadata.missing.includes('teams'), 'declara lo ausente');
+    assert.throws(() => assembleRawMatchStructure([], 'Ascent', 24, 'A#1'), /demo/i, 'síntesis sin flag explícito debe fallar');
+    const demo = assembleRawMatchStructure([], 'Ascent', 24, 'A#1', { demo: true });
+    assert.ok(demo.data.metadata.matchId.startsWith('demo-'), 'el demo se marca como tal');
+  });
+
+check('consensus: responde al perfil real y declara evidencia insuficiente',
+  () => {
+    const { ConsensusArbiter } = require(path.join(scriptsDir, 'consensus_arbiter.js'));
+    const arbiter = new ConsensusArbiter();
+    const weak = arbiter.synthesizeConsensus({
+      provenance: 'normalized_input',
+      pillarsObserved: { precision: true, macro: true, openings: true, economy: true, clutch: true },
+      mechanical: { hsPct: 15, kd: 0.8, fk: 1, fd: 5, adr: 95, kast: 58, clutches: 0 },
+      radar: { precisionMecanica: '30 / 100', duelosDeApertura: '28 / 100', disciplinaEconomica: '30 / 100', macrogamePosicionamiento: '35 / 100', composturaClutch: '30 / 100' }
+    });
+    assert.strictEqual(weak.quorumAchieved, true);
+    assert.strictEqual(weak.verdict, 'MULTI_LENS_QUORUM_REACHED');
+    assert.ok(/normaliz/i.test(weak.provenanceLabel), 'procedencia visible');
+    const strong = arbiter.synthesizeConsensus({
+      provenance: 'normalized_input',
+      pillarsObserved: { precision: true, macro: true, openings: true, economy: true, clutch: true },
+      mechanical: { hsPct: 30, kd: 1.3, fk: 5, fd: 2, adr: 155, kast: 75, clutches: 2 },
+      radar: { precisionMecanica: '70 / 100', duelosDeApertura: '65 / 100', disciplinaEconomica: '70 / 100', macrogamePosicionamiento: '70 / 100', composturaClutch: '65 / 100' }
+    });
+    assert.notStrictEqual(strong.verdict, weak.verdict, 'perfiles opuestos no comparten veredicto');
+    const insufficient = arbiter.synthesizeConsensus({ provenance: 'normalized_input', radar: {} });
+    assert.strictEqual(insufficient.verdict, 'INSUFFICIENT_EVIDENCE');
+    assert.strictEqual(insufficient.quorumAchieved, false);
+    assert.ok(insufficient.missing.length > 0, 'debe declarar evidencia faltante');
+    const src = fs.readFileSync(path.join(scriptsDir, 'consensus_arbiter.js'), 'utf8');
+    assert.ok(!/primerosDuelos|gestionEconomica|spacingYTrades|radar\.supervivencia/.test(src), 'no debe consumir claves inexistentes del perfil');
   });
 
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben
