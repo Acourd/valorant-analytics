@@ -28,12 +28,15 @@ const arbiter = new ConsensusArbiter();
 arbiter.lenses.push(new RogueByzantineLens());
 
 const criticalTelemetry = {
-  adr: 95,
+  provenance: 'normalized_input',
+  pillarsObserved: { precision: true, macro: true, openings: true, economy: true, clutch: true },
+  mechanical: { hsPct: 15, kd: 0.8, fk: 1, fd: 5, adr: 95, kast: 58, clutches: 0 },
   radar: {
-    primerosDuelos: 28,
-    gestionEconomica: 30,
-    spacingYTrades: 35,
-    supervivencia: 30
+    precisionMecanica: '30 / 100',
+    duelosDeApertura: '28 / 100',
+    disciplinaEconomica: '30 / 100',
+    macrogamePosicionamiento: '35 / 100',
+    composturaClutch: '30 / 100'
   }
 };
 
@@ -46,12 +49,15 @@ console.log('✓ Quórum bizantino BFT (3/4) toleró la inyección de 1 lente ad
 
 // 3. Quórum con telemetría nominal
 const nominalTelemetry = {
-  adr: 155,
+  provenance: 'normalized_input',
+  pillarsObserved: { precision: true, macro: true, openings: true, economy: true, clutch: true },
+  mechanical: { hsPct: 30, kd: 1.3, fk: 5, fd: 2, adr: 155, kast: 75, clutches: 2 },
   radar: {
-    primerosDuelos: 60,
-    gestionEconomica: 65,
-    spacingYTrades: 70,
-    supervivencia: 65
+    precisionMecanica: '70 / 100',
+    duelosDeApertura: '65 / 100',
+    disciplinaEconomica: '70 / 100',
+    macrogamePosicionamiento: '70 / 100',
+    composturaClutch: '65 / 100'
   }
 };
 

@@ -389,15 +389,18 @@ TenZ#0001	Omen	Platinum 1	19	16	4	225	150	28%
     `.trim();
     const match = parseTextScoreboard(raw, { map: 'Haven', rounds: 24, targetPlayer: 'kirtmy#000' });
     assert.strictEqual(match.data.metadata.mapName, 'Haven');
+    assert.strictEqual(match.data.metadata.provenance, 'normalized_input');
     const summaries = match.data.segments.filter(s => s.type === 'player-summary');
-    assert.strictEqual(summaries.length, 10);
+    assert.strictEqual(summaries.length, 3, 'solo los jugadores observados en el texto');
+    assert.strictEqual(match.data.segments.filter(s => s.type === 'player-round').length, 0, 'no se fabrican rondas');
+    assert.strictEqual(match.data.segments.filter(s => s.type === 'team-summary').length, 0, 'no se fabrican equipos');
     const k = summaries.find(s => s.metadata.platformUserHandle === 'kirtmy#000');
     assert.ok(k && k.stats.kills.value === 21 && k.stats.deaths.value === 14);
   });
 
 check('universal_ingestor: assembleRawMatchStructure genera 10 jugadores, 2 equipos y zonas al 100%',
   () => {
-    const synthetic = assembleRawMatchStructure([], 'Ascent', 24, 'kirtmy#000');
+    const synthetic = assembleRawMatchStructure([], 'Ascent', 24, 'kirtmy#000', { demo: true });
     assert.strictEqual(synthetic.data.segments.filter(s => s.type === 'team-summary').length, 2);
     const summaries = synthetic.data.segments.filter(s => s.type === 'player-summary');
     assert.strictEqual(summaries.length, 10);
@@ -414,7 +417,7 @@ check('universal_ingestor: assembleRawMatchStructure genera 10 jugadores, 2 equi
 
 check('universal_ingestor: cumplimiento formal de invariant_validator sobre telemetría sintetizada',
   () => {
-    const synthetic = assembleRawMatchStructure([], 'Ascent', 24, 'kirtmy#000');
+    const synthetic = assembleRawMatchStructure([], 'Ascent', 24, 'kirtmy#000', { demo: true });
     const p = evaluateLearningProfile(synthetic, 'kirtmy#000');
     assert.strictEqual(validateLearningProfile(p), true);
     assert.strictEqual(validateRadar(p.radar), true);
@@ -564,7 +567,7 @@ check('harvester: cacheDir inexistente y data_1 truncado no lanzan (retornan [])
 
 check('ingestor: options.matchId determinista y sin random en contrato',
   () => {
-    const r = assembleRawMatchStructure([], 'Ascent', 24, 'Test#0001', { matchId: 'resilient-test-001' });
+    const r = assembleRawMatchStructure([], 'Ascent', 24, 'Test#0001', { matchId: 'resilient-test-001', demo: true });
     assert.strictEqual(r.data.metadata.matchId, 'resilient-test-001');
     assert.strictEqual(r.data.segments.filter(s => s.type === 'player-summary').length, 10);
     assert.strictEqual(r.data.metadata.rounds, 24);
@@ -2358,6 +2361,52 @@ check('rutinas: objetivo inexistente sale con exit 1 y sin rutina de otro jugado
       assert.ok(/no encontrado/i.test(out), `${cmd}: debe explicar el objetivo ausente`);
       assert.ok(!/RUTINA KOVAAKS 15-MIN|RUTINA EVOLUTIVA ADAPTATIVA/.test(out), `${cmd}: no debe emitir rutina de otro jugador`);
     }
+  });
+
+check('ingestor: modo observado sin fabricación y demo explícito',
+  () => {
+    const raw = 'A#1\tIso\tGold 2\t21\t14\t5\t245\t162\t26%';
+    const observed = parseTextScoreboard(raw);
+    assert.strictEqual(observed.data.metadata.provenance, 'normalized_input');
+    assert.strictEqual(observed.data.metadata.mapName, null, 'sin mapa detectado no se inventa');
+    assert.strictEqual(observed.data.segments.filter(s => s.type === 'player-round').length, 0, 'sin rondas fabricadas');
+    assert.strictEqual(observed.data.segments.filter(s => s.type === 'team-summary').length, 0, 'sin equipos fabricados');
+    assert.strictEqual(observed.data.segments.filter(s => s.type === 'player-round-damage').length, 0, 'sin daño fabricado');
+    assert.strictEqual(observed.data.segments.filter(s => s.type === 'player-round-kills').length, 0, 'sin kills fabricadas');
+    const sc = observed.data.segments.find(s => s.type === 'player-summary');
+    assert.ok(!('kast' in sc.stats), 'no se inventan métricas ausentes');
+    assert.ok(observed.data.metadata.missing.includes('teams'), 'declara lo ausente');
+    assert.throws(() => assembleRawMatchStructure([], 'Ascent', 24, 'A#1'), /demo/i, 'síntesis sin flag explícito debe fallar');
+    const demo = assembleRawMatchStructure([], 'Ascent', 24, 'A#1', { demo: true });
+    assert.ok(demo.data.metadata.matchId.startsWith('demo-'), 'el demo se marca como tal');
+  });
+
+check('consensus: responde al perfil real y declara evidencia insuficiente',
+  () => {
+    const { ConsensusArbiter } = require(path.join(scriptsDir, 'consensus_arbiter.js'));
+    const arbiter = new ConsensusArbiter();
+    const weak = arbiter.synthesizeConsensus({
+      provenance: 'normalized_input',
+      pillarsObserved: { precision: true, macro: true, openings: true, economy: true, clutch: true },
+      mechanical: { hsPct: 15, kd: 0.8, fk: 1, fd: 5, adr: 95, kast: 58, clutches: 0 },
+      radar: { precisionMecanica: '30 / 100', duelosDeApertura: '28 / 100', disciplinaEconomica: '30 / 100', macrogamePosicionamiento: '35 / 100', composturaClutch: '30 / 100' }
+    });
+    assert.strictEqual(weak.quorumAchieved, true);
+    assert.strictEqual(weak.verdict, 'BYZANTINE_QUORUM_REACHED');
+    assert.ok(/normaliz/i.test(weak.provenanceLabel), 'procedencia visible');
+    const strong = arbiter.synthesizeConsensus({
+      provenance: 'normalized_input',
+      pillarsObserved: { precision: true, macro: true, openings: true, economy: true, clutch: true },
+      mechanical: { hsPct: 30, kd: 1.3, fk: 5, fd: 2, adr: 155, kast: 75, clutches: 2 },
+      radar: { precisionMecanica: '70 / 100', duelosDeApertura: '65 / 100', disciplinaEconomica: '70 / 100', macrogamePosicionamiento: '70 / 100', composturaClutch: '65 / 100' }
+    });
+    assert.notStrictEqual(strong.verdict, weak.verdict, 'perfiles opuestos no comparten veredicto');
+    const insufficient = arbiter.synthesizeConsensus({ provenance: 'normalized_input', radar: {} });
+    assert.strictEqual(insufficient.verdict, 'INSUFFICIENT_EVIDENCE');
+    assert.strictEqual(insufficient.quorumAchieved, false);
+    assert.ok(insufficient.missing.length > 0, 'debe declarar evidencia faltante');
+    const src = fs.readFileSync(path.join(scriptsDir, 'consensus_arbiter.js'), 'utf8');
+    assert.ok(!/primerosDuelos|gestionEconomica|spacingYTrades|radar\.supervivencia/.test(src), 'no debe consumir claves inexistentes del perfil');
   });
 
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben

@@ -81,12 +81,14 @@ function evaluateLearningProfile(matchData, targetHandle) {
 
   // Pillar D: Economic Discipline & Buy Conversion
   let economyScore = 75; // Baseline
+  let economyObserved = false;
   try {
     const econ = analyzeEconomy(matchData, target);
     const fullTier = econ.tiers.find(t => t.tier?.toLowerCase().includes('full'));
     if (fullTier) {
       const fullWinPct = parseFloat(fullTier.winPct);
       economyScore = Math.min(100, Math.round(fullWinPct * 0.8 + 20));
+      economyObserved = true;
     }
   } catch(e) {}
 
@@ -132,11 +134,25 @@ function evaluateLearningProfile(matchData, targetHandle) {
   // que habilita rutinas; no se rellenan valores plausibles.
   const mechanical = {
     hsPct: observedNumber(st, ['hsAccuracy', 'headshotsPercentage']),
+    kd: observedNumber(st, ['kdRatio']) !== null
+      ? observedNumber(st, ['kdRatio'])
+      : ((observedNumber(st, ['kills']) !== null && observedNumber(st, ['deaths']) !== null)
+        ? Number((observedNumber(st, ['kills']) / Math.max(1, observedNumber(st, ['deaths']))).toFixed(2))
+        : null),
     fk: observedNumber(st, ['firstKills']),
     fd: observedNumber(st, ['firstDeaths']),
     acs: observedNumber(st, ['scorePerRound']),
     adr: observedNumber(st, ['damagePerRound']),
-    kast: observedNumber(st, ['kast'])
+    kast: observedNumber(st, ['kast']),
+    clutches: observedNumber(st, ['clutches'])
+  };
+  // Qué pilares tienen métrica OBSERVADA (consensus no usa los no observados).
+  const pillarsObserved = {
+    precision: mechanical.hsPct !== null || mechanical.kd !== null,
+    macro: mechanical.kast !== null && mechanical.adr !== null,
+    openings: mechanical.fk !== null && mechanical.fd !== null,
+    economy: economyObserved,
+    clutch: mechanical.clutches !== null
   };
   const dataQuality = unknowns.length === 0 ? 'completa' : (unknowns.length >= 5 ? 'insuficiente' : 'parcial');
   const finalLeaks = (causesAllowed && unknowns.length < 5) ? eloLeaks.slice(0, 3) : [];
@@ -156,6 +172,7 @@ function evaluateLearningProfile(matchData, targetHandle) {
     dataQuality,
     provenance,
     mechanical,
+    pillarsObserved,
     unknowns,
     warning: dataWarning,
     radar: {

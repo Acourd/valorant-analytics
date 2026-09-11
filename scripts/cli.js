@@ -675,20 +675,20 @@ try {
 
   } else if (command === 'consensus') {
     const { target, player } = resolveTargetAndPlayer(args);
-    const effectivePlayer = player || 'TenZ#0001';
-    const matchData = resolveMatchData(target, effectivePlayer);
-    const profile = evaluateLearningProfile(matchData, effectivePlayer);
+    const matchData = resolveMatchData(target, player);
+    const profile = evaluateLearningProfile(matchData, player);
     const arbiter = new ConsensusArbiter();
     const report = arbiter.synthesizeConsensus(profile);
 
     printBanner();
-    console.log(`⚖️ SÍNTESIS DE CONSENSO BIZANTINO MULTI-LENTE (BFT)`);
-    console.log(`Jugador: ${effectivePlayer} | Veredicto: ${report.verdict}`);
+    console.log(`🧠 SÍNTESIS DE CONSENSO BIZANTINO MULTI-LENTE (BFT)`);
+    console.log(`Jugador: ${profile.player} | Veredicto: ${report.verdict} | Procedencia: ${report.provenanceLabel}`);
     console.log(`------------------------------------------------------------------------`);
     console.log(`  • Lentes Participantes:  ${report.participatingLenses}`);
     console.log(`  • Quórum Alcanzado:      ${report.quorumAchieved ? 'SÍ' : 'NO'}`);
     console.log(`  • Prioridad de Acción:   ${report.actionablePriority}`);
-    console.log(`\n📋 SÍNTESIS UNIFICADA DE LENTES:`);
+    if (report.missing && report.missing.length > 0) console.log(`  • Evidencia faltante:    ${report.missing.join('; ')}`);
+    console.log(`\n🔍 SÍNTESIS UNIFICADA DE LENTES:`);
     report.synthesis.forEach(s => console.log(`  • ${s}`));
     console.log(`========================================================================\n`);
 

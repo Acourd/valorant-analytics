@@ -11,12 +11,15 @@ console.log('[TEST] Iniciando verificación de Consensus Arbiter & Routine Synth
 // 1. Consensus Arbiter (BFT Quorum)
 const arbiter = new ConsensusArbiter();
 const poorTelemetry = {
-  adr: 98,
+  provenance: 'normalized_input',
+  pillarsObserved: { precision: true, macro: true, openings: true, economy: true, clutch: true },
+  mechanical: { hsPct: 18, kd: 0.9, fk: 1, fd: 4, adr: 98, kast: 60, clutches: 0 },
   radar: {
-    primerosDuelos: 30,
-    gestionEconomica: 35,
-    spacingYTrades: 38,
-    supervivencia: 32
+    precisionMecanica: '32 / 100',
+    duelosDeApertura: '30 / 100',
+    disciplinaEconomica: '35 / 100',
+    macrogamePosicionamiento: '38 / 100',
+    composturaClutch: '30 / 100'
   }
 };
 
