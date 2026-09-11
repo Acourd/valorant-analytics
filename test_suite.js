@@ -141,14 +141,21 @@ check('parseDuels: target case-insensitive, matriz killer->victim con conteos',
   });
 
 // ---- Unidad: kovaaks ----
-check('generateKovaaksRoutine: 3 bloques, 15 min totales, telemetría FK/FD',
+check('generateKovaaksRoutine: aspas (debilidad observada) genera rutina; TenZ (sin debilidad) la omite',
   () => {
-    const r = generateKovaaksRoutine(sample, 'TenZ#0001');
-    assert.strictEqual(r.routine.length, 3);
-    assert.ok(r.routine.every(b => b.duration.startsWith('5 mins')));
-    assert.ok(r.player, 'sin jugador resuelto');
-    assert.ok(typeof r.firstDuels.entryRating === 'number' && r.firstDuels.entryRating >= 0 && r.firstDuels.entryRating <= 100);
-    assert.ok(r.hsPct.endsWith('%'));
+    const weak = generateKovaaksRoutine(sample, 'aspas#0001');
+    assert.strictEqual(weak.omitted, false, 'aspas debe generar rutina (HS/leg fuera de umbral)');
+    assert.ok(weak.routine.length > 0);
+    assert.ok(weak.routine.every(b => b.duration.startsWith('5 mins')));
+    assert.ok(weak.player, 'sin jugador resuelto');
+    assert.strictEqual(weak.provenance, 'normalized_input');
+    assert.ok(/normali/i.test(weak.provenanceLabel), 'procedencia visible');
+    assert.strictEqual(weak.sensitivityRecommendation, null, 'sin sensibilidad inventada');
+    const strong = generateKovaaksRoutine(sample, 'TenZ#0001');
+    assert.strictEqual(strong.omitted, true, 'TenZ no cruza umbral: debe omitirse');
+    assert.strictEqual(strong.reason, 'RUTINA OMITIDA');
+    assert.ok(Array.isArray(strong.missingMetrics));
+    assert.ok(strong.requiredData.length > 0 || /umbral/i.test(strong.omittedReason), 'debe explicar la omisión');
   });
 
 // ---- Unidad: duo_synergy ----
@@ -211,10 +218,15 @@ function withIsolatedCache(fn) {
   }
 }
 
-check('cli.js aim: dispatcher ejecuta la rutina sin TypeError (regresión P0)',
+check('cli.js aim: rutina solo con evidencia (aspas) y RUTINA OMITIDA sin debilidad (TenZ)',
   () => {
-    const out = cliOk(['aim', sampleFile, 'TenZ#0001']);
-    assert.ok(out.includes('RUTINA KOVAAKS 15-MIN'), 'cabecera aim ausente');
+    const weakOut = cliOk(['aim', sampleFile, 'aspas#0001']);
+    assert.ok(weakOut.includes('RUTINA KOVAAKS 15-MIN'), 'cabecera aim ausente con evidencia');
+    assert.ok(/normali/i.test(weakOut), 'debe mostrar procedencia');
+    assert.ok(/Motivo:/i.test(weakOut), 'debe citar el motivo/umbral');
+    const strongOut = cliOk(['aim', sampleFile, 'TenZ#0001']);
+    assert.ok(/RUTINA OMITIDA/i.test(strongOut), 'sin debilidad debe omitirse');
+    assert.ok(/Métricas faltantes|Datos requeridos/i.test(strongOut), 'debe mostrar faltantes');
   });
 
 check('cli.js duels: matriz 1v1 renderizada (regresión P0: contrato parseDuels)',
@@ -255,18 +267,22 @@ check('analyzeWeaponTelemetry: cálculo de zonas (Head/Body/Leg) y SE/TP spray r
     assert.ok(res.recoilDiagnosis && res.recoilDiagnosis.kovaaksPrescription);
   });
 
-check('analyzeWeaponTelemetry: categorización en 3 bandas de distancia (Close/Mid/Long)',
+check('analyzeWeaponTelemetry: zonas observadas y distancia n/d (sin inferir por loadout)',
   () => {
     const res = analyzeWeaponTelemetry(sample, 'TenZ#0001');
-    assert.strictEqual(res.distanceBands.length, 3);
-    assert.ok(res.distanceBands.every(b => typeof b.duels === 'number' && typeof b.totalDamage === 'number'));
+    assert.strictEqual(res.distanceBands, null, 'sin posiciones no se infieren bandas');
+    assert.ok(/n\/d/.test(res.distanceNote), 'debe declarar distancia n/d');
+    assert.strictEqual(res.zoneMetrics.observed, true, 'debe haber impacto observado');
+    assert.ok(typeof res.zoneMetrics.legPct === 'number');
+    assert.ok(!/loadout/i.test(JSON.stringify(res.distanceBands || '')), 'jamás distancia por loadout');
   });
 
-check('cli.js weapons: telemetría de armas y bandas de impacto en consola',
+check('cli.js weapons: telemetría de impactos y distancia n/d en consola',
   () => {
     const out = cliOk(['weapons', sampleFile, 'TenZ#0001']);
-    assert.ok(out.includes('TELEMETRÍA DE ARMAS') && out.includes('DISTANCIA Y CONVERSIÓN'));
+    assert.ok(out.includes('TELEMETRÍA DE ARMAS') && out.includes('DISTANCIA: n/d'));
     assert.ok(out.includes('SE/TP Ratio'));
+    assert.ok(!out.includes('Close Range'), 'no debe inventar bandas de distancia');
   });
 
 check('cli.js calibrate: modo zero-cloud offline diagnóstico instantáneo',
@@ -345,11 +361,15 @@ check('cli.js consensus: arbitraje bizantino multi-lente con quórum BFT',
     assert.ok(out.includes('Lentes Participantes:  3'));
   });
 
-check('cli.js synthesize: rutina evolutiva adaptativa según debilidades de match',
+check('cli.js synthesize: rutina evolutiva con evidencia (aspas) y RUTINA OMITIDA sin debilidad (TenZ)',
   () => {
-    const out = cliOk(['synthesize', sampleFile, 'TenZ#0001']);
-    assert.ok(out.includes('RUTINA EVOLUTIVA ADAPTATIVA'));
-    assert.ok(out.includes('EJERCICIOS SINTETIZADOS'));
+    const weakOut = cliOk(['synthesize', sampleFile, 'aspas#0001']);
+    assert.ok(weakOut.includes('RUTINA EVOLUTIVA ADAPTATIVA'));
+    assert.ok(weakOut.includes('EJERCICIOS SINTETIZADOS'));
+    assert.ok(/normali/i.test(weakOut), 'debe mostrar procedencia');
+    const strongOut = cliOk(['synthesize', sampleFile, 'TenZ#0001']);
+    assert.ok(/RUTINA OMITIDA/i.test(strongOut), 'sin debilidad debe omitirse');
+    assert.ok(/Métricas faltantes|Datos requeridos/i.test(strongOut), 'debe mostrar faltantes');
   });
 
 check('cli.js sbom: manifiesto CycloneDX v1.5 con 0 dependencias externas',
@@ -2299,6 +2319,45 @@ check('procedencia: fuentes locales se etiquetan como normalizadas (no verificad
     assert.ok(/normalizad/i.test(out), 'el archivo local debe declararse normalizado');
     assert.ok(!/JSON local verificado/i.test(out), 'no debe afirmar "JSON local verificado"');
     assert.ok(!/cach[ée] local verificada/i.test(out), 'no debe afirmar "caché local verificada"');
+  });
+
+check('rutinas: sin evidencia mecánica se omiten con procedencia y faltantes (sin defaults)',
+  () => {
+    const { RoutineSynthesizer } = require(path.join(scriptsDir, 'routine_synthesizer.js'));
+    const synth = new RoutineSynthesizer();
+    const omitted = synth.synthesizeRoutine({ player: 'X#1', provenance: 'normalized_input' });
+    assert.strictEqual(omitted.omitted, true);
+    assert.strictEqual(omitted.reason, 'RUTINA OMITIDA');
+    assert.deepStrictEqual(omitted.drillPlan, []);
+    assert.ok(omitted.missingMetrics.includes('hsPct'), 'debe declarar hsPct faltante');
+    assert.ok(omitted.requiredData.length > 0, 'debe declarar datos requeridos');
+    assert.ok(/normali/i.test(omitted.provenanceLabel), 'procedencia visible');
+    assert.ok(!omitted.identifiedWeaknesses.some(w => w.area === 'PISTOL_PRECISION'), 'sin debilidad por defecto');
+    // Datos parciales (solo ACS) tampoco habilitan recomendaciones.
+    const partial = synth.synthesizeRoutine({ player: 'X#1', provenance: 'normalized_input', mechanical: { acs: 240 } });
+    assert.strictEqual(partial.omitted, true);
+    assert.ok(partial.missingMetrics.includes('hsPct'));
+    // Perfiles opuestos → resultados distintos.
+    const weak = synth.synthesizeRoutine({ player: 'W#1', provenance: 'normalized_input', mechanical: { hsPct: 14, fk: 4, fd: 3 } });
+    const strong = synth.synthesizeRoutine({ player: 'S#1', provenance: 'normalized_input', mechanical: { hsPct: 36, fk: 4, fd: 4 } });
+    assert.strictEqual(weak.omitted, false, 'métricas débiles generan rutina');
+    assert.ok(weak.drillPlan.length > 0);
+    assert.ok(weak.drillPlan.every(d => d.enablingMetric && d.threshold !== undefined), 'cada ejercicio cita métrica y umbral');
+    assert.strictEqual(strong.omitted, true, 'métricas fuertes no generan rutina');
+    assert.notDeepStrictEqual(weak.identifiedWeaknesses, strong.identifiedWeaknesses);
+  });
+
+check('rutinas: objetivo inexistente sale con exit 1 y sin rutina de otro jugador',
+  () => {
+    for (const cmd of ['aim', 'synthesize']) {
+      let code = 0;
+      let out = '';
+      try { cliOk([cmd, sampleFile, 'NoExiste#9999']); }
+      catch (e) { code = e.status; out = String(e.stdout || '') + String(e.stderr || ''); }
+      assert.strictEqual(code, 1, `${cmd}: objetivo inexistente debe salir 1`);
+      assert.ok(/no encontrado/i.test(out), `${cmd}: debe explicar el objetivo ausente`);
+      assert.ok(!/RUTINA KOVAAKS 15-MIN|RUTINA EVOLUTIVA ADAPTATIVA/.test(out), `${cmd}: no debe emitir rutina de otro jugador`);
+    }
   });
 
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben

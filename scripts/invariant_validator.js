@@ -153,26 +153,34 @@ function validateWeaponTelemetry(weaponResult) {
     throw new InvariantViolationError('WEAPON_TELEMETRY', 'Resultado de telemetría de armas ausente', { weaponResult });
   }
 
-  validateHitZones(weaponResult.hitZoneDistribution);
-
   const m = weaponResult.metrics || {};
+  const observed = Boolean(weaponResult.zoneMetrics && weaponResult.zoneMetrics.observed);
   if (!isFiniteNumber(m.totalHits) || m.totalHits < 0) {
     throw new InvariantViolationError('METRICS_HITS', 'totalHits debe ser un entero no negativo', { totalHits: m.totalHits });
   }
-
-  if (!isFiniteNumber(m.sprayTapRatio) || m.sprayTapRatio < 0) {
-    throw new InvariantViolationError('METRICS_SE_TP', 'Ratio SE/TP de spray debe ser un número real no negativo', { sprayTapRatio: m.sprayTapRatio });
-  }
-
-  if (!Array.isArray(weaponResult.distanceBands) || weaponResult.distanceBands.length !== 3) {
-    throw new InvariantViolationError('DISTANCE_BANDS', 'Debe haber exactamente 3 bandas de distancia (Close, Mid, Long)', { bands: weaponResult.distanceBands });
-  }
-
-  weaponResult.distanceBands.forEach(band => {
-    if (!inRange(band.duels, 0, 1000) || !inRange(band.totalDamage, 0, 50000)) {
-      throw new InvariantViolationError('BAND_DATA', `Valores de banda fuera de rango admisible: ${band.band}`, { band });
+  if (observed) {
+    validateHitZones(weaponResult.hitZoneDistribution);
+    if (!isFiniteNumber(m.sprayTapRatio) || m.sprayTapRatio < 0) {
+      throw new InvariantViolationError('METRICS_SE_TP', 'Ratio SE/TP de spray debe ser un número real no negativo', { sprayTapRatio: m.sprayTapRatio });
     }
-  });
+  } else if (m.sprayTapRatio !== null && m.sprayTapRatio !== undefined) {
+    throw new InvariantViolationError('METRICS_SE_TP_UNOBSERVED', 'Sin impactos observados no se debe emitir ratio SE/TP', { sprayTapRatio: m.sprayTapRatio });
+  }
+
+  // Bandas de distancia: si no hay posiciones observadas deben ser n/d (null)
+  // y declararlo; nunca inferirse del valor de loadout.
+  if (weaponResult.distanceBands !== null && weaponResult.distanceBands !== undefined) {
+    if (!Array.isArray(weaponResult.distanceBands) || weaponResult.distanceBands.length !== 3) {
+      throw new InvariantViolationError('DISTANCE_BANDS', 'Debe haber exactamente 3 bandas de distancia (Close, Mid, Long) o n/d', { bands: weaponResult.distanceBands });
+    }
+    weaponResult.distanceBands.forEach(band => {
+      if (!inRange(band.duels, 0, 1000) || !inRange(band.totalDamage, 0, 50000)) {
+        throw new InvariantViolationError('BAND_DATA', `Valores de banda fuera de rango admisible: ${band.band}`, { band });
+      }
+    });
+  } else if (typeof weaponResult.distanceNote !== 'string' || weaponResult.distanceNote.length === 0) {
+    throw new InvariantViolationError('DISTANCE_NOTE', 'Sin bandas de distancia debe declararse como n/d', { weaponResult });
+  }
 
   return true;
 }

@@ -11,7 +11,7 @@ const fs = require('fs');
 const { extractMatchId, fetchMatch } = require('./fetch_match');
 const { parseDuels } = require('./duel_matrix');
 const { analyzeEconomy } = require('./economy_analyzer');
-const { resolveExactHandle, sourceProvenance, provenanceLabel, mayAssertCauses } = require('./data_contract');
+const { resolveExactHandle, sourceProvenance, provenanceLabel, mayAssertCauses, observedNumber } = require('./data_contract');
 
 function evaluateLearningProfile(matchData, targetHandle) {
   if (!matchData || typeof matchData !== 'object') {
@@ -128,6 +128,16 @@ function evaluateLearningProfile(matchData, targetHandle) {
 
   const provenance = sourceProvenance(meta);
   const causesAllowed = mayAssertCauses(provenance);
+  // Evidencia mecánica OBSERVADA (null cuando no existe): es la única fuente
+  // que habilita rutinas; no se rellenan valores plausibles.
+  const mechanical = {
+    hsPct: observedNumber(st, ['hsAccuracy', 'headshotsPercentage']),
+    fk: observedNumber(st, ['firstKills']),
+    fd: observedNumber(st, ['firstDeaths']),
+    acs: observedNumber(st, ['scorePerRound']),
+    adr: observedNumber(st, ['damagePerRound']),
+    kast: observedNumber(st, ['kast'])
+  };
   const dataQuality = unknowns.length === 0 ? 'completa' : (unknowns.length >= 5 ? 'insuficiente' : 'parcial');
   const finalLeaks = (causesAllowed && unknowns.length < 5) ? eloLeaks.slice(0, 3) : [];
   const dataWarning = unknowns.length >= 5
@@ -145,6 +155,7 @@ function evaluateLearningProfile(matchData, targetHandle) {
     result: meta.result || 'Finished',
     dataQuality,
     provenance,
+    mechanical,
     unknowns,
     warning: dataWarning,
     radar: {
