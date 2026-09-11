@@ -19,7 +19,7 @@
 ## 2. Selección de 10–20 jugadores
 
 **Inclusión**
-- 18+ (si hay 16–17: consentimiento del tutor + asentimiento del menor).
+- **Edad mínima: PENDIENTE_DE_DEFINICIÓN** (propuesta por defecto: 18+). Si se decide admitir 16–17: consentimiento del tutor + asentimiento del menor, documentados.
 - Juega competitivo con regularidad (≥ 5 partidas/semana) y usa Tracker.gg/OP.GG.
 - Dispone de datos que puede aportar (capturas, texto de marcador o JSON local).
 - Disposición a dar feedback estructurado y, opcional, seguimiento a 2 semanas.
@@ -47,9 +47,15 @@ Checklist que debe firmarse/aceptarse antes de la sesión:
 - [ ] Datos: qué se recoge (rango, horas, métricas aportadas, feedback), para qué y por cuánto tiempo (retención **≤ 6 meses**).
 - [ ] **Minimización:** no se piden contraseñas, tokens de Riot ni datos sensibles.
 - [ ] **Anonimización** del feedback y de los artefactos antes de compartir.
+- [ ] **Terceros en capturas:** los marcadores incluyen handles de otros 9 jugadores (dato público, pero de terceros); se recortan/ocultan antes de compartirse y nunca se publican.
 - [ ] **No verificación de origen:** se informa que los datos son `normalized_input` (no verificados).
-- [ ] Contacto del responsable y vía de retirada/borrado.
-- [ ] (Si aplica) Consentimiento del tutor + asentimiento del menor.
+- [ ] **Retirada/borrado:** el participante puede solicitarlo en cualquier momento.
+  - Contacto del responsable: **PENDIENTE_DE_DEFINICIÓN**.
+  - Canal de solicitud: **PENDIENTE_DE_DEFINICIÓN**.
+  - Plazo máximo de borrado: **PENDIENTE_DE_DEFINICIÓN**.
+  - Alcance: datos crudos, notas del moderador y artefactos. **Incluye derivados**: si un hallazgo ya se agregó en un informe, no es reversible, pero el informe nunca es identificable.
+- [ ] **Grabación de audio/vídeo: PENDIENTE_DE_DEFINICIÓN.** Si se activa, exige consentimiento específico por escrito (y retención propia); si NO se activa, toda grabación queda **prohibida**.
+- [ ] **Edad mínima:** PENDIENTE_DE_DEFINICIÓN (propuesta: 18+). Si se admite 16–17: consentimiento del tutor **y** asentimiento del menor, documentados.
 
 Plantilla mínima: nombre/seudónimo, fecha, aceptación de los puntos anteriores, firma o confirmación por escrito.
 
@@ -76,11 +82,16 @@ Plantilla mínima: nombre/seudónimo, fecha, aceptación de los puntos anteriore
 | **Claridad** | "Entendí cada sección sin ayuda" | Comprensión sin explicación externa |
 | **Accionabilidad** | "Sé exactamente qué probar en mi próxima sesión" | Puedo convertirla en acciones concretas |
 | **Calibración de alcance** | "Entendí que son hipótesis, no veredictos" (≥4 esperado) | No malinterpreta límites |
-| **Señal de ruido** | "¿Hubo algo que pareciera exagerado o inventado?" (0 = no) | Anti-sobreafirmación |
+| **Calibración inversa** | "Leí alguna afirmación como un hecho" (1–5; **menor es mejor**) | Detecta sobreinterpretación |
+| **Señal de ruido** | "Nada me pareció exagerado o inventado" (1–5; `null` = sin respuesta) | Anti-sobreafirmación |
 
 **Binarias**
 - ¿Ejecutó ≥1 recomendación en 2 semanas? (sí/no) · ¿Cuál(es)?
 - ¿Compartiría el reporte con un amigo? (sí/no)
+
+**Acción concreta (obligatoria en cada sesión)**
+- Recomendación concreta elegida: **¿cuál exactamente?**
+- **Fecha prevista de prueba** (ISO): ¿cuándo la probará?
 
 **Cualitativas**
 - Sección más y menos útil; ambigüedades; recomendaciones no ejecutables; texto sobrante.
@@ -88,7 +99,7 @@ Plantilla mínima: nombre/seudónimo, fecha, aceptación de los puntos anteriore
 **Criterios de éxito (provisionales)**
 - Mediana ≥ 4 en **Utilidad**, **Claridad** y **Accionabilidad**.
 - ≥ 60% ejecutó ≥ 1 recomendación a 2 semanas.
-- Mediana ≥ 4 en **Calibración de alcance** y 0 casos de "exagerado/inventado" con valor > 1.
+- Mediana ≥ 4 en **Calibración de alcance**, mediana ≥ 4 en **Señal de ruido** y mediana ≤ 2 en **Calibración inversa**.
 - Ningún incidente de privacidad.
 
 ---
@@ -103,20 +114,22 @@ Plantilla mínima: nombre/seudónimo, fecha, aceptación de los puntos anteriore
   "fechaISO": "YYYY-MM-DD",
   "perfil": { "rangoActual": "Oro 2", "rangoPico": "Platino 1", "horasSemana": 8, "region": "EU" },
   "evidencia": { "tipo": "normalized_input", "partidasAportadas": 2 },
-  "likert": { "utilidad": 0, "claridad": 0, "accionabilidad": 0, "calibracionAlcance": 0, "sensacionRuido": 0 },
+  "likert": { "utilidad": null, "claridad": null, "accionabilidad": null, "calibracionAlcance": null, "calibracionInversa": null, "senalRuido": null },
+  "accion": { "recomendacionConcreta": "", "fechaPrevistaPrueba": "" },
   "binarias": { "compartiriaConAmigo": null, "ejecutoRecomendacion": null },
   "secciones": { "masUtil": "", "menosUtil": "", "confusa": "", "faltante": "" },
   "notasModerador": "",
-  "seguimiento2semanas": { "aplicoAlgo": null, "queAplico": "", "efectoPercibido": "" }
+  "seguimiento2semanas": { "aplicoAlgo": null, "queAplico": "", "fechaRealizada": "", "efectoPercibido": "" }
 }
 ```
 
-### 6.2 Ítems Likert (redacción estable)
+### 6.2 Ítems Likert (redacción estable; 1–5, `null` = sin respuesta)
 1. La información me resultó valiosa. (Utilidad)
 2. Entendí cada sección sin ayuda. (Claridad)
 3. Sé exactamente qué probar en mi próxima sesión. (Accionabilidad)
-4. Entendí que son hipótesis, no veredictos. (Calibración)
-5. Nada me pareció exagerado o inventado. (Ruido; 5 = totalmente de acuerdo)
+4. Entendí que son hipótesis, no veredictos. (Calibración de alcance)
+5. Leí alguna afirmación como un hecho. (Calibración inversa; **menor es mejor**)
+6. Nada me pareció exagerado o inventado. (Señal de ruido)
 
 ### 6.3 Guía de entrevista (semiestructurada)
 - ¿Qué fue lo primero que miraste? ¿Por qué?
@@ -130,9 +143,14 @@ Plantilla mínima: nombre/seudónimo, fecha, aceptación de los puntos anteriore
 ## 7. Privacidad y seguridad
 
 - Datos en local; sin subir capturas con datos personales a servicios externos.
-- Anonimización antes de archivar; retención ≤ 6 meses; borrado a petición.
+- **Almacenamiento:** PENDIENTE_DE_DEFINICIÓN (ubicación y control de acceso).
+- **Notas del moderador:** pueden contener PII; se anonimizan antes de compartirse o no salen del equipo del operador.
+- **Transferencia entre roles:** canal PENDIENTE_DE_DEFINICIÓN; se evita enviar capturas sin recortar.
+- **Anonimización de terceros:** antes de compartir cualquier captura, se recortan/ocultan los handles de los otros jugadores.
+- Anonimización antes de archivar; retención ≤ 6 meses; **retirada/borrado** según el procedimiento del §3 (incluye derivados no reversibles, nunca identificables).
 - Nada de credenciales Riot; la ingesta es `normalized_input`.
 - Los hallazgos se reportan agregados; sin identificar a nadie sin permiso.
+- **Grabación:** PENDIENTE_DE_DEFINICIÓN; prohibida salvo consentimiento específico por escrito.
 
 ---
 
@@ -164,8 +182,9 @@ Roles: **Coordinador** (recluta/consentimiento), **Operador** (ejecuta reportes)
 |---|---|
 | Muestra pequeña / sesgo de autoselección | Cuotas por rango/rol; declarar límite |
 | Auto-informe | Triangulación con artefactos del reporte y seguimiento |
-| Sobreinterpretar hipótesis | Moderador corrige; ítem de calibración de alcance |
-| Privacidad | Anonimización, retención limitada, sin credenciales |
+| Sobreinterpretar hipótesis | Moderador corrige; calibración de alcance + ítem inverso |
+| Privacidad | Anonimización (incluidos terceros en capturas), retención limitada, sin credenciales |
+| Grabación no consentida | Prohibida salvo consentimiento específico por escrito (PENDIENTE_DE_DEFINICIÓN) |
 | Confundir utilidad con acierto | Mensaje explícito: no se evalúa verdad del MMR/talento |
 
 ---
