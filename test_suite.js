@@ -74,7 +74,6 @@ const {
   assembleRawMatchStructure,
   resolveMatchDataResilient
 } = require(path.join(scriptsDir, 'universal_ingestor.js'));
-const { decompressBuffer, getChromiumCachePaths, extractFromCacheDirectory } = require(path.join(scriptsDir, 'browser_cache_harvester.js'));
 const { extractAccountTelemetry, aggregateCareerTelemetry, generateMilestonesTimeline } = require(path.join(scriptsDir, 'career_telemetry.js'));
 const { evaluateMmrDrag, evaluateTalentVsEffort } = require(path.join(scriptsDir, 'autodiagnostic_engine.js'));
 
@@ -430,13 +429,12 @@ check('universal_ingestor: resolveMatchDataResilient intercepta WAF 403 con cont
     const fakeWafUrl = 'https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04';
     assert.throws(
       () => resolveMatchDataResilient(fakeWafUrl, 'kirtmy#000', { map: 'Ascent' }),
-      /Sin telemetría verificable/
+      /no soportada|Riot RSO/
     );
     const match = resolveMatchDataResilient(fakeWafUrl, 'kirtmy#000', { map: 'Ascent', allowSynthetic: true });
     assert.ok(match && match.data && match.data.segments);
     assert.strictEqual(match.data.segments.filter(s => s.type === 'player-summary').length, 10);
-    assert.strictEqual(match.data.metadata.wafContainment, true);
-    assert.strictEqual(match.data.metadata.synthetic, true);
+    assert.strictEqual(match.data.metadata.synthetic, true, 'demo explícito');
   });
 
 check('cli.js parse: dispatcher procesa archivo de volcado de texto sin errores',
@@ -457,17 +455,6 @@ check('cli.js match (WAF resilient): URL remota protegida ejecuta Zero-Crash con
     assert.ok(out.includes('DIAGNÓSTICO 360°') && out.includes('kirtmy#000'));
     assert.ok(out.includes('RADAR DE DOMINIO'));
     assert.ok(out.includes('SINTÉTICA'), 'modo demo debe declarar procedencia sintética');
-  });
-
-check('browser_cache_harvester: decompressBuffer y detección de rutas Chromium',
-  () => {
-    const raw = Buffer.from(JSON.stringify({ ok: true, timestamp: Date.now() }));
-    const zlib = require('zlib');
-    const br = zlib.brotliCompressSync(raw);
-    const dec = decompressBuffer(br);
-    assert.ok(dec && JSON.parse(dec.toString('utf8')).ok === true);
-    const paths = getChromiumCachePaths();
-    assert.ok(Array.isArray(paths));
   });
 
 check('career_telemetry: desglose de horas competitivas vs general y cronología de hitos',
@@ -549,21 +536,6 @@ check('cli.js career & diagnose: ejecución exitosa de los nuevos comandos con E
   });
 
 // ---- Blindaje adversarial v4.1: casos límite y edge cases ----
-
-check('harvester: cacheDir inexistente y data_1 truncado no lanzan (retornan [])',
-  () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'harv-edge-'));
-    try {
-      assert.deepStrictEqual(extractFromCacheDirectory(path.join(tmp, 'no-existe'), null), []);
-      const truncDir = path.join(tmp, 'trunc');
-      fs.mkdirSync(truncDir);
-      fs.writeFileSync(path.join(truncDir, 'data_1'), Buffer.alloc(100));
-      const res = extractFromCacheDirectory(truncDir, null);
-      assert.ok(Array.isArray(res), 'debe retornar array aunque el blockfile esté truncado');
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
-  });
 
 check('ingestor: options.matchId determinista y sin random en contrato',
   () => {
@@ -727,8 +699,7 @@ check('ingestor demo: --demo emite sintético con procedencia explícita',
     fm.fetchMatch = () => { throw new Error('Simulated WAF 403'); };
     try {
       const r = resolveMatchDataResilient('https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04', 'Test#0001', { allowSynthetic: true });
-      assert.strictEqual(r.data.metadata.synthetic, true);
-      assert.strictEqual(r.data.metadata.wafContainment, true);
+      assert.strictEqual(r.data.metadata.synthetic, true, 'demo declarado');
       assert.ok(Array.isArray(r.data.metadata.ingestionDiagnostics) && r.data.metadata.ingestionDiagnostics.length > 0);
       assert.throws(
         () => resolveMatchDataResilient('https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04', 'Test#0001'),
@@ -912,7 +883,7 @@ check('ingestor: IDs no-archivo no provocan sondas fs; parse sin entrada falla',
     fsMod.existsSync = (...a) => { probed.push('existsSync'); return origExists(...a); };
     fsMod.statSync = (...a) => { probed.push('statSync'); return origStat(...a); };
     try {
-      assert.throws(() => resolveMatchDataResilient('..%2f..%2fx', 'X#1'), /canónico/);
+      assert.throws(() => resolveMatchDataResilient('..%2f..%2fx', 'X#1'), /no resoluble/);
     } finally {
       fsMod.existsSync = origExists;
       fsMod.statSync = origStat;

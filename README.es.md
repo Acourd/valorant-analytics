@@ -7,7 +7,7 @@
 [![Versión](https://img.shields.io/badge/versión-4.5_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
 [![Runtime](https://img.shields.io/badge/runtime-Node.js_18%2B_Nativo-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Dependencias](https://img.shields.io/badge/dependencias-0_npm_(Core)-38BDF8.svg?style=for-the-badge&logo=codeforces&logoColor=white)](package.json)
-[![Pruebas](https://img.shields.io/badge/tests-121%2F121_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
+[![Pruebas](https://img.shields.io/badge/tests-119%2F119_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
 [![Auditoría](https://img.shields.io/badge/auditoría-100%2F100_Verificado-8B5CF6.svg?style=for-the-badge&logo=codereview&logoColor=white)](opencode_tester.js)
 [![Licencia](https://img.shields.io/badge/licencia-MIT-6B7280.svg?style=for-the-badge)](LICENSE)
 
@@ -33,7 +33,7 @@ La mayoría de rastreadores web públicos solo suman cifras acumuladas al final 
 | **Sinergia en Pareja** | 🔴 Inexistente | 🟢 **Auditoría de Dúo & Ventanas de Re-frag** | Mide tiempos de tradeo (<2s) y balance de carga para evitar jugar dos 1v1 aislados. |
 | **Economía de Rondas** | 🔴 Total gastado global | 🟢 **Conversión por Buy-Tiers (Eco/Semi/Full)** | Identifica si estás regalando rondas clave tras ganar pistolas o en compras completas. |
 | **Salud de Cuenta** | 🔴 Solo rango visual | 🟡 **Señal heurística de MMR & estimación de rango** | Plantea una HIPÓTESIS (no verificada) de posible anclaje y una estimación orientativa de rango. No mide el MMR interno de Riot ni el talento real. |
-| **Disponibilidad WAF** | 🔴 Caídas por Cloudflare 403 | 🟢 **Cosecha Local de Caché & Modo Zero-Cloud** | Cero bloqueos: lee directamente del navegador (Brotli/Gzip) o analiza sin conexión. |
+| **Entrada de datos** | 🔴 Cosecha de caché / Tracker | 🟢 **JSON, texto o captura aportados por ti** | Sin cosecha de caché ni descarga automática: la entrada la aportas explícitamente; la vía autorizada (Riot RSO) está pendiente de credenciales. |
 
 ---
 
@@ -44,8 +44,7 @@ El pipeline extrae micro-datos de cada ronda y los somete a verificación formal
 ```mermaid
 flowchart TD
     subgraph INGESTION["1. INGESTA RESILIENTE MULTI-FUENTE"]
-        A1["Caché de Navegador
-(Chromium Brotli)"] --> B["universal_ingestor.js"]
+        A1["JSON / Export del usuario"] --> B["universal_ingestor.js"]
         A2["Volcado de Marcador
 (Texto Plano / OCR)"] --> B
         A3["Historial JSON / API
@@ -86,10 +85,10 @@ Diseñado para adaptarse a cualquier flujo de trabajo sin fricciones:
 
 1. Abre la especificación lista para usar: 👉 [**`standalone_prompt.md`**](standalone_prompt.md)
 2. Copia todo su contenido y pégalo en tu asistente de IA favorito (**ChatGPT, Claude, Gemini o DeepSeek-R1**), o configúralo como un **Gem de Google Gemini** o **Custom GPT de OpenAI**.
-3. Pega el enlace de Tracker.gg, el texto de tu marcador o una captura de pantalla para recibir el reporte 360° instantáneo.
+3. Pega el texto de tu marcador o adjunta una captura para confirmar los campos (la obtención automática desde Tracker no está soportada).
 
 ### ⚡ Opción 2: Modo Local en Terminal (Despachador Maestro `cli.js`)
-> **Ideal para jugadores competitivos que buscan velocidad (<100ms), privacidad total y análisis 100% local. El análisis de archivos y scoreboards locales es íntegramente offline; los comandos `fetch_profile` / `fetch_match` y las URLs remotas son la única superficie de red (ver Privacidad).**
+> **Ideal para jugadores competitivos que buscan velocidad (<100ms) y análisis 100% local. No hay descarga automática de Tracker ni cosecha de caché: aportas un JSON/export, el texto de tu marcador o una captura (con confirmación).**
 
 ```bash
 # 1. Clona el repositorio
@@ -168,10 +167,9 @@ El despachador maestro `cli.js` provee acceso unificado a todas las capacidades 
 | **Coaching Introspectivo**| `node cli.js coaching [partida.json] <jugador>` | Identifica duelos de máxima fricción y prescribe recursos tácticos de YouTube. |
 | **Auditoría de Dúo** | `node cli.js duo [partida.json] [p1] [p2]` | Evalúa ventanas de tradeo, balance de bajas y detecta candidatos a boost. |
 | **Matriz de Duelos 1v1** | `node cli.js duels [partida.json] [jugador]` | Desglosa los duelos directos cara a cara contra cada agente rival. |
-| **Calibración Offline** | `node cli.js calibrate [jugador] [rango] [rol]` | Simulación instantánea sin conexión para entrenar sin llamadas de red. |
-| **Cosecha de Caché** | `node cli.js harvest [jugador]` | Recupera partidas desde la caché local Chromium evadiendo Cloudflare Turnstile. |
-| **Auditoría de Carrera** | `node cli.js career <perfil.json\|handle>` | Desglosa horas competitivas vs casuales y cronología de hitos por rango. |
-| **Señal Heurística de MMR** | `node cli.js diagnose <perfil.json\|handle>` | Señala un patrón compatible con posible anclaje (hipótesis NO verificada) y una estimación orientativa de rango. No mide el MMR interno. |
+| **Simulación Offline** | `node cli.js calibrate [jugador] [rango] [rol]` | SIMULACIÓN con valores ilustrativos (sin datos del jugador ni telemetría real). |
+| **Auditoría de Carrera** | `node cli.js career <perfil.json>` | Desglosa horas competitivas vs casuales y cronología de hitos por rango. |
+| **Señal Heurística de MMR** | `node cli.js diagnose <perfil.json>` | Señala un patrón compatible con posible anclaje (hipótesis NO verificada) y una estimación orientativa de rango. No mide el MMR interno. |
 | **Ingesta Resiliente** | `node cli.js parse <archivo_o_texto> [jugador]` | Procesa volcados de texto plano o marcadores de Tracker.gg / OP.GG. |
 | **Invariantes Matemáticos**| `node cli.js invariants [partida.json] [jugador]` | Verificación formal de cotas numéricas [0, 100] y convergencia de zonas (100%). |
 | **Atestación Cripto** | `node cli.js attest [partida.json] [jugador]` | Genera y valida un sobre DSSE in-toto firmado con Ed25519. |
@@ -198,11 +196,11 @@ Si utilizas **Google Gemini (Gems)** o **OpenAI (Custom GPTs)**, el archivo [`st
 
 ## ◈ Privacidad y Especificaciones de Ingeniería
 
-- **100% Local y Confidencial:** Todo el análisis se ejecuta localmente en tu procesador. Ninguna estadística, Riot ID o captura sale de tu máquina, EXCEPTO cuando TÚ invocas explícitamente `fetch_profile`, `fetch_match` o pasas una URL remota (esos comandos transmiten únicamente el Riot ID / match ID a la API pública de Tracker.gg para descargar la telemetría).
-- **Red solo bajo demanda explícita:** los comandos `fetch_profile` / `fetch_match` (y URLs remotas en `match`) consultan la API pública de Tracker.gg con reintento y backoff; todo lo demás (JSON local, scoreboards, caché) es 100% offline. Un perfil privado devuelve error instructivo, jamás datos inventados.
+- **100% Local y Confidencial:** todo el análisis se ejecuta en tu equipo; nada sale de tu máquina. No hay llamadas de red salvo que en el futuro actives Riot RSO con credenciales propias.
+- **Sin red por defecto:** el análisis es local. No se cosecha la caché del navegador ni se consulta Tracker.gg. La entrada es un JSON/export, texto o captura que aportas explícitamente.
 - **Zero Dependencias NPM:** Diseñado exclusivamente sobre las librerías estándar de Node.js (`fs`, `path`, `zlib`, `crypto`, `child_process`). Cero descargas externas.
 - **Compatibilidad Multiplataforma:** Probado y garantizado en Windows 11 (PowerShell/CMD), macOS (zsh) y Linux (bash).
-- **Garantía Determinista:** 121 pruebas automatizadas verificadas con Exit Code 0 (`node test_suite.js`) y puntuación perfecta de 100/100 en auditorías de código agéntico (`node opencode_tester.js`).
+- **Garantía Determinista:** 119 pruebas automatizadas verificadas con Exit Code 0 (`node test_suite.js`) y puntuación perfecta de 100/100 en auditorías de código agéntico (`node opencode_tester.js`).
 
 ---
 

@@ -7,7 +7,7 @@
 [![Version](https://img.shields.io/badge/version-4.5_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
 [![Runtime](https://img.shields.io/badge/runtime-Node.js_18%2B_Native-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-0_npm_(Core)-38BDF8.svg?style=for-the-badge&logo=codeforces&logoColor=white)](package.json)
-[![Tests](https://img.shields.io/badge/tests-121%2F121_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
+[![Tests](https://img.shields.io/badge/tests-119%2F119_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
 [![Audit](https://img.shields.io/badge/audit-100%2F100_Verified-8B5CF6.svg?style=for-the-badge&logo=codereview&logoColor=white)](opencode_tester.js)
 [![License](https://img.shields.io/badge/license-MIT-6B7280.svg?style=for-the-badge)](LICENSE)
 
@@ -33,7 +33,7 @@ Most public web trackers only sum cumulative end-of-match stats: total kills, de
 | **Duo Synergy** | 🔴 Non-existent | 🟢 **Duo Audit & Re-frag Windows** | Measures trade windows (<2s) and carry load distribution to stop playing isolated 1v1s. |
 | **Round Economy** | 🔴 Total money spent | 🟢 **Conversion across Buy Tiers (Eco/Semi/Full)** | Identifies whether you are throwing post-pistol conversions or full-buy rounds. |
 | **Account Health** | 🔴 Visual rank only | 🟡 **Heuristic MMR signal & rank estimate** | Raises an UNVERIFIED hypothesis of possible anchoring plus an indicative rank estimate. It does not measure Riot's internal MMR or real talent. |
-| **WAF Availability** | 🔴 Cloudflare 403 blockades | 🟢 **Local Cache Harvester & Zero-Cloud** | Zero drops: reads directly from browser cache (Brotli/Gzip) or runs fully offline. |
+| **Data Input** | 🔴 Cache harvesting / Tracker | 🟢 **JSON, text or screenshot you provide** | No cache harvesting, no automatic downloads: you provide the input explicitly; the authorized route (Riot RSO) is pending credentials. |
 
 ---
 
@@ -44,8 +44,7 @@ The pipeline extracts micro-data from each round and submits it to formal invari
 ```mermaid
 flowchart TD
     subgraph INGESTION["1. RESILIENT MULTI-SOURCE INGESTION"]
-        A1["Browser Cache
-(Chromium Brotli)"] --> B["universal_ingestor.js"]
+        A1["User JSON / Export"] --> B["universal_ingestor.js"]
         A2["Scoreboard Dump
 (Plain Text / OCR)"] --> B
         A3["JSON Telemetry / API
@@ -86,10 +85,10 @@ Engineered to fit any workflow with zero friction:
 
 1. Open the ready-to-use specification: 👉 [**`standalone_prompt.md`**](standalone_prompt.md)
 2. Copy its entire content and paste it into your preferred AI assistant (**ChatGPT, Claude, Gemini, or DeepSeek-R1**), or configure it as a **Google Gemini Gem** or **OpenAI Custom GPT**.
-3. Paste your Tracker.gg link, scoreboard text, or match screenshot to receive an instant 360° report.
+3. Paste your scoreboard text or attach a screenshot to confirm the fields (automatic Tracker fetching is not supported).
 
 ### ⚡ Option 2: Local Terminal Mode (Master Dispatcher `cli.js`)
-> **Ideal for competitive players seeking high speed (<100ms), complete privacy, and offline operation.**
+> **Ideal for competitive players seeking speed (<100ms) and fully local analysis. There is no automatic Tracker download or cache harvesting: you provide a JSON/export, scoreboard text or a confirmed screenshot.**
 
 ```bash
 # 1. Clone the repository
@@ -168,10 +167,9 @@ The master dispatcher `cli.js` provides unified access to all platform engines:
 | **Introspective Coaching**| `node cli.js coaching [match.json] <player>` | Pinpoints high-friction duels and pairs errors with curated tactical YouTube drills. |
 | **Duo Synergy Audit** | `node cli.js duo [match.json] [p1] [p2]` | Evaluates trade windows, carry load balance, and detects boost candidates. |
 | **1v1 Duel Matrix** | `node cli.js duels [match.json] [player]` | Analyzes direct head-to-head encounters against every opponent agent. |
-| **Offline Calibration**| `node cli.js calibrate [player] [rank] [role]` | Instant zero-cloud simulation for offline training without network calls. |
-| **Cache Harvester** | `node cli.js harvest [player]` | Scrapes matches directly from local Chromium cache bypassing Cloudflare Turnstile. |
-| **Career Audit** | `node cli.js career <profile.json\|handle>` | Breaks down competitive vs casual hours and generates rank milestones chronology. |
-| **Heuristic MMR Signal** | `node cli.js diagnose <profile.json\|handle>` | Flags a pattern compatible with possible anchoring (UNVERIFIED hypothesis) and an indicative rank estimate. It does not measure internal MMR. |
+| **Offline Simulation** | `node cli.js calibrate [player] [rank] [role]` | SIMULATION with illustrative values (no player data, no real telemetry). |
+| **Career Audit** | `node cli.js career <profile.json>` | Breaks down competitive vs casual hours and generates rank milestones chronology. |
+| **Heuristic MMR Signal** | `node cli.js diagnose <profile.json>` | Flags a pattern compatible with possible anchoring (UNVERIFIED hypothesis) and an indicative rank estimate. It does not measure internal MMR. |
 | **Resilient Ingestion** | `node cli.js parse <file_or_text> [player]` | Parses raw text dumps or scoreboard copies from Tracker.gg / OP.GG. |
 | **Formal Invariants** | `node cli.js invariants [match.json] [player]` | Verifies mathematical bounds [0, 100] and hit-zone sum convergence (100%). |
 | **Crypto Attestation**| `node cli.js attest [match.json] [player]` | Signs and verifies an Ed25519 in-toto DSSE attestation envelope. |
@@ -198,11 +196,11 @@ If you use **Google Gemini (Gems)** or **OpenAI (Custom GPTs)**, [`standalone_pr
 
 ## ◈ Privacy & Engineering Specifications
 
-- **100% Local & Confidential:** All computations run locally on your CPU. No statistics, Riot IDs, or match data leave your machine, EXCEPT when you explicitly invoke `fetch_profile`, `fetch_match`, or pass a remote URL (those commands send only the Riot ID / match ID to the public Tracker.gg API to download telemetry).
-- **Network only on explicit demand:** `fetch_profile` / `fetch_match` (and remote URLs in `match`) query the public Tracker.gg API with retry and backoff; everything else (local JSON, scoreboards, cache) is 100% offline. A private profile returns an instructive error, never invented data.
+- **100% Local & Confidential:** all analysis runs on your machine; nothing leaves it. No network calls unless you later enable Riot RSO with your own credentials.
+- **No network by default:** analysis is local. No browser cache harvesting and no Tracker.gg queries. Input is a JSON/export, text or screenshot you explicitly provide.
 - **Zero NPM Dependencies:** Built strictly on native Node.js core libraries (`fs`, `path`, `zlib`, `crypto`, `child_process`). Zero external downloads.
 - **Cross-Platform Compatibility:** Tested and verified on Windows 11 (PowerShell/CMD), macOS (zsh), and Linux (bash).
-- **Deterministic Reliability:** 121 automated tests passing with Exit Code 0 and a 100/100 score on agentic code audits.
+- **Deterministic Reliability:** 119 automated tests passing with Exit Code 0 and a 100/100 score on agentic code audits.
 
 ---
 

@@ -473,88 +473,23 @@ function resolveMatchDataResilient(source, playerHandle = null, options = {}) {
     return parseTextScoreboard(source, { targetPlayer: playerHandle, ...options });
   }
 
-  // 3. Extracción remota con contención WAF
-  const { extractMatchId, fetchMatch, CANONICAL_MATCH_ID } = require('./fetch_match');
+  // 3. Entrada remota (URL/UUID): Tracker NO se consulta (no es una fuente
+  // estable, autorizada ni consentida). Solo modo demo explícito o error
+  // instructivo con las vías admitidas.
+  const { extractMatchId, CANONICAL_MATCH_ID } = require('./fetch_match');
   const matchId = extractMatchId(source);
-
   if (!matchId || !CANONICAL_MATCH_ID.test(matchId)) {
-    throw new Error(`Entrada no resoluble: "${String(source).slice(0, 120)}". Proporciona un archivo JSON local, un volcado de scoreboard, un match ID canónico (UUID) o usa --demo para telemetría sintética explícita.`);
+    throw new Error(`Entrada no resoluble: "${String(source).slice(0, 120)}". Proporciona un archivo JSON/export aportado por el usuario, un volcado de texto del marcador o una captura con confirmación.`);
   }
-
-  {
-    const cacheDir = path.join(__dirname, '..', '.cache', 'matches');
-    const cacheFile = path.join(cacheDir, `${matchId}.json`);
-    const resolved = path.resolve(cacheFile);
-    if (!resolved.startsWith(path.resolve(cacheDir) + path.sep)) {
-      throw new Error(`Ruta de caché fuera del perímetro permitido: "${matchId}".`);
-    }
-    const CACHE_TTL_MS = 30 * 24 * 3600 * 1000;
-    const digestOf = data => crypto.createHash('sha256').update(JSON.stringify(data && data.segments ? data.segments : null)).digest('hex');
-    // Lectura ENDURECIDA: sin symlink, digest verificado, caducidad y procedencia
-    // normalizada. Una caché sin digest válido NUNCA se presenta como verificada.
-    let cached = null;
-    try {
-      const lst = fs.lstatSync(cacheFile);
-      if (lst.isSymbolicLink()) {
-        diagnostics.push(`Caché es un enlace simbólico (${cacheFile}); se ignora por perímetro.`);
-      } else if (!lst.isFile()) {
-        diagnostics.push(`Caché no es un archivo regular (${cacheFile}); se ignora.`);
-      } else {
-        const parsed = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
-        const cm = (parsed && parsed.data && parsed.data.metadata) || {};
-        const segmentsOk = Array.isArray(parsed && parsed.data && parsed.data.segments);
-        const digestOk = typeof cm.cacheDigest === 'string' && cm.cacheDigest === digestOf(parsed.data);
-        const freshOk = typeof cm.cachedAt === 'string' && (Date.now() - Date.parse(cm.cachedAt)) <= CACHE_TTL_MS;
-        if (!segmentsOk) diagnostics.push('Caché sin segmentos válidos; se ignora.');
-        else if (!digestOk) diagnostics.push('Caché sin digest válido (posible manipulación); se ignora.');
-        else if (!freshOk) diagnostics.push('Caché caducada; se ignora.');
-        else {
-          parsed.data.metadata.provenance = 'normalized_input';
-          parsed.data.metadata.cached = true;
-          cached = parsed;
-        }
-      }
-    } catch (e) {
-      if (e.code !== 'ENOENT') diagnostics.push(`Caché no legible (${cacheFile}): ${e.message}`);
-    }
-    if (cached) return cached;
-
-    try {
-      const remoteData = fetchMatch(matchId);
-      try {
-        fs.mkdirSync(cacheDir, { recursive: true });
-        remoteData.data = remoteData.data || {};
-        remoteData.data.metadata = remoteData.data.metadata || {};
-        remoteData.data.metadata.cachedAt = new Date().toISOString();
-        remoteData.data.metadata.cacheDigest = digestOf(remoteData.data);
-        remoteData.data.metadata.provenance = 'normalized_input';
-        fs.writeFileSync(cacheFile, JSON.stringify(remoteData, null, 2));
-      } catch (persistErr) {
-        diagnostics.push(`No se pudo persistir caché (${persistErr.message}); se responde en memoria.`);
-      }
-      if (diagnostics.length > 0) {
-        remoteData.data = remoteData.data || {};
-        remoteData.data.metadata = remoteData.data.metadata || {};
-        remoteData.data.metadata.ingestionDiagnostics = diagnostics;
-      }
-      return remoteData;
-    } catch (netErr) {
-      if (!options.allowSynthetic) {
-        throw new Error(`Fallo de red/WAF para Match ${matchId}: ${netErr.message}. Sin telemetría verificable no se emite análisis. Usa --demo para modo sintético explícito.`);
-      }
-      console.log(`\n🛡️ [MOTOR DE RESILIENCIA TÁCTICA ACTIVADO — MODO DEMO]`);
-      console.log(`   Causa: Cloudflare Turnstile WAF protegiendo api.tracker.gg para Match: ${matchId}`);
-      console.log(`   Acción: Generando reconstrucción de telemetría matemáticamente invariante para ${playerHandle}.`);
-      console.log(`   ADVERTENCIA: datos SINTÉTICOS, no son la partida real. Solo demostración.\n`);
-
-      const synthetic = assembleRawMatchStructure([], options.map || 'Ascent', 24, playerHandle, { ...options, demo: true });
-      synthetic.data.metadata.matchId = matchId;
-      synthetic.data.metadata.wafContainment = true;
-      synthetic.data.metadata.synthetic = true;
-      synthetic.data.metadata.ingestionDiagnostics = [...diagnostics, 'Fallback sintético por fallo de red (modo --demo): NO es telemetría real.'];
-      return synthetic;
-    }
+  if (!options.allowSynthetic) {
+    throw new Error('Entrada remota no soportada: Tracker.gg no es una fuente estable, autorizada ni consentida. Proporciona un JSON/export del usuario, texto del marcador o captura con confirmación; la vía autorizada es Riot RSO (pendiente de credenciales). Usa --demo solo para demostración.');
   }
+  console.log('\n🛡️ [MODO DEMO EXPLÍCITO] Reconstrucción sintética: NO es una partida real.\n');
+  const synthetic = assembleRawMatchStructure([], options.map || 'Ascent', 24, playerHandle, { ...options, demo: true });
+  synthetic.data.metadata.matchId = matchId;
+  synthetic.data.metadata.synthetic = true;
+  synthetic.data.metadata.ingestionDiagnostics = ['Fallback sintético explícito (--demo): NO es telemetría real.'];
+  return synthetic;
 }
 
 module.exports = {
