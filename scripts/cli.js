@@ -402,8 +402,11 @@ try {
     } else {
       console.log(`\n🔎 Observaciones/fugas omitidas: sin eventos observados de ronda.`);
     }
-    if (evidence.allowedSections.includes('aim_routine') && res.prescripcionInmediata) {
-      console.log(`\n🎯 RUTINA KOVAAKS (${res.prescripcionInmediata.metrica}; umbral ${res.prescripcionInmediata.umbral}): ${res.prescripcionInmediata.sesionKovaaks}`);
+    if (evidence.allowedSections.includes('aim_routine') && res.prescripcionInmediata && res.prescripcionInmediata.sesionKovaaks) {
+      console.log(`\n🎯 RUTINA CORRECTIVA (${res.prescripcionInmediata.metrica}; umbral ${res.prescripcionInmediata.umbral}): ${res.prescripcionInmediata.sesionKovaaks}`);
+      console.log(`💡 Regla de timing/tradeo: OMITIDA — ${res.prescripcionInmediata.limitacion}`);
+    } else if (evidence.allowedSections.includes('aim_routine') && res.prescripcionInmediata) {
+      console.log(`\n✓ Sin debilidad mecánica cubierta (${res.prescripcionInmediata.reglaEvaluada}): ${res.prescripcionInmediata.motivo}`);
       console.log(`💡 Regla de timing/tradeo: OMITIDA — ${res.prescripcionInmediata.limitacion}`);
     } else {
       console.log(`\n🎯 Rutina omitida: falta evidencia mecánica observada (HS% válido).`);
@@ -908,8 +911,11 @@ try {
     } else {
       console.log(`\n🔎 Observaciones/fugas omitidas: sin eventos observados de ronda.`);
     }
-    if (evidence.allowedSections.includes('aim_routine') && res.prescripcionInmediata) {
-      console.log(`\n🎯 RUTINA KOVAAKS (${res.prescripcionInmediata.metrica}; umbral ${res.prescripcionInmediata.umbral}): ${res.prescripcionInmediata.sesionKovaaks}`);
+    if (evidence.allowedSections.includes('aim_routine') && res.prescripcionInmediata && res.prescripcionInmediata.sesionKovaaks) {
+      console.log(`\n🎯 RUTINA CORRECTIVA (${res.prescripcionInmediata.metrica}; umbral ${res.prescripcionInmediata.umbral}): ${res.prescripcionInmediata.sesionKovaaks}`);
+      console.log(`💡 Regla de timing/tradeo: OMITIDA — ${res.prescripcionInmediata.limitacion}`);
+    } else if (evidence.allowedSections.includes('aim_routine') && res.prescripcionInmediata) {
+      console.log(`\n✓ Sin debilidad mecánica cubierta (${res.prescripcionInmediata.reglaEvaluada}): ${res.prescripcionInmediata.motivo}`);
       console.log(`💡 Regla de timing/tradeo: OMITIDA — ${res.prescripcionInmediata.limitacion}`);
     } else {
       console.log(`\n🎯 Rutina omitida: falta evidencia mecánica observada (HS% válido).`);
@@ -1022,8 +1028,9 @@ try {
       console.log(`🎯 DIAGNÓSTICO DIRECTO: ${res.player} (${res.agent} - ${res.rank}) | Mapa: ${res.map}`);
       console.log(`------------------------------------------------------------------------`);
       console.log(`📊 Radar Precisión Mecánica: ${res.radar.precisionMecanica === null ? 'n/d (sin métrica observada)' : `${res.radar.precisionMecanica} / 100`}`);
-      console.log(`🎯 Rutina mecánica: ${res.prescripcionInmediata ? `${res.prescripcionInmediata.sesionKovaaks} (${res.prescripcionInmediata.metrica}; umbral ${res.prescripcionInmediata.umbral})` : 'omitida (sin HS% observado)'}`);
-      console.log(`💡 Regla de timing/tradeo: ${res.prescripcionInmediata ? `OMITIDA — ${res.prescripcionInmediata.limitacion}` : 'omitida (sin HS% observado)'}`);
+      const pres = res.prescripcionInmediata;
+      console.log(`🎯 Rutina mecánica: ${pres && pres.sesionKovaaks ? `${pres.sesionKovaaks} (${pres.metrica}; umbral ${pres.umbral})` : (pres ? `sin debilidad cubierta (${pres.reglaEvaluada})` : 'omitida (sin HS% observado)')}`);
+      console.log(`💡 Regla de timing/tradeo: ${pres ? `OMITIDA — ${pres.limitacion}` : 'omitida (sin HS% observado)'}`);
       console.log(`========================================================================\n`);
     } else {
       console.error(`Comando desconocido: "${command}". Ejecuta "node cli.js --help" para ver las opciones.`);

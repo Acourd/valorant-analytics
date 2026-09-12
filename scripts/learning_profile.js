@@ -12,6 +12,7 @@ const { extractMatchId, fetchMatch } = require('./fetch_match');
 const { parseDuels } = require('./duel_matrix');
 const { analyzeEconomy } = require('./economy_analyzer');
 const { resolveExactHandle, sourceProvenance, provenanceLabel, mayAssertCauses, observedNumber } = require('./data_contract');
+const { THRESHOLDS } = require('./routine_contract');
 
 /**
  * Detecta contexto temporal/posicional/trade OBSERVADO en los segmentos.
@@ -166,20 +167,31 @@ function evaluateLearningProfile(matchData, targetHandle) {
       ? `Procedencia: ${provenanceLabel(provenance)}. Se describen observaciones; NO se emiten causas/fugas (requieren fuente verificada).`
       : (unknowns.length > 0 ? `Métricas no disponibles y excluidas del diagnóstico: ${unknowns.join(', ')}.` : null));
 
-  // 3. Prescripción SOLO mecánica y con evidencia observada. Las reglas de
-  // timing/tradeo/posición están PROHIBIDAS sin eventos de ronda con
-  // timestamps/posición/trade (no presentes en este contrato de datos).
+  // 3. Prescripción mecánica CONDICIONADA por el umbral documentado, no solo
+  // por la existencia de la métrica: correctiva si HS% < 25; con HS% ≥ 25 se
+  // declara "sin debilidad mecánica cubierta por esta regla" y NO se recomienda
+  // entrenamiento remedial. Las reglas de timing/tradeo siguen prohibidas sin
+  // timestamps/posición/trade observados.
+  const hsThreshold = THRESHOLDS.HS_LOW.value;
+  const hsObserved = mechanical.hsPct !== null;
+  const hsBelow = hsObserved && mechanical.hsPct < hsThreshold;
   const temporalContext = detectTemporalContext(matchData);
-  const prescripcionInmediata = mechanical.hsPct === null ? null : {
-    tipo: 'mecanica',
+  const limitacion = temporalContext.sufficient
+    ? `Contexto temporal parcial detectado (${Object.keys(temporalContext).filter(k => temporalContext[k]).join('/')}): este contrato todavía no deriva reglas de tradeo verificadas.`
+    : 'Sin timestamps/posición/trade observados: se omite toda regla de timing/tradeo; solo rutina mecánica vinculada a HS% y su umbral.';
+  const prescripcionInmediata = hsObserved ? {
+    tipo: hsBelow ? 'correctiva' : 'sin_debilidad',
+    estado: hsBelow ? 'debilidad_cubierta' : 'sin_debilidad',
     metrica: `HS% observado (${Number(mechanical.hsPct.toFixed(1))}%)`,
-    umbral: '25% (estándar competitivo documentado)',
-    sesionKovaaks: mechanical.hsPct >= 35 ? '5 min de Valorant Microshot Speed + 5 min de Thin Aiming Long' : '5 min de Pasu Small Reload + 5 min de 1wall6targets extra small',
+    umbral: `${hsThreshold}% (${THRESHOLDS.HS_LOW.description})`,
+    reglaEvaluada: `HS% < ${hsThreshold}`,
+    sesionKovaaks: hsBelow ? '5 min de Pasu Small Reload + 5 min de 1wall6targets extra small' : null,
     reglaMental: null,
-    limitacion: temporalContext.sufficient
-      ? `Contexto temporal parcial detectado (${Object.keys(temporalContext).filter(k => temporalContext[k]).join('/')}): este contrato todavía no deriva reglas de tradeo verificadas.`
-      : 'Sin timestamps/posición/trade observados: se omite toda regla de timing/tradeo; solo rutina mecánica vinculada a HS%.'
-  };
+    motivo: hsBelow
+      ? `HS% ${Number(mechanical.hsPct.toFixed(1))} < umbral ${hsThreshold}%: debilidad mecánica cubierta por la regla.`
+      : `HS% ${Number(mechanical.hsPct.toFixed(1))} ≥ umbral ${hsThreshold}%: sin debilidad mecánica cubierta por esta regla; no se recomienda entrenamiento remedial.`,
+    limitacion
+  } : null;
 
   return {
     player: target,
@@ -247,9 +259,12 @@ if (require.main === module) {
     });
   }
 
-  if (res.prescripcionInmediata) {
-    console.log(`\n💡 PRESCRIPCIÓN MECÁNICA (${res.prescripcionInmediata.metrica}; umbral ${res.prescripcionInmediata.umbral}):`);
+  if (res.prescripcionInmediata && res.prescripcionInmediata.sesionKovaaks) {
+    console.log(`\n💡 PRESCRIPCIÓN CORRECTIVA (${res.prescripcionInmediata.metrica}; umbral ${res.prescripcionInmediata.umbral}):`);
     console.log(`  • Práctica Kovaaks: ${res.prescripcionInmediata.sesionKovaaks}`);
+    console.log(`  • Regla de timing/tradeo: OMITIDA — ${res.prescripcionInmediata.limitacion}`);
+  } else if (res.prescripcionInmediata) {
+    console.log(`\n✓ Sin debilidad mecánica cubierta por esta regla — ${res.prescripcionInmediata.motivo}`);
     console.log(`  • Regla de timing/tradeo: OMITIDA — ${res.prescripcionInmediata.limitacion}`);
   } else {
     console.log(`\n💡 Prescripción omitida: sin HS% observado no se emite rutina.`);

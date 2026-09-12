@@ -25,7 +25,7 @@ const profile = evaluateLearningProfile(sample, 'TenZ#0001');
 assert.ok(profile.radar, 'Radar de 5 pilares debe estar presente');
 assert.strictEqual(profile.provenance, 'normalized_input', 'la muestra local es normalized_input (no verificada)');
 assert.deepStrictEqual(profile.eloLeaks, [], 'datos normalizados no fabrican causas/fugas');
-assert.ok(profile.prescripcionInmediata === null || profile.prescripcionInmediata.sesionKovaaks, 'Rutina mecánica solo con HS observado');
+assert.ok(profile.prescripcionInmediata === null || typeof profile.prescripcionInmediata.tipo === 'string', 'Prescripción estructurada solo con HS observado');
 
 // 3. Coaching Report
 const coaching = generateCoachingReport(sample, 'TenZ#0001');

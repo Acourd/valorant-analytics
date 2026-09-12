@@ -8,6 +8,7 @@
 - **Bloque D — Paquete y CI:** `check_syntax.js` para todos los `.js`; `npm pack --dry-run` verificado en tests (excluye `tests/`, suites y artefactos de desarrollo); runner con 3 semillas de fuzz; versión `4.7.0`.
 - **Límite vigente:** sin telemetría Riot real ni validación con jugadores; `calibrate` sigue siendo una simulación offline.
 - **Regresiones del veredicto sobre `37a59fb`:** `duo` exige ambos Riot IDs exactos (sin elección automática de compañeros) y la prescripción ya no emite reglas de timing/tradeo/posicionamiento sin timestamps/posición/trade observados; solo rutina mecánica vinculada a HS% y umbral (138/138 checks).
+- **Regresión del veredicto sobre `7c83619`:** el umbral HS% ahora **condiciona** la rutina: correctiva solo con HS% < 25; con HS% ≥ 25 se declara “sin debilidad mecánica cubierta” y no se recomienda entrenamiento remedial (pruebas de frontera 24.9/25.0/35+; 139/139 checks).
 
 ## 4.6.0 — Confiabilidad y trazabilidad
 

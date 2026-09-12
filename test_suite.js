@@ -2644,6 +2644,12 @@ check('prescripción: sin eventos temporales no hay regla de timing/tradeo',
       assert.ok(/HS% observado/i.test(p.prescripcionInmediata.metrica), 'rutina vinculada a HS% observado');
       assert.ok(/25/.test(p.prescripcionInmediata.umbral), 'umbral documentado');
       assert.ok(p.prescripcionInmediata.limitacion, 'limitación declarada');
+      const hs = p.mechanical.hsPct;
+      if (hs !== null && hs < 25) assert.ok(p.prescripcionInmediata.sesionKovaaks, 'HS<25 => rutina correctiva');
+      if (hs !== null && hs >= 25) {
+        assert.strictEqual(p.prescripcionInmediata.sesionKovaaks, null, 'HS>=25 => sin entrenamiento remedial');
+        assert.ok(/sin debilidad mecánica cubierta/i.test(p.prescripcionInmediata.motivo), 'declara sin debilidad');
+      }
     }
     const tmp = path.join(os.tmpdir(), `presc-${process.pid}.txt`);
     fs.writeFileSync(tmp, 'kirtmy#000\tIso\tGold 2\t21\t14\t5\t245\t162\t26%\n', 'utf8');
@@ -2651,9 +2657,35 @@ check('prescripción: sin eventos temporales no hay regla de timing/tradeo',
       for (const out of [cliOk(['match', sampleFile, 'TenZ#0001']), cliOk(['parse', tmp, 'kirtmy#000'])]) {
         assert.ok(!/regla de los 2 segundos|compañero a distancia de tradeo/i.test(out), 'no debe emitir timing/tradeo sin contexto');
         assert.ok(!/REGLA MENTAL:/.test(out), 'no debe renderizar regla mental');
+        assert.ok(!/RUTINA CORRECTIVA|RUTINA KOVAAKS:/.test(out), 'HS>=25 no debe recomendar entrenamiento remedial');
       }
     } finally {
       fs.unlinkSync(tmp);
+    }
+  });
+
+check('prescripción mecánica: umbral HS real (24.9 correctiva; 25.0 y 35+ sin debilidad)',
+  () => {
+    const mk = hs => ({
+      data: {
+        metadata: { matchId: 'th', provenance: 'normalized_input' },
+        segments: [{
+          type: 'player-summary',
+          attributes: { platformUserIdentifier: 'F#1' },
+          metadata: { platformUserHandle: 'F#1' },
+          stats: { headshotsPercentage: { displayValue: `${hs}%` } }
+        }]
+      }
+    });
+    const low = evaluateLearningProfile(mk(24.9), 'F#1');
+    assert.strictEqual(low.prescripcionInmediata.tipo, 'correctiva', '24.9 < 25 debe ser correctiva');
+    assert.ok(low.prescripcionInmediata.sesionKovaaks, '24.9 debe recomendar rutina');
+    assert.ok(/< 25/.test(low.prescripcionInmediata.reglaEvaluada), 'regla evaluada explícita');
+    for (const hs of [25.0, 35.0]) {
+      const p = evaluateLearningProfile(mk(hs), 'F#1');
+      assert.strictEqual(p.prescripcionInmediata.tipo, 'sin_debilidad', `${hs} >= 25 => sin debilidad`);
+      assert.strictEqual(p.prescripcionInmediata.sesionKovaaks, null, `${hs} no debe recomendar entrenamiento remedial`);
+      assert.ok(/sin debilidad mecánica cubierta/i.test(p.prescripcionInmediata.motivo), 'motivo explícito');
     }
   });
 
