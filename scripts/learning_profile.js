@@ -11,28 +11,8 @@ const fs = require('fs');
 const { extractMatchId, fetchMatch } = require('./fetch_match');
 const { parseDuels } = require('./duel_matrix');
 const { analyzeEconomy } = require('./economy_analyzer');
-const { resolveExactHandle, sourceProvenance, provenanceLabel, mayAssertCauses, observedNumber } = require('./data_contract');
+const { resolveExactHandle, sourceProvenance, provenanceLabel, mayAssertCauses, observedNumber, detectTemporalContext } = require('./data_contract');
 const { THRESHOLDS } = require('./routine_contract');
-
-/**
- * Detecta contexto temporal/posicional/trade OBSERVADO en los segmentos.
- * Sin timestamps, posiciones o marcas de trade, queda PROHIBIDO emitir reglas
- * de timing/tradeo/posicionamiento (solo rutina mecánica vinculada a HS%).
- */
-function detectTemporalContext(matchData) {
-  const segments = (matchData && matchData.data && matchData.data.segments) || [];
-  const ctx = { timing: false, position: false, trade: false };
-  for (const s of segments) {
-    const a = s.attributes || {};
-    const m = s.metadata || {};
-    if (Number.isFinite(Number(a.roundTime)) || Number.isFinite(Number(m.roundTimeMs)) ||
-        Number.isFinite(Number(m.timestampMs)) || /T\d{2}:\d{2}/.test(String(m.timestamp || ''))) ctx.timing = true;
-    if (m.position || a.position || (Number.isFinite(Number(m.x)) && Number.isFinite(Number(m.y)))) ctx.position = true;
-    if (m.traded === true || a.traded === true || Number.isFinite(Number(m.tradeTimeMs))) ctx.trade = true;
-  }
-  ctx.sufficient = ctx.timing || ctx.position || ctx.trade;
-  return ctx;
-}
 
 function evaluateLearningProfile(matchData, targetHandle) {
   if (!matchData || typeof matchData !== 'object') {

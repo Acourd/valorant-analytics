@@ -26,7 +26,7 @@ class RoutineSynthesizer {
    * @param {object} telemetry perfil con `mechanical` observado y `provenance`
    */
   synthesizeRoutine(telemetry) {
-    const evidence = buildEvidence({ profile: telemetry, player: telemetry && telemetry.player });
+    const evidence = buildEvidence({ profile: telemetry, player: telemetry && telemetry.player, temporalContext: telemetry && telemetry.temporalContext });
     const gate = canGenerateRoutine(evidence);
     const player = evidence.player || (telemetry && telemetry.target) || null;
     const base = {

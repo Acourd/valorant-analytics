@@ -485,7 +485,7 @@ function resolveMatchDataResilient(source, playerHandle = null, options = {}) {
     if (!fs.existsSync(source)) {
       throw new Error(`Archivo no encontrado: "${source}". Proporciona una ruta existente, un volcado de scoreboard, un match ID canónico o usa --demo.`);
     }
-    const content = fs.readFileSync(source, 'utf8');
+    const content = fs.readFileSync(source, 'utf8').replace(/^\uFEFF/, '');
     if (content.trim().startsWith('{')) {
       try {
         return JSON.parse(content);

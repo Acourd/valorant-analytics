@@ -115,6 +115,26 @@ function observedNumber(stats, keys) {
   return null;
 }
 
+/**
+ * Detecta contexto temporal/posicional/trade OBSERVADO en los segmentos.
+ * Sin timestamps, posiciones o marcas de trade, queda PROHIBIDO emitir reglas
+ * de timing/tradeo/posicionamiento (aperturas incluidas).
+ */
+function detectTemporalContext(matchData) {
+  const segments = (matchData && matchData.data && matchData.data.segments) || [];
+  const ctx = { timing: false, position: false, trade: false };
+  for (const s of segments) {
+    const a = s.attributes || {};
+    const m = s.metadata || {};
+    if (Number.isFinite(Number(a.roundTime)) || Number.isFinite(Number(m.roundTimeMs)) ||
+        Number.isFinite(Number(m.timestampMs)) || /T\d{2}:\d{2}/.test(String(m.timestamp || ''))) ctx.timing = true;
+    if (m.position || a.position || (Number.isFinite(Number(m.x)) && Number.isFinite(Number(m.y)))) ctx.position = true;
+    if (m.traded === true || a.traded === true || Number.isFinite(Number(m.tradeTimeMs))) ctx.trade = true;
+  }
+  ctx.sufficient = ctx.timing || ctx.position || ctx.trade;
+  return ctx;
+}
+
 module.exports = {
   PROVENANCE,
   LABELS,
@@ -123,5 +143,6 @@ module.exports = {
   sourceProvenance,
   provenanceLabel,
   mayAssertCauses,
-  observedNumber
+  observedNumber,
+  detectTemporalContext
 };

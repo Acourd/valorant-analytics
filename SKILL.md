@@ -32,6 +32,9 @@ Activate this skill whenever the user asks to:
 The recommended entry point for all operations is the master CLI dispatcher:
 
 ```powershell
+# 0. PLAN para la siguiente partida (flujo recomendado: observar → límites → una acción → medir):
+node cli.js plan <partida_o_texto> "Nombre#TAG"
+
 # 1. 360° Autodiagnostic Radar & ELO Leaks:
 node cli.js match <match_id_or_json> [player_handle]
 
@@ -61,7 +64,9 @@ node cli.js career <profile.json>
 node cli.js diagnose <profile.json>
 ```
 
-> **Contrato CLI:** códigos de salida documentados (`0` = resultado descriptivo válido, incluye `n/d`/`omitido`; `1` = entrada, objetivo o comando inválido; `2` = evidencia insuficiente en `guardian`/`drift`). Añade `--json` para salida estructurada en los comandos analíticos. Ningún comando selecciona un jugador en silencio: sin objetivo explícito solo se auto-resuelve un roster de un jugador.
+> **Contrato CLI:** códigos de salida documentados (`0` = resultado descriptivo válido, incluye `n/d`/`omitido`; `1` = entrada, objetivo o comando inválido; `2` = evidencia insuficiente en `plan`/`guardian`/`drift`). Añade `--json` para salida estructurada en los comandos analíticos. Ningún comando selecciona un jugador en silencio: sin objetivo explícito solo se auto-resuelve un roster de un jugador.
+>
+> **Modo avanzado:** `node cli.js --advanced --help` expone DSSE, Merkle, MPC, Wasm, invariantes y diagnóstico especializado. Son herramientas de INTEGRIDAD/criptografía del software, no coaching para jugadores; el flujo del jugador es `plan → aportar datos → una acción → volver a medir`.
 
 ---
 
