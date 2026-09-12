@@ -57,6 +57,7 @@ const { ConsensusArbiter } = require('./consensus_arbiter');
 const { RoutineSynthesizer } = require('./routine_synthesizer');
 const routineContract = require('./routine_contract');
 const { buildEvidence, canGenerateRoutine, evaluateWeaknesses } = require('./routine_contract');
+const { pae } = require('./dsse_pae');
 const { runCli } = require('./cli');
 
 module.exports = {
@@ -98,6 +99,8 @@ module.exports = {
   canGenerateRoutine,
   evaluateWeaknesses,
   routineContract,
+  // DSSE/PAE
+  pae,
   // Invariantes
   validateRadar,
   validateHitZones,

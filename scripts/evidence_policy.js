@@ -393,7 +393,26 @@ function observeVerifiedMatch(matchData, playerPuuid, options = {}) {
   const matchId = String(options.attestation.matchId).trim().toLowerCase();
   const sourceRef = `match:${matchId}`;
   const players = Array.isArray(matchData && matchData.players) ? matchData.players : [];
-  const focus = players.find(p => p && p.puuid === playerPuuid) || players[0];
+  // Objetivo EXACTO también en la vía verificada: jamás se analiza a otro
+  // jugador cuando el puuid pedido no aparece (o aparece duplicado).
+  if (typeof playerPuuid !== 'string' || playerPuuid.trim() === '') {
+    const err = new Error('observeVerifiedMatch requiere el puuid exacto del objetivo (TARGET_REQUIRED).');
+    err.code = 'TARGET_REQUIRED';
+    throw err;
+  }
+  const matches = players.filter(p => p && p.puuid === playerPuuid);
+  if (matches.length === 0) {
+    const candidates = players.slice(0, 10).map(p => `${p && p.puuid ? p.puuid : 'sin-puuid'}`).join(', ');
+    const err = new Error(`Objetivo no encontrado en la partida verificada: puuid "${playerPuuid}" ausente. Nunca se analiza a otro jugador. Candidatos: ${candidates}`);
+    err.code = 'TARGET_NOT_FOUND';
+    throw err;
+  }
+  if (matches.length > 1) {
+    const err = new Error(`Objetivo ambiguo: el puuid "${playerPuuid}" aparece ${matches.length} veces en el payload verificado.`);
+    err.code = 'TARGET_AMBIGUOUS';
+    throw err;
+  }
+  const focus = matches[0];
   const stats = (focus && focus.stats) || {};
   const num = v => (Number.isFinite(Number(v)) ? Number(v) : null);
   const kills = num(stats.kills);

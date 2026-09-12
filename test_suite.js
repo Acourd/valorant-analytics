@@ -69,6 +69,7 @@ const {
   reconcileDuelMatrix
 } = require(path.join(scriptsDir, 'invariant_validator.js'));
 const { evaluateLearningProfile } = require(path.join(scriptsDir, 'learning_profile.js'));
+const { generateAttestationKeyPair } = require(path.join(scriptsDir, 'dsse_attestation.js'));
 const {
   parseTextScoreboard,
   assembleRawMatchStructure,
@@ -2779,6 +2780,109 @@ check('CI: acciones de GitHub fijadas por SHA (cadena de suministro)',
     for (const line of uses) {
       assert.ok(/@[0-9a-f]{40}(\s|$|#)/.test(line), `acción sin SHA: ${line}`);
     }
+  });
+
+// ---- Regresiones del veredicto 84 (v4.7.2): umbral MPC, interop PAE, objetivo verificado, launcher, API runCli, Merkle determinista ----
+
+check('MPC: umbral 0/negativo/superante y sobres vacíos se rechazan; 2-de-3 válido',
+  () => {
+    const { MpcThresholdSigner } = require(path.join(scriptsDir, 'mpc_threshold_signer.js'));
+    const { signMultiPartyEnvelope } = MpcThresholdSigner;
+    const signer = new MpcThresholdSigner({ threshold: 2 });
+    const pems = [];
+    const signers = [];
+    for (let i = 0; i < 3; i++) {
+      const kp = generateAttestationKeyPair();
+      const pub = kp.publicKey.export({ type: 'spki', format: 'pem' });
+      const priv = kp.privateKey.export({ type: 'pkcs8', format: 'pem' });
+      const id = `k${i}`;
+      signer.registerKeyholder(id, pub);
+      pems.push(pub);
+      signers.push({ keyId: id, privateKeyPem: priv });
+    }
+    const envelope = signMultiPartyEnvelope({ _type: 'test', ok: true }, signers.slice(0, 2));
+    assert.strictEqual(signer.verifyThreshold(envelope, 2).verified, true, '2-de-3 válido');
+    const zero = signer.verifyThreshold(envelope, 0);
+    assert.strictEqual(zero.verified, false, 'umbral 0 jamás admite');
+    assert.ok(/entero >= 1/.test(zero.error));
+    assert.strictEqual(signer.verifyThreshold(envelope, -1).verified, false, 'umbral negativo rechazado');
+    assert.strictEqual(signer.verifyThreshold(envelope, 4).verified, false, 'umbral > keyholders rechazado');
+    const empty = signer.verifyThreshold({ payloadType: 'application/vnd.in-toto+json', payload: '', signatures: [] }, 2);
+    assert.strictEqual(empty.verified, false, 'sobre vacío rechazado');
+    assert.ok(/vacío|malformado/i.test(empty.error));
+    const noSigs = signer.verifyThreshold({ payloadType: 'application/vnd.in-toto+json', payload: Buffer.from('{}').toString('base64'), signatures: [] }, 2);
+    assert.strictEqual(noSigs.verified, false, 'sin firmas rechazado');
+  });
+
+check('interop DSSE↔MPC: misma PAE byte-correcta sobre payload crudo',
+  () => {
+    const { MpcThresholdSigner } = require(path.join(scriptsDir, 'mpc_threshold_signer.js'));
+    const report = { report: { player: 'X#1', provenance: 'normalized_input' }, subject: 'test' };
+    const dsse = require(path.join(scriptsDir, 'dsse_attestation.js'));
+    const kp = generateAttestationKeyPair();
+    const envelope = dsse.signTelemetryReport(report, kp);
+    const signer = new MpcThresholdSigner({ threshold: 1 });
+    signer.registerKeyholder(envelope.signatures[0].keyid, envelope.publicKeyPem);
+    const res = signer.verifyThreshold(envelope, 1);
+    assert.strictEqual(res.verified, true, 'el firmante DSSE y el verificador MPC comparten PAE');
+    const tampered = { ...envelope, payload: Buffer.from(JSON.stringify({ report: { player: 'OTRO#9' } })).toString('base64') };
+    assert.strictEqual(signer.verifyThreshold(tampered, 1).verified, false, 'payload alterado no verifica');
+  });
+
+check('Riot verificado: puuid inexistente => TARGET_NOT_FOUND sin analizar a otro jugador',
+  () => {
+    const ep = require(path.join(scriptsDir, 'evidence_policy.js'));
+    const g = loadRiotGolden();
+    writeRiotTrust(g.trustedKeys);
+    try {
+      assert.throws(
+        () => ep.observeVerifiedMatch(g.payload, 'puuid-inexistente-9999', { attestation: g.attestation, maxAgeMs: RIOT_BIG_MAX_AGE }),
+        e => e.code === 'TARGET_NOT_FOUND'
+      );
+      assert.throws(
+        () => ep.observeVerifiedMatch(g.payload, '', { attestation: g.attestation, maxAgeMs: RIOT_BIG_MAX_AGE }),
+        e => e.code === 'TARGET_REQUIRED'
+      );
+      const real = g.payload.players[0].puuid;
+      const observed = ep.observeVerifiedMatch(g.payload, real, { attestation: g.attestation, maxAgeMs: RIOT_BIG_MAX_AGE });
+      assert.strictEqual(observed.provenance, 'verified_source', 'el puuid correcto sí produce verified_source');
+    } finally {
+      writeRiotTrust([]);
+    }
+  });
+
+check('launcher raíz: node cli.js --help ejecuta la CLI documentada (exit 0)',
+  () => {
+    const out = execFileSync(process.execPath, [path.join(__dirname, 'cli.js'), '--help'], { encoding: 'utf8' });
+    assert.ok(/USO INTUITIVO/.test(out), 'la raíz debe mostrar la ayuda real');
+    assert.ok(/CÓDIGOS DE SALIDA/.test(out), 'la ayuda documenta códigos de salida');
+  });
+
+check('API runCli: retorna { exitCode, result } sin terminar el proceso anfitrión',
+  () => {
+    const { runCli } = require(path.join(scriptsDir, 'cli.js'));
+    const ok = runCli(['sbom', '--json']);
+    assert.strictEqual(ok.exitCode, 0, 'comando válido => 0');
+    assert.ok(ok.result && ok.result.command === 'sbom', 'result estructurado disponible');
+    const result2 = runCli(['sbom', '--json']);
+    assert.strictEqual(result2.exitCode, 0, 'la segunda llamada sobrevive (sin exit)');
+    const bad = runCli(['match', sampleFile, 'NoExiste#9999', '--json']);
+    assert.strictEqual(bad.exitCode, 1, 'objetivo inválido => 1 sin matar el proceso');
+    const insuff = runCli(['guardian', sampleFile, 'TenZ#0001', '--json']);
+    assert.strictEqual(insuff.exitCode, 2, 'evidencia insuficiente => 2 sin matar el proceso');
+  });
+
+check('Merkle: raíz determinista sin timestamp (centinela documentada) y con timestamp explícito',
+  () => {
+    const { buildMatchMerkleLedger } = require(path.join(scriptsDir, 'merkle_ledger.js'));
+    const a = buildMatchMerkleLedger({ matchId: 'm1', map: 'Ascent' });
+    const b = buildMatchMerkleLedger({ matchId: 'm1', map: 'Ascent' });
+    assert.strictEqual(a.root, b.root, 'misma entrada => misma raíz (sin Date.now)');
+    assert.strictEqual(a.events[0].timestamp, 'UNSPECIFIED_TIMESTAMP', 'centinela determinista');
+    const c = buildMatchMerkleLedger({ matchId: 'm1', map: 'Ascent', timestamp: '2026-01-01T00:00:00.000Z' });
+    const d = buildMatchMerkleLedger({ matchId: 'm1', map: 'Ascent', timestamp: '2026-01-01T00:00:00.000Z' });
+    assert.strictEqual(c.root, d.root, 'timestamp explícito también determinista');
+    assert.notStrictEqual(c.root, a.root, 'timestamp explícito cambia la hoja de forma trazable');
   });
 
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben
