@@ -403,8 +403,8 @@ try {
       console.log(`\n🔎 Observaciones/fugas omitidas: sin eventos observados de ronda.`);
     }
     if (evidence.allowedSections.includes('aim_routine') && res.prescripcionInmediata) {
-      console.log(`\n💡 REGLA MENTAL: ${res.prescripcionInmediata.reglaMental}`);
-      console.log(`🎯 RUTINA KOVAAKS: ${res.prescripcionInmediata.sesionKovaaks}`);
+      console.log(`\n🎯 RUTINA KOVAAKS (${res.prescripcionInmediata.metrica}; umbral ${res.prescripcionInmediata.umbral}): ${res.prescripcionInmediata.sesionKovaaks}`);
+      console.log(`💡 Regla de timing/tradeo: OMITIDA — ${res.prescripcionInmediata.limitacion}`);
     } else {
       console.log(`\n🎯 Rutina omitida: falta evidencia mecánica observada (HS% válido).`);
     }
@@ -428,28 +428,13 @@ try {
     if (!p1 || !p2) {
       const summaries = (matchData.data?.segments || []).filter(s => s.type === 'player-summary');
       const uniqueHandles = [...new Set(summaries.map(s => s.metadata?.platformUserHandle || s.attributes?.platformUserIdentifier).filter(Boolean))];
-
-      if (uniqueHandles.length < 2) {
-        printBanner();
-        console.log(`⚠️ Telemetría insuficiente: la partida contiene menos de 2 jugadores para auditar sinergia de dúo.`);
-        console.log(`========================================================================\n`);
-        process.exit(EXIT.INSUFFICIENT);
-      }
-
-      const teamMap = {};
-      summaries.forEach(s => {
-        const team = s.metadata?.teamId || 'Blue';
-        const h = s.metadata?.platformUserHandle || s.attributes?.platformUserIdentifier;
-        if (h) {
-          teamMap[team] = teamMap[team] || [];
-          if (!teamMap[team].includes(h)) teamMap[team].push(h);
-        }
-      });
-      const teamWithAtLeastTwo = Object.values(teamMap).find(t => t.length >= 2);
-      if (!p1 && teamWithAtLeastTwo) p1 = teamWithAtLeastTwo[0];
-      if (!p2 && teamWithAtLeastTwo) p2 = teamWithAtLeastTwo[1];
-      if (!p1) p1 = uniqueHandles[0];
-      if (!p2) p2 = uniqueHandles[1];
+      const missing = [!p1 ? 'player1' : null, !p2 ? 'player2' : null].filter(Boolean).join(' y ');
+      const candidates = uniqueHandles.length > 0
+        ? `Candidatos: ${uniqueHandles.slice(0, 10).join(', ')}`
+        : 'La telemetría no contiene jugadores válidos.';
+      console.error(`Error: duo requiere DOS Riot IDs exactos (p1 y p2); falta ${missing}. ${candidates}`);
+      console.error(`Uso: node cli.js duo <archivo_o_id> "Nombre#TAG" "Nombre#TAG"`);
+      process.exit(EXIT.INVALID);
     }
     const res = auditDuoSynergy(matchData, p1, p2);
     validateDuoSynergy(res);
@@ -924,8 +909,8 @@ try {
       console.log(`\n🔎 Observaciones/fugas omitidas: sin eventos observados de ronda.`);
     }
     if (evidence.allowedSections.includes('aim_routine') && res.prescripcionInmediata) {
-      console.log(`\n💡 REGLA MENTAL: ${res.prescripcionInmediata.reglaMental}`);
-      console.log(`🎯 RUTINA KOVAAKS: ${res.prescripcionInmediata.sesionKovaaks}`);
+      console.log(`\n🎯 RUTINA KOVAAKS (${res.prescripcionInmediata.metrica}; umbral ${res.prescripcionInmediata.umbral}): ${res.prescripcionInmediata.sesionKovaaks}`);
+      console.log(`💡 Regla de timing/tradeo: OMITIDA — ${res.prescripcionInmediata.limitacion}`);
     } else {
       console.log(`\n🎯 Rutina omitida: falta evidencia mecánica observada (HS% válido).`);
     }
@@ -1037,7 +1022,8 @@ try {
       console.log(`🎯 DIAGNÓSTICO DIRECTO: ${res.player} (${res.agent} - ${res.rank}) | Mapa: ${res.map}`);
       console.log(`------------------------------------------------------------------------`);
       console.log(`📊 Radar Precisión Mecánica: ${res.radar.precisionMecanica === null ? 'n/d (sin métrica observada)' : `${res.radar.precisionMecanica} / 100`}`);
-      console.log(`💡 Regla Inmediata: ${res.prescripcionInmediata ? res.prescripcionInmediata.reglaMental : 'omitida (sin HS% observado)'}`);
+      console.log(`🎯 Rutina mecánica: ${res.prescripcionInmediata ? `${res.prescripcionInmediata.sesionKovaaks} (${res.prescripcionInmediata.metrica}; umbral ${res.prescripcionInmediata.umbral})` : 'omitida (sin HS% observado)'}`);
+      console.log(`💡 Regla de timing/tradeo: ${res.prescripcionInmediata ? `OMITIDA — ${res.prescripcionInmediata.limitacion}` : 'omitida (sin HS% observado)'}`);
       console.log(`========================================================================\n`);
     } else {
       console.error(`Comando desconocido: "${command}". Ejecuta "node cli.js --help" para ver las opciones.`);

@@ -7,6 +7,7 @@
 - **Bloque C — Contrato CLI:** códigos de salida documentados (`0` resultado válido, `1` entrada/objetivo/comando inválido, `2` evidencia insuficiente en guardian/drift); `--json` en los comandos analíticos; procedencia uniforme; **ningún** comando selecciona jugador en silencio; ayuda actualizada (incluye `calibrate` como SIMULACIÓN).
 - **Bloque D — Paquete y CI:** `check_syntax.js` para todos los `.js`; `npm pack --dry-run` verificado en tests (excluye `tests/`, suites y artefactos de desarrollo); runner con 3 semillas de fuzz; versión `4.7.0`.
 - **Límite vigente:** sin telemetría Riot real ni validación con jugadores; `calibrate` sigue siendo una simulación offline.
+- **Regresiones del veredicto sobre `37a59fb`:** `duo` exige ambos Riot IDs exactos (sin elección automática de compañeros) y la prescripción ya no emite reglas de timing/tradeo/posicionamiento sin timestamps/posición/trade observados; solo rutina mecánica vinculada a HS% y umbral (138/138 checks).
 
 ## 4.6.0 — Confiabilidad y trazabilidad
 

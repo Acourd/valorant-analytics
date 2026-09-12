@@ -13,6 +13,26 @@ const { parseDuels } = require('./duel_matrix');
 const { analyzeEconomy } = require('./economy_analyzer');
 const { resolveExactHandle, sourceProvenance, provenanceLabel, mayAssertCauses, observedNumber } = require('./data_contract');
 
+/**
+ * Detecta contexto temporal/posicional/trade OBSERVADO en los segmentos.
+ * Sin timestamps, posiciones o marcas de trade, queda PROHIBIDO emitir reglas
+ * de timing/tradeo/posicionamiento (solo rutina mecánica vinculada a HS%).
+ */
+function detectTemporalContext(matchData) {
+  const segments = (matchData && matchData.data && matchData.data.segments) || [];
+  const ctx = { timing: false, position: false, trade: false };
+  for (const s of segments) {
+    const a = s.attributes || {};
+    const m = s.metadata || {};
+    if (Number.isFinite(Number(a.roundTime)) || Number.isFinite(Number(m.roundTimeMs)) ||
+        Number.isFinite(Number(m.timestampMs)) || /T\d{2}:\d{2}/.test(String(m.timestamp || ''))) ctx.timing = true;
+    if (m.position || a.position || (Number.isFinite(Number(m.x)) && Number.isFinite(Number(m.y)))) ctx.position = true;
+    if (m.traded === true || a.traded === true || Number.isFinite(Number(m.tradeTimeMs))) ctx.trade = true;
+  }
+  ctx.sufficient = ctx.timing || ctx.position || ctx.trade;
+  return ctx;
+}
+
 function evaluateLearningProfile(matchData, targetHandle) {
   if (!matchData || typeof matchData !== 'object') {
     throw new Error('evaluateLearningProfile requiere un objeto de telemetría válido.');
@@ -146,10 +166,19 @@ function evaluateLearningProfile(matchData, targetHandle) {
       ? `Procedencia: ${provenanceLabel(provenance)}. Se describen observaciones; NO se emiten causas/fugas (requieren fuente verificada).`
       : (unknowns.length > 0 ? `Métricas no disponibles y excluidas del diagnóstico: ${unknowns.join(', ')}.` : null));
 
-  // 3. Prescripción SOLO con evidencia mecánica observada (HS%); sin datos: null.
+  // 3. Prescripción SOLO mecánica y con evidencia observada. Las reglas de
+  // timing/tradeo/posición están PROHIBIDAS sin eventos de ronda con
+  // timestamps/posición/trade (no presentes en este contrato de datos).
+  const temporalContext = detectTemporalContext(matchData);
   const prescripcionInmediata = mechanical.hsPct === null ? null : {
-    reglaMental: 'Aplica la regla de los 2 segundos: antes de cada asomo, verifica en el minimapa si tienes un compañero a distancia de tradeo.',
-    sesionKovaaks: mechanical.hsPct >= 35 ? '5 min de Valorant Microshot Speed + 5 min de Thin Aiming Long' : '5 min de Pasu Small Reload + 5 min de 1wall6targets extra small'
+    tipo: 'mecanica',
+    metrica: `HS% observado (${Number(mechanical.hsPct.toFixed(1))}%)`,
+    umbral: '25% (estándar competitivo documentado)',
+    sesionKovaaks: mechanical.hsPct >= 35 ? '5 min de Valorant Microshot Speed + 5 min de Thin Aiming Long' : '5 min de Pasu Small Reload + 5 min de 1wall6targets extra small',
+    reglaMental: null,
+    limitacion: temporalContext.sufficient
+      ? `Contexto temporal parcial detectado (${Object.keys(temporalContext).filter(k => temporalContext[k]).join('/')}): este contrato todavía no deriva reglas de tradeo verificadas.`
+      : 'Sin timestamps/posición/trade observados: se omite toda regla de timing/tradeo; solo rutina mecánica vinculada a HS%.'
   };
 
   return {
@@ -219,9 +248,9 @@ if (require.main === module) {
   }
 
   if (res.prescripcionInmediata) {
-    console.log(`\n💡 PRESCRIPCIÓN INMEDIATA PARA TU SIGUIENTE SESIÓN:`);
-    console.log(`  • Regla Táctica:   ${res.prescripcionInmediata.reglaMental}`);
+    console.log(`\n💡 PRESCRIPCIÓN MECÁNICA (${res.prescripcionInmediata.metrica}; umbral ${res.prescripcionInmediata.umbral}):`);
     console.log(`  • Práctica Kovaaks: ${res.prescripcionInmediata.sesionKovaaks}`);
+    console.log(`  • Regla de timing/tradeo: OMITIDA — ${res.prescripcionInmediata.limitacion}`);
   } else {
     console.log(`\n💡 Prescripción omitida: sin HS% observado no se emite rutina.`);
   }

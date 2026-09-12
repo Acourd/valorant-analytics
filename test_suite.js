@@ -658,12 +658,15 @@ check('cli.js duels: objetivo ausente no auto-selecciona (fail-closed con candid
     assert.ok(!/MATRIZ DE DUELOS 1v1 DIRECTOS/.test(out), 'no debe analizar a un jugador arbitrario');
   });
 
-check('cli.js duo: dispatcher sin jugadores resuelve compañeros dinámicamente con Exit Code 0',
+check('cli.js duo: sin jugadores falla cerrado (exit 1, candidatos, sin informe)',
   () => {
-    const out = execFileSync(process.execPath, [cliPath, 'duo', sampleFile], { encoding: 'utf8' });
-    assert.ok(out.includes('AUDITORÍA DE DÚO'), 'Encabezado ausente');
-    assert.ok(out.includes('Sinergia:'), 'Puntuación de sinergia ausente');
-    assert.ok(!out.includes('None and None'), 'No debe fallar por jugadores no encontrados');
+    let code = 0;
+    let out = '';
+    try { execFileSync(process.execPath, [cliPath, 'duo', sampleFile], { encoding: 'utf8' }); }
+    catch (e) { code = e.status; out = String(e.stdout || '') + String(e.stderr || ''); }
+    assert.strictEqual(code, 1, 'debe salir 1');
+    assert.ok(/requiere DOS Riot IDs/.test(out) && /Candidatos/.test(out), 'debe pedir ambos IDs y listar candidatos');
+    assert.ok(!/AUDITORÍA DE DÚO/.test(out), 'no debe emitir informe');
   });
 
 check('cli.js economy: dispatcher ejecuta desglose de buy-tiers con Exit Code 0',
@@ -2620,6 +2623,38 @@ check('paquete: files excluye artefactos de desarrollo y CI ejecuta syntax check
     const ci = fs.readFileSync(path.join(__dirname, '.github', 'workflows', 'ci.yml'), 'utf8');
     assert.ok(/check_syntax\.js/.test(ci), 'CI debe ejecutar la comprobación de sintaxis');
     assert.ok(/test:properties|test_property_fuzz/.test(JSON.stringify(pkg.scripts)), 'script npm de propiedades');
+  });
+
+check('duo: sin jugadores falla cerrado (exit 1, candidatos, sin informe)',
+  () => {
+    let code = 0;
+    let out = '';
+    try { cliOk(['duo', sampleFile]); }
+    catch (e) { code = e.status; out = String(e.stdout || '') + String(e.stderr || ''); }
+    assert.strictEqual(code, 1, 'duo sin jugadores => exit 1');
+    assert.ok(/requiere DOS Riot IDs/.test(out) && /Candidatos/.test(out), 'debe exigir ambos IDs y listar candidatos');
+    assert.ok(!/AUDITORÍA DE DÚO|Sinergia:/.test(out), 'no debe analizar a jugadores no solicitados');
+  });
+
+check('prescripción: sin eventos temporales no hay regla de timing/tradeo',
+  () => {
+    const p = evaluateLearningProfile(sample, 'TenZ#0001');
+    if (p.prescripcionInmediata) {
+      assert.strictEqual(p.prescripcionInmediata.reglaMental, null, 'regla mental bloqueada sin timestamps/posición/trade');
+      assert.ok(/HS% observado/i.test(p.prescripcionInmediata.metrica), 'rutina vinculada a HS% observado');
+      assert.ok(/25/.test(p.prescripcionInmediata.umbral), 'umbral documentado');
+      assert.ok(p.prescripcionInmediata.limitacion, 'limitación declarada');
+    }
+    const tmp = path.join(os.tmpdir(), `presc-${process.pid}.txt`);
+    fs.writeFileSync(tmp, 'kirtmy#000\tIso\tGold 2\t21\t14\t5\t245\t162\t26%\n', 'utf8');
+    try {
+      for (const out of [cliOk(['match', sampleFile, 'TenZ#0001']), cliOk(['parse', tmp, 'kirtmy#000'])]) {
+        assert.ok(!/regla de los 2 segundos|compañero a distancia de tradeo/i.test(out), 'no debe emitir timing/tradeo sin contexto');
+        assert.ok(!/REGLA MENTAL:/.test(out), 'no debe renderizar regla mental');
+      }
+    } finally {
+      fs.unlinkSync(tmp);
+    }
   });
 
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben
