@@ -186,6 +186,7 @@ function loadAttestIdentity() {
 }
 
 function printProvenance(source, matchData) {
+  if (JSON_MODE) return; // la procedencia viaja en el payload estructurado
   const meta = (matchData && matchData.data && matchData.data.metadata) || {};
   const provenance = sourceProvenance(meta);
   if (provenance === 'synthetic_demo') {
@@ -213,25 +214,35 @@ function resolveTargetAndPlayer(args) {
     usedBundledSample = true;
   }
 
-  if (usedBundledSample) {
+  if (usedBundledSample && !JSON_MODE) {
     console.log(`[FUENTE: fixture de ejemplo incluido (examples/sample_match.json). Pasa un archivo JSON o un Riot ID propio para análisis real.]`);
   }
 
   return { target, player };
 }
 
-function handleProfile(handle) {
+function handleProfile(handle, jsonOut = false) {
   const normalized = normalizeHandle(handle);
   const [name, tag] = handle.split('#');
   const opggTag = tag ? `${name.trim()}-${tag.trim()}` : name.trim();
   const trackerTag = tag ? `${name.trim()}%23${tag.trim()}` : normalized;
+  const links = {
+    opgg: `https://op.gg/es/valorant/profile/${encodeURIComponent(opggTag)}`,
+    tracker: `https://tracker.gg/valorant/profile/riot/${trackerTag}/overview`,
+    vlr: `https://www.vlr.gg/search/?q=${encodeURIComponent(name.trim())}`
+  };
+
+  if (jsonOut) {
+    process.stdout.write(JSON.stringify({ command: 'profile', handle, links, note: 'Enlaces informativos; no se consulta ninguna plataforma.' }, null, 2) + '\n');
+    return;
+  }
 
   printBanner();
   console.log(`🌐 PERFIL DE TELEMETRÍA MULTI-PLATAFORMA: ${handle}`);
   console.log(`------------------------------------------------------------------------`);
-  console.log(`  • OP.GG:     https://op.gg/es/valorant/profile/${encodeURIComponent(opggTag)}`);
-  console.log(`  • Tracker:   https://tracker.gg/valorant/profile/riot/${trackerTag}/overview`);
-  console.log(`  • VLR.gg:    https://www.vlr.gg/search/?q=${encodeURIComponent(name.trim())}`);
+  console.log(`  • OP.GG:     ${links.opgg}`);
+  console.log(`  • Tracker:   ${links.tracker}`);
+  console.log(`  • VLR.gg:    ${links.vlr}`);
   console.log(`\nℹ️ Enlaces informativos (no se consulta Tracker desde aquí).`);
   console.log(`   Para analizar, aporta un JSON/export, el texto del marcador o una captura con confirmación:`);
   console.log(`   node cli.js match <partida.json> "${handle}"`);
@@ -255,11 +266,37 @@ function buildDuelTable(matrixData, playerHandle) {
 }
 
 let DEMO_MODE = false;
+let JSON_MODE = false;
+
+// Códigos de salida documentados (ver ayuda):
+// 0 = resultado descriptivo válido (incluye n/d / omitido como respuesta contractual)
+// 1 = entrada, objetivo o comando inválido
+// 2 = evidencia insuficiente para el resultado principal (guardian, drift)
+const EXIT = Object.freeze({ OK: 0, INVALID: 1, INSUFFICIENT: 2 });
+
+function emit(jsonOut, payload, human) {
+  if (jsonOut) { process.stdout.write(JSON.stringify(payload, null, 2) + '\n'); return; }
+  human();
+}
+
+// Ningún comando selecciona un jugador en silencio: sin objetivo explícito
+// solo se auto-resuelve un roster de UN jugador; si hay varios, el contrato
+// lanza TARGET_REQUIRED con candidatos (exit 1).
+function resolveEffectivePlayer(matchData, player) {
+  if (player) return player;
+  const handles = (matchData && matchData.data && matchData.data.segments || [])
+    .filter(s => s.type === 'player-summary')
+    .map(s => s.metadata?.platformUserHandle || s.attributes?.platformUserIdentifier)
+    .filter(Boolean);
+  return require('./data_contract').resolveExactHandle(handles, undefined);
+}
 
 function runCli(argv) {
   const args = argv.slice();
   DEMO_MODE = args.includes('--demo');
-  for (let i = args.length - 1; i >= 0; i--) { if (args[i] === '--demo') args.splice(i, 1); }
+  const jsonOut = args.includes('--json');
+  JSON_MODE = jsonOut;
+  for (let i = args.length - 1; i >= 0; i--) { if (args[i] === '--demo' || args[i] === '--json') args.splice(i, 1); }
   const command = args[0];
 
 if (!command || command === '--help' || command === '-h') {
@@ -273,10 +310,10 @@ if (!command || command === '--help' || command === '-h') {
   console.log(`  node cli.js weapons <partida_o_id> [jugador]      ➔ Telemetría de Armas y Recoil`);
   console.log(`  node cli.js economy <partida_o_id> [jugador]      ➔ Desglose de Economía y Buy-Tiers`);
   console.log(`  node cli.js coaching <partida_o_id> [jugador]     ➔ Reporte Introspectivo y Recursos Tácticos`);
-  console.log(`  node cli.js calibrate [jugador] [rango] [rol]     ➔ Calibración Instantánea Zero-Cloud`);
+  console.log(`  node cli.js calibrate [jugador] [rango] [rol]     ➔ SIMULACIÓN offline (no análisis real)`);
   console.log(`  node cli.js career <perfil.json>           ➔ Auditoría de Horas y Trayectoria`);
   console.log(`  node cli.js diagnose <perfil.json>         ➜ Señal heurística de MMR y estimación de rango (hipótesis no verificada)`);
-  console.log(`  node cli.js parse <texto_o_archivo> [jugador]     ➔ Ingesta Universal Resiliente (Anti-WAF)`);
+  console.log(`  node cli.js parse <texto_o_archivo> [jugador]     ➔ Ingesta offline (JSON/texto aportado; sin red)`);
   console.log(`  node cli.js invariants <partida_o_id> [jugador]   ➔ Verificación Formal de Invariantes`);
   console.log(`  node cli.js attest <partida_o_id> [jugador]       ➔ Sobre DSSE in-toto firmado con Ed25519`);
   console.log(`  node cli.js merkle <partida_o_id>                 ➔ Árbol Merkle de Eventos y Pruebas`);
@@ -290,6 +327,10 @@ if (!command || command === '--help' || command === '-h') {
   console.log(`  node cli.js match examples/sample_match.json "TenZ#0001"`);
   console.log(`  node cli.js duo examples/sample_match.json "TenZ#0001" "Chronicle#0001"`);
   console.log(`  node cli.js duels examples/sample_match.json`);
+  console.log(`\nSALIDA ESTRUCTURADA: añade --json a match/aim/duels/weapons/economy/coaching/duo/guardian/drift/consensus/synthesize/parse/career/diagnose/sbom/profile.`);
+  console.log(`CÓDIGOS DE SALIDA: 0 = resultado descriptivo válido (incluye n/d y "omitido" como respuesta contractual);`);
+  console.log(`                   1 = entrada, objetivo o comando inválido; 2 = evidencia insuficiente para el resultado principal (guardian, drift).`);
+  console.log(`OBJETIVO: ningún comando selecciona un jugador silenciosamente; indica el Riot ID exacto (salvo roster de 1 jugador).`);
   console.log(`========================================================================\n`);
   process.exit(0);
 }
@@ -303,7 +344,7 @@ if (pf.verdict === 'DENY') {
 
 // Auto-detección: si el primer arg contiene '#' (Riot ID) y no es un archivo → perfil
 if (command.includes('#') && !fs.existsSync(command)) {
-  handleProfile(command);
+  handleProfile(command, jsonOut);
   process.exit(0);
 }
 
@@ -313,9 +354,19 @@ try {
     const matchData = resolveMatchData(target, player);
     const res = evaluateLearningProfile(matchData, player);
     validateLearningProfile(res);
-
-    printBanner();
     const evidence = deriveMatchEvidence(matchData, player, target);
+
+    emit(jsonOut, {
+      command: 'match',
+      player: res.player, agent: res.agent, rank: res.rank, map: res.map,
+      provenance: res.provenance, provenanceLabel: provenanceLabel(res.provenance),
+      dataQuality: res.dataQuality, warning: res.warning,
+      evidence: { level: evidence.level, missing: evidence.missing, allowedSections: evidence.allowedSections },
+      radar: res.radar, pillarsObserved: res.pillarsObserved, eloLeaks: res.eloLeaks,
+      observations: (evidence.observedEvents || []).slice(0, 50),
+      prescription: res.prescripcionInmediata
+    }, () => {
+    printBanner();
     console.log(`🎯 DIAGNÓSTICO 360°: ${res.player} (${res.agent} - ${res.rank}) | Mapa: ${res.map} [descriptivo]`);
     printEvidenceLimits(evidence);
     console.log(`------------------------------------------------------------------------`);
@@ -358,6 +409,7 @@ try {
       console.log(`\n🎯 Rutina omitida: falta evidencia mecánica observada (HS% válido).`);
     }
     console.log(`========================================================================\n`);
+    });
 
   } else if (command === 'duo' || command === 'synergy') {
     let target = args[1];
@@ -381,7 +433,7 @@ try {
         printBanner();
         console.log(`⚠️ Telemetría insuficiente: la partida contiene menos de 2 jugadores para auditar sinergia de dúo.`);
         console.log(`========================================================================\n`);
-        process.exit(0);
+        process.exit(EXIT.INSUFFICIENT);
       }
 
       const teamMap = {};
@@ -402,18 +454,23 @@ try {
     const res = auditDuoSynergy(matchData, p1, p2);
     validateDuoSynergy(res);
 
+    emit(jsonOut, Object.assign({ command: 'duo', provenance: res.provenance }, res), () => {
     printBanner();
-    console.log(`🤝 AUDITORÍA DE DÚO: ${res.p1.handle} + ${res.p2.handle} | Sinergia: ${res.synergy.score}`);
+    const fmtNum = v => (v === null || v === undefined ? 'n/d' : v);
+    console.log(`🤝 AUDITORÍA DE DÚO: ${res.p1.handle} + ${res.p2.handle} | Sinergia: ${fmtNum(res.synergy.score)}`);
     console.log(`------------------------------------------------------------------------`);
-    console.log(`👤 ${res.p1.handle} (${res.p1.agent}): ACS ${res.p1.acs} | KD ${res.p1.kd} | HS% ${res.p1.hs}`);
-    console.log(`👤 ${res.p2.handle} (${res.p2.agent}): ACS ${res.p2.acs} | KD ${res.p2.kd} | HS% ${res.p2.hs}`);
+    console.log(`👤 ${res.p1.handle} (${res.p1.agent || 'n/d'}): ACS ${fmtNum(res.p1.acs)} | KD ${fmtNum(res.p1.kd)} | HS% ${fmtNum(res.p1.hs)}`);
+    console.log(`👤 ${res.p2.handle} (${res.p2.agent || 'n/d'}): ACS ${fmtNum(res.p2.acs)} | KD ${fmtNum(res.p2.kd)} | HS% ${fmtNum(res.p2.hs)}`);
     console.log(`\n⚖️ VEREDICTO: ${res.synergy.verdict}`);
-    console.log(`   Diferencial: ${res.synergy.acsDifferential}`);
+    if (res.synergy.acsDifferential) console.log(`   Diferencial: ${res.synergy.acsDifferential}`);
+    if (res.synergy.missing && res.synergy.missing.length > 0) console.log(`   Faltantes: ${res.synergy.missing.join('; ')}`);
     if (res.synergy.carryAnalysis) {
-      console.log(`   Carga: ${res.synergy.carryAnalysis.primaryCarrier} carga, ${res.synergy.carryAnalysis.secondaryPlayer} soporta | Candidato a boost: ${res.synergy.carryAnalysis.boostCandidate ? 'SÍ' : 'no'}`);
+      console.log(`   Carga: ${res.synergy.carryAnalysis.primaryCarrier} carga, ${res.synergy.carryAnalysis.secondaryPlayer} soporta | Candidato a boost: ${res.synergy.carryAnalysis.boostCandidate ? 'SÍ (heurística)' : 'no'}`);
     }
-    console.log(`   Directiva:   ${res.synergy.tacticalAdvice}`);
+    if (res.synergy.tacticalAdvice) console.log(`   Directiva:   ${res.synergy.tacticalAdvice}`);
+    if (res.synergy.limitations) console.log(`   Límites:     ${res.synergy.limitations.join(' ')}`);
     console.log(`========================================================================\n`);
+    });
 
   } else if (command === 'aim' || command === 'kovaaks') {
     const { target, player } = resolveTargetAndPlayer(args);
@@ -421,6 +478,7 @@ try {
     const evidence = deriveMatchEvidence(matchData, player, target);
     const res = generateKovaaksRoutine(matchData, player);
 
+    emit(jsonOut, Object.assign({ command: 'aim', evidence: { level: evidence.level, missing: evidence.missing } }, res), () => {
     printBanner();
     if (res.omitted) {
       console.log(`🎯 RUTINA OMITIDA: ${res.omittedReason}`);
@@ -440,6 +498,7 @@ try {
       });
     }
     console.log(`========================================================================\n`);
+    });
 
   } else if (command === 'duels' || command === 'matrix') {
     const { target, player } = resolveTargetAndPlayer(args);
@@ -452,6 +511,14 @@ try {
       duels: observeDuelRows(duelInfo.rows, matchData, { originPath: target })
     });
 
+    emit(jsonOut, {
+      command: 'duels',
+      player: duelInfo.target || player || null,
+      provenance: 'normalized_input',
+      evidence: { level: evidence.level, missing: evidence.missing, allowedSections: evidence.allowedSections },
+      error: duelInfo.error || null,
+      rows: duelInfo.rows
+    }, () => {
     printBanner();
     if (!evidence.allowedSections.includes('duel_matrix')) {
       console.log(`⚔️ MATRIZ DE DUELOS OMITIDA: sin datos de duelos válidos.`);
@@ -468,6 +535,7 @@ try {
       });
     }
     console.log(`========================================================================\n`);
+    });
 
   } else if (command === 'weapons' || command === 'armas') {
     const { target, player } = resolveTargetAndPlayer(args);
@@ -475,6 +543,7 @@ try {
     const result = analyzeWeaponTelemetry(matchData, player);
     if (result.zoneMetrics.observed) validateWeaponTelemetry(result);
 
+    emit(jsonOut, Object.assign({ command: 'weapons' }, result), () => {
     printBanner();
     console.log(`🎯 TELEMETRÍA DE ARMAS E IMPACTOS: ${result.player} (${result.agent || 'n/d'})`);
     console.log(`Distribución de Zonas: Cabeza ${result.hitZoneDistribution.head} | Cuerpo ${result.hitZoneDistribution.body} | Piernas ${result.hitZoneDistribution.leg}`);
@@ -483,58 +552,83 @@ try {
     console.log(`DISTANCIA: ${result.distanceNote}`);
     console.log(`------------------------------------------------------------------------`);
     console.log(`DIAGNÓSTICO TÁCTICO: ${result.recoilDiagnosis.analisisTactico}`);
-    console.log(`RUTINA ASOCIADA: ${result.recoilDiagnosis.kovaaksPrescription || 'RUTINA OMITIDA (sin eventos de daño observados)'}`);
+    console.log(`RUTINA ASOCIADA: ${result.recoilDiagnosis.kovaaksPrescription || 'RUTINA OMITIDA (sin umbral superado o sin eventos de daño)'}`);
     console.log(`========================================================================\n`);
+    });
 
   } else if (command === 'economy' || command === 'eco') {
     const { target, player } = resolveTargetAndPlayer(args);
     const matchData = resolveMatchData(target, player);
     const eco = analyzeEconomy(matchData, player);
 
+    emit(jsonOut, Object.assign({ command: 'economy' }, eco), () => {
     printBanner();
-    console.log(`💰 DESGLOSE DE ECONOMÍA Y BUY TIERS: ${eco.player} (${eco.agent || '?'} - ${eco.rank || 'Unranked'})`);
+    const fmt = v => (v === null || v === undefined ? 'n/d' : v);
+    console.log(`💰 DESGLOSE DE ECONOMÍA Y BUY TIERS: ${eco.player} (${eco.agent || 'n/d'} - ${eco.rank || 'n/d'})`);
     console.log(`------------------------------------------------------------------------`);
     console.table(eco.tiers.map(t => ({
       'Buy Tier': t.tier,
-      'Rounds': t.rounds,
-      'Record (W-L)': `${t.won}-${t.lost}`,
-      'Win %': t.winPct,
-      'KDA': t.kda,
-      'K/D': t.kd,
-      'ADR': t.adr,
-      'ACS': t.acs,
-      'HS%': t.hsPct
+      'Rounds': fmt(t.rounds),
+      'Record (W-L)': t.won === null || t.lost === null ? 'n/d' : `${t.won}-${t.lost}`,
+      'Win %': fmt(t.winPct),
+      'KDA': fmt(t.kda),
+      'K/D': fmt(t.kd),
+      'ADR': fmt(t.adr),
+      'ACS': fmt(t.acs),
+      'HS%': fmt(t.hsPct)
     })));
+    if (eco.unclassifiedRounds > 0) console.log(`Nota: ${eco.note}`);
     console.log(`========================================================================\n`);
+    });
 
   } else if (command === 'coaching' || command === 'coach') {
     const { target, player } = resolveTargetAndPlayer(args);
     const matchData = resolveMatchData(target, player);
     const report = generateCoachingReport(matchData, player);
 
+    emit(jsonOut, Object.assign({ command: 'coaching' }, report), () => {
     printBanner();
     if (report.error) {
       console.log(`⚠️ ${report.error}`);
     } else {
-      console.log(`🧠 REPORTE INTROSPECTIVO DE COACHING TÁCTICO: ${report.player.handle} (${report.player.agent} - ${report.player.rank})`);
+      console.log(`🧠 REPORTE INTROSPECTIVO DE COACHING TÁCTICO: ${report.player.handle} (${report.player.agent || 'n/d'} - ${report.player.rank || 'n/d'})`);
       console.log(`------------------------------------------------------------------------`);
-      console.log(`⚔️ DUELOS CON MAYOR FRICCIÓN EN LA PARTIDA:`);
-      if (!report.hardOpponents || report.hardOpponents.length === 0) {
-        console.log(`  ✓ Dominio favorable en todos los enfrentamientos directos de la partida.`);
+      if (report.insufficient) {
+        console.log(`EVIDENCIA INSUFICIENTE: faltan ${report.missing.join(', ')}. No se emiten recomendaciones.`);
       } else {
-        report.hardOpponents.forEach(h => {
-          console.log(`  • vs ${h.opp.handle.padEnd(20)} (${(h.opp.agent || '?').padEnd(10)}): ${h.kills} K - ${h.deaths} D (Déficit: -${h.diff})`);
+        console.log(`⚔️ DUELOS CON MAYOR FRICCIÓN EN LA PARTIDA:`);
+        if (!report.hardOpponents || report.hardOpponents.length === 0) {
+          console.log(`  (sin duelos observados con balance negativo)`);
+        } else {
+          report.hardOpponents.forEach(h => {
+            console.log(`  • vs ${h.opp.handle.padEnd(20)} (${(h.opp.agent || '?').padEnd(10)}): ${h.kills} K - ${h.deaths} D (Déficit: -${h.diff})`);
+          });
+        }
+        console.log(`\n📚 RECOMENDACIONES (métrica + umbral + procedencia):`);
+        if (report.recommendations.length === 0) {
+          console.log(`  (ninguna recomendación habilitada: sin umbral observado superado)`);
+        } else {
+          report.recommendations.forEach(r => {
+            console.log(`  • ${r.module}: ${r.rationale}`);
+            console.log(`    Métrica: ${r.metric} | Umbral: ${r.threshold} | Procedencia: ${r.provenance}`);
+            console.log(`    Limitación: ${r.limitation}`);
+          });
+        }
+        console.log(`\n📚 RECURSOS EDUCATIVOS RECOMENDADOS (genéricos, no diagnóstico):`);
+        const resourceList = Object.values(report.resources);
+        if (resourceList.length === 0) console.log(`  (sin recursos recomendados para esta evidencia)`);
+        resourceList.forEach(r => {
+          console.log(`  • ${r.title}`);
+          console.log(`    Conceptos: ${r.keyConcepts[0]}`);
+          console.log(`    Creadores: ${r.creators.join(', ')}`);
+          console.log(`    Enlace:    ${r.searchQuery}`);
         });
+        if (report.unrecommended.length > 0) console.log(`  (No renderizados por no estar recomendados: ${report.unrecommended.join(', ')})`);
       }
-      console.log(`\n📚 MÓDULOS Y GUÍAS DE APRENDIZAJE RECOMENDADOS:`);
-      Object.values(report.resources).forEach(r => {
-        console.log(`  • ${r.title}`);
-        console.log(`    Conceptos: ${r.keyConcepts[0]}`);
-        console.log(`    Creadores: ${r.creators.join(', ')}`);
-        console.log(`    Enlace:    ${r.searchQuery}`);
-      });
+      if (report.limitations) console.log(`\nLímites: ${report.limitations.join(' ')}`);
     }
     console.log(`========================================================================\n`);
+    });
 
   } else if (command === 'calibrate' || command === 'mock') {
     const player = args[1] || 'Player#0001';
@@ -559,8 +653,8 @@ try {
 
   } else if (command === 'invariants' || command === 'verify-math') {
     const { target, player } = resolveTargetAndPlayer(args);
-    const effectivePlayer = player || 'TenZ#0001';
-    const matchData = resolveMatchData(target, effectivePlayer);
+    const matchData = resolveMatchData(target, player);
+    const effectivePlayer = resolveEffectivePlayer(matchData, player);
 
     printBanner();
     console.log(`🛡️ VERIFICACIÓN FORMAL DE INVARIANTES MATEMÁTICOS`);
@@ -585,8 +679,8 @@ try {
 
   } else if (command === 'attest') {
     const { target, player } = resolveTargetAndPlayer(args);
-    const effectivePlayer = player || 'TenZ#0001';
-    const matchData = resolveMatchData(target, effectivePlayer);
+    const matchData = resolveMatchData(target, player);
+    const effectivePlayer = resolveEffectivePlayer(matchData, player);
     const profile = evaluateLearningProfile(matchData, effectivePlayer);
 
     printBanner();
@@ -643,11 +737,12 @@ try {
 
   } else if (command === 'guardian') {
     const { target, player } = resolveTargetAndPlayer(args);
-    const effectivePlayer = player || 'TenZ#0001';
-    const matchData = resolveMatchData(target, effectivePlayer);
+    const matchData = resolveMatchData(target, player);
+    const effectivePlayer = resolveEffectivePlayer(matchData, player);
     const guardian = new SessionGuardian();
     const audit = guardian.auditSession(matchData, effectivePlayer);
 
+    emit(jsonOut, Object.assign({ command: 'guardian', player: effectivePlayer }, audit), () => {
     printBanner();
     if (audit.verdict === 'INSUFFICIENT_DATA') {
       console.log(`🛡️ SESSION GUARDIAN: EVIDENCIA INSUFICIENTE (NO_DATA)`);
@@ -656,25 +751,28 @@ try {
       console.log(`  • Sin consejo de cola ni de salud: faltan datos observados.`);
       console.log(`  • Faltantes: ${(audit.missing || []).join('; ')}`);
       console.log(`========================================================================\n`);
-      process.exit(2);
+    } else {
+      console.log(`🛡️ SESSION GUARDIAN: FATIGA & TILT COGNITIVO`);
+      console.log(`Jugador: ${effectivePlayer} | Veredicto: ${audit.verdict}`);
+      console.log(`------------------------------------------------------------------------`);
+      console.log(`  • Nivel de Tilt:     ${audit.tilt.level} (Índice: ${audit.tilt.tiltIndex}/100)`);
+      console.log(`  • Factor de Fatiga:  ${audit.fatigue.fatigueFactor} / 1.00 (${audit.fatigue.continuousMinutes} mins acumulados)`);
+      console.log(`  • Apto para competir: ${audit.safeToContinue ? 'SÍ (Continuar cola)' : 'NO (Pausa obligatoria)'}`);
+      console.log(`\n📋 DIRECTIVAS DE SALUD COGNITIVA:`);
+      audit.prescriptions.forEach(p => console.log(`  • ${p}`));
+      console.log(`========================================================================\n`);
     }
-    console.log(`🛡️ SESSION GUARDIAN: FATIGA & TILT COGNITIVO`);
-    console.log(`Jugador: ${effectivePlayer} | Veredicto: ${audit.verdict}`);
-    console.log(`------------------------------------------------------------------------`);
-    console.log(`  • Nivel de Tilt:     ${audit.tilt.level} (Índice: ${audit.tilt.tiltIndex}/100)`);
-    console.log(`  • Factor de Fatiga:  ${audit.fatigue.fatigueFactor} / 1.00 (${audit.fatigue.continuousMinutes} mins acumulados)`);
-    console.log(`  • Apto para competir: ${audit.safeToContinue ? 'SÍ (Continuar cola)' : 'NO (Pausa obligatoria)'}`);
-    console.log(`\n📋 DIRECTIVAS DE SALUD COGNITIVA:`);
-    audit.prescriptions.forEach(p => console.log(`  • ${p}`));
-    console.log(`========================================================================\n`);
+    });
+    if (audit.verdict === 'INSUFFICIENT_DATA') process.exit(EXIT.INSUFFICIENT);
 
   } else if (command === 'drift') {
     const { target, player } = resolveTargetAndPlayer(args);
-    const effectivePlayer = player || 'TenZ#0001';
-    const matchData = resolveMatchData(target, effectivePlayer);
+    const matchData = resolveMatchData(target, player);
+    const effectivePlayer = resolveEffectivePlayer(matchData, player);
     const detector = new DriftDetector();
     const driftReport = detector.auditMatchDrift(matchData, effectivePlayer);
 
+    emit(jsonOut, Object.assign({ command: 'drift', player: effectivePlayer }, driftReport), () => {
     printBanner();
     if (driftReport.noData) {
       console.log(`📊 RADAR DE DERIVA: EVIDENCIA INSUFICIENTE (NO_DATA)`);
@@ -682,15 +780,17 @@ try {
       console.log(`------------------------------------------------------------------------`);
       console.log(`  • Sin estabilidad ni entropía: faltan rondas observadas del objetivo.`);
       console.log(`========================================================================\n`);
-      process.exit(2);
+    } else {
+      console.log(`📊 RADAR DE DERIVA TÁCTICA Y ENTROPÍA MECÁNICA`);
+      console.log(`Jugador: ${effectivePlayer} | Estabilidad Global: ${driftReport.overallStability}%`);
+      console.log(`------------------------------------------------------------------------`);
+      console.log(`  • Clasificación de Lado: ${driftReport.sideDivergence.classification} (Divergencia: ${driftReport.sideDivergence.divergenceScore}%)`);
+      console.log(`  • Entropía de Quarters:  ${driftReport.quarterDrift.killDistributionEntropy} / ${driftReport.quarterDrift.maxPossibleEntropy}`);
+      console.log(`  • Diagnóstico:           ${driftReport.quarterDrift.diagnosis}`);
+      console.log(`========================================================================\n`);
     }
-    console.log(`📊 RADAR DE DERIVA TÁCTICA Y ENTROPÍA MECÁNICA`);
-    console.log(`Jugador: ${effectivePlayer} | Estabilidad Global: ${driftReport.overallStability}%`);
-    console.log(`------------------------------------------------------------------------`);
-    console.log(`  • Clasificación de Lado: ${driftReport.sideDivergence.classification} (Divergencia: ${driftReport.sideDivergence.divergenceScore}%)`);
-    console.log(`  • Entropía de Quarters:  ${driftReport.quarterDrift.killDistributionEntropy} / ${driftReport.quarterDrift.maxPossibleEntropy}`);
-    console.log(`  • Diagnóstico:           ${driftReport.quarterDrift.diagnosis}`);
-    console.log(`========================================================================\n`);
+    });
+    if (driftReport.noData) process.exit(EXIT.INSUFFICIENT);
 
   } else if (command === 'consensus') {
     const { target, player } = resolveTargetAndPlayer(args);
@@ -699,6 +799,7 @@ try {
     const arbiter = new ConsensusArbiter();
     const report = arbiter.synthesizeConsensus(profile);
 
+    emit(jsonOut, Object.assign({ command: 'consensus', player: profile.player }, report), () => {
     printBanner();
     console.log(`🧠 SÍNTESIS DE CONSENSO MULTI-LENTE (determinista; 3 lentes locales)`);
     console.log(`Jugador: ${profile.player} | Veredicto: ${report.verdict} | Procedencia: ${report.provenanceLabel}`);
@@ -710,6 +811,7 @@ try {
     console.log(`\n🔍 SÍNTESIS UNIFICADA DE LENTES:`);
     report.synthesis.forEach(s => console.log(`  • ${s}`));
     console.log(`========================================================================\n`);
+    });
 
   } else if (command === 'synthesize') {
     const { target, player } = resolveTargetAndPlayer(args);
@@ -718,6 +820,7 @@ try {
     const synthesizer = new RoutineSynthesizer({ targetDurationMinutes: 15 });
     const routine = synthesizer.synthesizeRoutine(profile);
 
+    emit(jsonOut, Object.assign({ command: 'synthesize' }, routine), () => {
     printBanner();
     if (routine.omitted) {
       console.log(`🧬 RUTINA OMITIDA: ${routine.omittedReason}`);
@@ -733,12 +836,14 @@ try {
       routine.drillPlan.forEach((d, i) => {
         console.log(`  ${i + 1}. [${d.focus}] ${d.scenario} x${d.reps} (${d.durationPerRep}) - Dificultad: ${d.difficultyMultiplier}x`);
       });
-      console.log(`\n💡 CONSEJO NEUROMUSCULAR: ${routine.neuroMuscleAdvice}`);
+      console.log(`\n💡 CONSEJO NEUROMUSCULAR (${routine.neuroMuscleAdviceBasis || 'genérico'}): ${routine.neuroMuscleAdvice}`);
     }
     console.log(`========================================================================\n`);
+    });
 
   } else if (command === 'sbom') {
     const manifest = generateSbom();
+    emit(jsonOut, Object.assign({ command: 'sbom' }, manifest), () => {
     printBanner();
     console.log(`📦 MANIFIESTO CYCLONEDX SBOM (ZERO-DEPENDENCY AUDIT)`);
     console.log(`------------------------------------------------------------------------`);
@@ -747,14 +852,15 @@ try {
     console.log(`  • Dependencias NPM:   0 (Pure Standard Library)`);
     console.log(`  • Licencia:           ${manifest.metadata.component.licenses[0].license.id}`);
     console.log(`========================================================================\n`);
+    });
 
   } else if (command === 'profile') {
     const handle = args[1];
     if (!handle || !/^[^#\s][^#]*#[^#\s][^#]*$/.test(handle.trim())) {
       console.error('Error: Riot ID inválido. Usa formato Nombre#TAG (ej. node cli.js profile "Derke#0001").');
-      process.exit(1);
+      process.exit(EXIT.INVALID);
     }
-    handleProfile(handle);
+    handleProfile(handle, jsonOut);
 
   } else if (command === 'parse' || command === 'ingest') {
     const fileInput = args[1];
@@ -772,8 +878,17 @@ try {
     const res = evaluateLearningProfile(matchData, player);
     validateLearningProfile(res);
     const evidence = deriveMatchEvidence(matchData, player, fileInput);
+    emit(jsonOut, {
+      command: 'parse',
+      player: res.player, agent: res.agent, rank: res.rank, map: res.map,
+      provenance: res.provenance, provenanceLabel: provenanceLabel(res.provenance),
+      evidence: { level: evidence.level, missing: evidence.missing, allowedSections: evidence.allowedSections },
+      radar: res.radar, pillarsObserved: res.pillarsObserved, eloLeaks: res.eloLeaks,
+      observations: (evidence.observedEvents || []).slice(0, 50),
+      prescription: res.prescripcionInmediata
+    }, () => {
     printBanner();
-    console.log(`📋 INGESTA UNIVERSAL RESILIENTE: ${res.player} (${res.agent} - ${res.rank}) | Mapa: ${res.map}`);
+    console.log(`📋 INGESTA UNIVERSAL RESILIENTE (offline): ${res.player} (${res.agent} - ${res.rank}) | Mapa: ${res.map}`);
     printEvidenceLimits(evidence);
     console.log(`------------------------------------------------------------------------`);
     if (evidence.allowedSections.includes('aggregate_radar')) {
@@ -815,6 +930,7 @@ try {
       console.log(`\n🎯 Rutina omitida: falta evidencia mecánica observada (HS% válido).`);
     }
     console.log(`========================================================================\n`);
+    });
 
   } else if (command === 'harvest') {
     printBanner();
@@ -840,22 +956,25 @@ try {
     const agg = aggregateCareerTelemetry([{ telemetry: tel }]);
     const timeline = generateMilestonesTimeline(agg);
 
+    emit(jsonOut, { command: 'career', telemetry: tel, summary: agg.summary, dataQuality: agg.dataQuality, timeline }, () => {
     printBanner();
     console.log(`⏱️ AUDITORÍA DE CARRERA Y TIEMPO REAL: ${tel.handle}`);
     console.log(`------------------------------------------------------------------------`);
-    console.log(`  • Horas en Competitivo (Tracker):  ${tel.competitive.formatted} (${tel.competitive.hours}h)`);
-    console.log(`  • Horas en Otros Modos (Casual):   ${tel.casual.formatted} (${tel.casual.hours}h)`);
+    console.log(`  • Horas en Competitivo (aportadas):  ${tel.competitive.formatted} (${tel.competitive.hours}h)`);
+    console.log(`  • Horas en Otros Modos (Casual):   ${tel.casual.formatted} (${tel.casual.hours}h)${tel.casual.allowanceHours > 0 ? ` [incluye allowance ${tel.casual.allowanceHours}h NO medidas]` : ''}`);
     console.log(`  • Horas Totales Efectivas:         ${tel.general.formatted} (${tel.general.hours}h)`);
-    console.log(`  • Rango Actual: ${tel.currentRank} | Pico: ${tel.peakRank}`);
+    console.log(`  • Rango Actual: ${tel.currentRank || 'n/d'} | Pico: ${tel.peakRank || 'n/d'}`);
     console.log(`  • Partidas: ${tel.competitive.matches} (Victorias: ${tel.competitive.wins}) | K/D: ${tel.competitive.kd} | HS: ${tel.competitive.hs}`);
+    if (tel.casual.allowanceNote) console.log(`  • Nota casual: ${tel.casual.allowanceNote}`);
     console.log(`\n📅 CRONOLOGÍA DE HITOS Y HORAS ACUMULADAS:`);
     console.table(timeline.map(t => ({
       'Rango': t.rango,
-      'Horas Tramo': `${t.tramoHoras} h`,
+      'Horas Tramo': t.tramoHoras === null ? 'n/d' : `${t.tramoHoras} h`,
       'Horas Acumuladas': `${t.acumuladoHoras} h`,
       'Contexto': t.contexto
     })));
     console.log(`========================================================================\n`);
+    });
 
   } else if (command === 'diagnose') {
     const inputPath = args[1];
@@ -877,13 +996,24 @@ try {
     const talentDiag = evaluateTalentVsEffort(agg);
     const evidence = deriveProfileEvidence(tel);
 
+    emit(jsonOut, {
+      command: 'diagnose', player: tel.handle,
+      evidence: { level: evidence.level, missing: evidence.missing, allowedSections: evidence.allowedSections },
+      hypothesis: {
+        category: talentDiag.category, indicatorMix: talentDiag.talentRatio,
+        rankScenario: talentDiag.trueDeservedRank, visualRank: tel.currentRank,
+        mmrDragSignal: mmrDiag.mmrDragDetected, mmrDiagnosis: mmrDiag.diagnosis,
+        bottleneck: talentDiag.bottleneckOptimization || null
+      },
+      claimStatus: talentDiag.claimStatus, disclaimer: talentDiag.disclaimer, limitations: talentDiag.limitations
+    }, () => {
     printBanner();
-    console.log(`🧠 AUTODIAGNÓSTICO INTEGRAL (HEURÍSTICO, NO VERIFICADO): ${tel.handle}`);
+    console.log(`🧠 AUTODIAGNÓSTICO INTEGRAL (HIPÓTESIS HEURÍSTICA, NO VERIFICADA): ${tel.handle}`);
     printEvidenceLimits(evidence);
     console.log(`------------------------------------------------------------------------`);
     console.log(`🏷️ CATEGORÍA (hipótesis descriptiva): ${talentDiag.category}`);
     console.log(`⚖️ MEZCLA DE INDICADORES: ${talentDiag.talentRatio}`);
-    console.log(`🎯 ESTIMACIÓN HEURÍSTICA DE RANGO (no verificada): ${talentDiag.trueDeservedRank} (Rango visual: ${tel.currentRank})`);
+    console.log(`🎯 ESCENARIO DE RANGO DE REFERENCIA (no es rango merecido ni predicción): ${talentDiag.trueDeservedRank} (Rango visual: ${tel.currentRank || 'n/d'})`);
     console.log(`\n🛡️ SEÑAL DE POSIBLE ANCLAJE DE MMR (hipótesis):`);
     console.log(`  • Señal compatible: ${mmrDiag.mmrDragDetected ? 'SÍ (heurística)' : 'no concluyente'}`);
     console.log(`  • Detalle: ${mmrDiag.diagnosis}`);
@@ -896,6 +1026,7 @@ try {
       console.log(`\n💡 Cuello de botella/optimización omitido: falta evidencia mecánica (HS%) o muestra suficiente.`);
     }
     console.log(`========================================================================\n`);
+    });
 
   } else {
     // Fallback frictionless: archivo o texto largo → diagnóstico directo

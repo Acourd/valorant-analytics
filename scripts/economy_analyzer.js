@@ -24,7 +24,7 @@ function analyzeEconomy(matchData, targetHandle) {
       handle,
       team: p.metadata?.teamId,
       agent: p.metadata?.agentName,
-      rank: p.stats?.rank?.displayValue || p.metadata?.tierName || 'Unranked'
+      rank: p.stats?.rank?.displayValue || p.metadata?.tierName || null
     };
   });
 
@@ -32,19 +32,29 @@ function analyzeEconomy(matchData, targetHandle) {
 
   const userLoadouts = loadoutSegments.filter(l => (l.metadata?.platformUserHandle || l.attributes?.platformUserIdentifier) === target);
 
+  let unclassifiedRounds = 0;
   let tiers = userLoadouts.map(l => {
     const st = l.stats || {};
+    const rounds = st.roundsPlayed?.value !== undefined ? st.roundsPlayed.value : null;
+    const won = st.roundsWon?.value !== undefined ? st.roundsWon.value : null;
+    const lost = st.roundsLost?.value !== undefined ? st.roundsLost.value : null;
+    const winPct = st.roundsWinPct?.displayValue !== undefined
+      ? st.roundsWinPct.displayValue
+      : (Number.isFinite(rounds) && rounds > 0 && Number.isFinite(won) ? `${Math.round((won / rounds) * 100)}%` : null);
+    const num = (section, key) => (st[key]?.value !== undefined ? String(st[key].value) : null);
     return {
-      tier: l.metadata?.name || l.attributes?.loadout,
-      rounds: st.roundsPlayed?.value || 0,
-      won: st.roundsWon?.value || 0,
-      lost: st.roundsLost?.value || 0,
-      winPct: st.roundsWinPct?.displayValue || `${Math.round(((st.roundsWon?.value || 0) / Math.max(1, st.roundsPlayed?.value || 1)) * 100)}%`,
-      kda: `${st.kills?.value || 0}/${st.deaths?.value || 0}/${st.assists?.value || 0}`,
-      kd: st.kDRatio?.displayValue || '0.00',
-      adr: st.damagePerRound?.displayValue || '0',
-      acs: st.scorePerRound?.displayValue || '0',
-      hsPct: st.headshotsPercentage?.displayValue || '0%'
+      tier: l.metadata?.name || l.attributes?.loadout || null,
+      rounds,
+      won,
+      lost,
+      winPct,
+      kda: (st.kills?.value !== undefined && st.deaths?.value !== undefined && st.assists?.value !== undefined)
+        ? `${st.kills.value}/${st.deaths.value}/${st.assists.value}`
+        : null,
+      kd: st.kDRatio?.displayValue !== undefined ? st.kDRatio.displayValue : null,
+      adr: st.damagePerRound?.displayValue !== undefined ? st.damagePerRound.displayValue : num('damagePerRound', 'value'),
+      acs: st.scorePerRound?.displayValue !== undefined ? st.scorePerRound.displayValue : num('scorePerRound', 'value'),
+      hsPct: st.headshotsPercentage?.displayValue !== undefined ? st.headshotsPercentage.displayValue : null
     };
   });
 
@@ -63,7 +73,9 @@ function analyzeEconomy(matchData, targetHandle) {
       };
 
       playerRounds.forEach(r => {
-        const val = r.stats?.loadoutValue?.value || 0;
+        const valRaw = r.stats?.loadoutValue?.value;
+        if (valRaw === undefined || valRaw === null || !Number.isFinite(Number(valRaw))) { unclassifiedRounds++; return; }
+        const val = Number(valRaw);
         let tierKey = 'Full-Buy';
         if (val <= 1000) tierKey = 'Pistol';
         else if (val <= 2400) tierKey = 'Eco';
@@ -101,7 +113,7 @@ function analyzeEconomy(matchData, targetHandle) {
             kd,
             adr: String(adr),
             acs: String(acs),
-            hsPct: '25%'
+            hsPct: null
           };
         });
     }
@@ -109,9 +121,14 @@ function analyzeEconomy(matchData, targetHandle) {
 
   return {
     player: target,
-    agent: playerMap[target]?.agent,
-    rank: playerMap[target]?.rank,
-    tiers
+    agent: playerMap[target]?.agent || null,
+    rank: playerMap[target]?.rank || null,
+    tiers,
+    unclassifiedRounds,
+    provenance: 'normalized_input',
+    note: unclassifiedRounds > 0
+      ? `${unclassifiedRounds} ronda(s) sin loadoutValue observado: excluidas de los tiers (no se asigna tier a ciegas).`
+      : 'Todas las rondas consideradas tienen loadoutValue observado.'
   };
 }
 

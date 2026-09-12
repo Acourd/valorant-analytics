@@ -196,6 +196,13 @@ function validateDuoSynergy(duoResult) {
   }
 
   const scoreStr = duoResult.synergy?.score;
+  // Sin ACS observado el contrato emite score null + INSUFFICIENT_DATA: válido.
+  if (scoreStr === null || scoreStr === undefined) {
+    if (!duoResult.p1 || !duoResult.p2) {
+      throw new InvariantViolationError('DUO_PLAYERS', 'Ambos jugadores deben estar definidos en el dúo', { p1: duoResult.p1, p2: duoResult.p2 });
+    }
+    return true;
+  }
   const match = String(scoreStr).match(/([0-9]+)\s*\/\s*100/);
   if (!match) {
     throw new InvariantViolationError('DUO_SCORE_FORMAT', `Puntuación de sinergia no tiene formato válido 'N / 100': '${scoreStr}'`, { scoreStr });

@@ -57,8 +57,8 @@ function extractAccountTelemetry(profileData, options = {}) {
   let hs = 'N/A';
   let acs = 'N/A';
   let dd = 'N/A';
-  let currentRank = 'Unranked';
-  let peakRank = 'N/A';
+  let currentRank = null;
+  let peakRank = null;
 
   // Extract from playlist segments or season segments
   segments.forEach(seg => {
@@ -126,7 +126,12 @@ function extractAccountTelemetry(profileData, options = {}) {
     casual: {
       seconds: totalCasualSeconds,
       hours: Number((totalCasualSeconds / 3600).toFixed(1)),
-      formatted: formatHours(totalCasualSeconds)
+      formatted: formatHours(totalCasualSeconds),
+      allowanceSeconds: casualAllowanceSeconds,
+      allowanceHours: Number((casualAllowanceSeconds / 3600).toFixed(1)),
+      allowanceNote: casualAllowanceSeconds > 0
+        ? 'Incluye un allowance documentado de ~25h de nivel 1-20 (no medido): no es tiempo observado.'
+        : null
     },
     general: {
       seconds: totalGeneralSeconds,
@@ -134,7 +139,7 @@ function extractAccountTelemetry(profileData, options = {}) {
       formatted: formatHours(totalGeneralSeconds)
     },
     currentRank,
-    peakRank: peakRank !== 'N/A' ? peakRank : currentRank
+    peakRank: peakRank !== null ? peakRank : currentRank
   };
 }
 
@@ -158,7 +163,7 @@ function aggregateCareerTelemetry(accountsList) {
     'Platinum': 5, 'Diamond': 6, 'Ascendant': 7, 'Immortal': 8, 'Radiant': 9
   };
 
-  let maxRank = 'Iron 1';
+  let maxRank = null;
   let maxWeight = 0;
   personal.forEach(a => {
     for (const [tier, w] of Object.entries(rankWeights)) {
@@ -216,11 +221,11 @@ function generateMilestonesTimeline(careerReport, options = {}) {
   const diamondAcc = careerReport.accounts.find(a => (a.peakRank || '').includes('Diamond'));
   const speedrunHours = (diamondAcc && typeof diamondAcc.competitive?.hours === 'number')
     ? diamondAcc.competitive.hours
-    : (typeof options.speedrunHours === 'number' ? options.speedrunHours : 10.2);
-  const mainAgent = options.mainAgent || 'Iso';
-  const speedrunHandle = diamondAcc ? diamondAcc.handle : (options.speedrunHandle || 'Speedrun');
+    : (typeof options.speedrunHours === 'number' ? options.speedrunHours : null);
+  const mainAgent = options.mainAgent || null;
+  const speedrunHandle = diamondAcc ? diamondAcc.handle : (options.speedrunHandle || null);
 
-  return [
+  const rows = [
     {
       tipo: 'ilustrativo',
       rango: 'Hierro 3 (Inicio)',
@@ -247,7 +252,7 @@ function generateMilestonesTimeline(careerReport, options = {}) {
       rango: 'Oro 1 - Oro 3',
       tramoHoras: 165,
       acumuladoHoras: 260,
-      contexto: `Escenario ilustrativo (no predicción): consolidación competitiva y especialización en ${mainAgent}.`
+      contexto: `Escenario ilustrativo (no predicción): consolidación competitiva${mainAgent ? ` y especialización en ${mainAgent}` : ''}.`
     },
     {
       tipo: 'ilustrativo',
@@ -255,15 +260,28 @@ function generateMilestonesTimeline(careerReport, options = {}) {
       tramoHoras: 80,
       acumuladoHoras: 340,
       contexto: 'Escenario ilustrativo (no predicción): aislamiento de micro-duelos 1v1 y duelos de apertura.'
-    },
-    {
+    }
+  ];
+
+  if (speedrunHours !== null) {
+    rows.push({
       tipo: 'ilustrativo',
       rango: 'Diamante 1',
       tramoHoras: speedrunHours,
       acumuladoHoras: Math.round(340 + speedrunHours),
-      contexto: `Escenario ilustrativo (no predicción) en cuenta limpia (${speedrunHandle}); no implica anclaje de MMR verificado.`
-    }
-  ];
+      contexto: `Escenario ilustrativo (no predicción) con referencia ${speedrunHandle ? `de ${speedrunHandle}` : 'aportada explícitamente'}; no implica anclaje de MMR verificado.`
+    });
+  } else {
+    rows.push({
+      tipo: 'no_observado',
+      rango: 'Diamante 1',
+      tramoHoras: null,
+      acumuladoHoras: 340,
+      contexto: 'Sin cuenta Diamante observada ni referencia explícita: no se inventa el tramo de horas.'
+    });
+  }
+
+  return rows;
 }
 
 module.exports = {

@@ -25,12 +25,20 @@ const profile = evaluateLearningProfile(sample, 'TenZ#0001');
 assert.ok(profile.radar, 'Radar de 5 pilares debe estar presente');
 assert.strictEqual(profile.provenance, 'normalized_input', 'la muestra local es normalized_input (no verificada)');
 assert.deepStrictEqual(profile.eloLeaks, [], 'datos normalizados no fabrican causas/fugas');
-assert.ok(profile.prescripcionInmediata.reglaMental, 'Regla mental debe estar definida');
+assert.ok(profile.prescripcionInmediata === null || profile.prescripcionInmediata.reglaMental, 'Prescripción solo con HS observado');
 
 // 3. Coaching Report
 const coaching = generateCoachingReport(sample, 'TenZ#0001');
 assert.ok(coaching.player.handle, 'Handle de coaching debe estar presente');
 assert.ok(Array.isArray(coaching.hardOpponents), 'hardOpponents debe ser un array');
-assert.ok(coaching.resources.iso_site_entry, 'Módulo de recursos iso_site_entry debe estar presente');
+assert.ok(Array.isArray(coaching.recommendations), 'recommendations debe ser un array');
+assert.ok(coaching.limitations.length > 0, 'limitaciones declaradas');
+for (const r of coaching.recommendations) {
+  assert.ok(r.metric && r.threshold && r.provenance && r.limitation, 'recomendación con métrica/umbral/procedencia/limitación');
+  assert.ok(coaching.resources[r.module], 'recurso recomendado presente');
+}
+for (const key of Object.keys(coaching.resources)) {
+  assert.ok(coaching.recommendations.some(r => r.module === key), 'solo recursos recomendados se exponen');
+}
 
 console.log('✓ Todas las aserciones de Duelos y Coaching pasaron exitosamente (Exit Code 0).');

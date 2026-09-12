@@ -1,5 +1,13 @@
 # Changelog — valorant-analytics
 
+## 4.7.0 — Bloque de madurez interna (sin terceros)
+
+- **Bloque A — Propiedades y fuzzing determinista:** nueva suite `tests/test_property_fuzz.js` (semilla fija, minimización por líneas al fallar) para parser Unicode/BOM, resolución de objetivo, sellado de procedencia y contratos entre módulos. Script `npm run test:properties`; CI la ejecuta con **3 semillas fijas**.
+- **Bloque B — Coaching y analítica honestas:** recomendaciones solo con métrica observada + umbral + procedencia + limitación; los recursos no recomendados **no se renderizan**; `duo`/`economía`/`armas` sin defaults (`n/d`); sin promesas de tradeo/refrag/tiempos sin timestamps; Guardian/Drift declaran insuficiencia; milestones sin tramo Diamante inventado; allowance casual etiquetado como no medido.
+- **Bloque C — Contrato CLI:** códigos de salida documentados (`0` resultado válido, `1` entrada/objetivo/comando inválido, `2` evidencia insuficiente en guardian/drift); `--json` en los comandos analíticos; procedencia uniforme; **ningún** comando selecciona jugador en silencio; ayuda actualizada (incluye `calibrate` como SIMULACIÓN).
+- **Bloque D — Paquete y CI:** `check_syntax.js` para todos los `.js`; `npm pack --dry-run` verificado en tests (excluye `tests/`, suites y artefactos de desarrollo); runner con 3 semillas de fuzz; versión `4.7.0`.
+- **Límite vigente:** sin telemetría Riot real ni validación con jugadores; `calibrate` sigue siendo una simulación offline.
+
 ## 4.6.0 — Confiabilidad y trazabilidad
 
 Contenido integrado en `main` mediante la **PR #10** (`fix: cierra procedencia, evidencia insuficiente, empaquetado y CI`), commit de rama `845794b`:

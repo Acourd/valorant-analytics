@@ -70,25 +70,27 @@ function analyzeWeaponTelemetry(matchData, targetHandle) {
   let firingDiscipline = null;
   let recoilAdvice = null;
   let kovaaksPrescription = null;
+  let prescriptionBasis = null;
   if (observed) {
-    firingDiscipline = 'Equilibrada (Control de Ráfagas Óptimo)';
-    recoilAdvice = 'Mantienes buen balance entre primer disparo a la cabeza y micro-ajuste de 3 balas.';
     if (sprayTapRatio > 1.8) {
-      firingDiscipline = 'Sobre-Compromiso en Spray (Spray Over-Commitment)';
-      recoilAdvice = 'Tiendes a prolongar el spray a más de 4-5 balas incluso a media distancia. Fuerza micro-ráfagas de 2 balas y counter-strafe.';
+      firingDiscipline = 'Sobre-Compromiso en Spray (ratio SE/TP > 1.8)';
+      recoilAdvice = `Ratio SE/TP observado ${sprayTapRatio} (umbral documentado 1.8): predominan ráfagas largas sobre taps letales. Forzar micro-ráfagas de 2 balas y counter-strafe.`;
+      kovaaksPrescription = 'Pasu Small Reload + 1wall6targets small (castiga spray innecesario y entrena micro-clicks estáticos)';
+      prescriptionBasis = `SE/TP observado ${sprayTapRatio} > umbral 1.8`;
     } else if (sprayTapRatio < 0.4 && headPct > 35) {
-      firingDiscipline = 'Tap-Firing Quirúrgico de Alta Precisión';
-      recoilAdvice = 'Excelente primer disparo a la cabeza. Asegura tener velocidad de reseteo si te empujan múltiples rivales en contacto cerrado.';
+      firingDiscipline = 'Tap-Firing de Alta Precisión (SE/TP < 0.4 y HS > 35%)';
+      recoilAdvice = `Ratio SE/TP ${sprayTapRatio} con ${headPct}% de impactos a cabeza: perfil de primer disparo fuerte; sin debilidad por umbral.`;
+    } else {
+      firingDiscipline = `Mixta (SE/TP ${sprayTapRatio})`;
+      recoilAdvice = 'Sin umbral documentado superado (SE/TP entre 0.4 y 1.8 y/o HS ≤ 35%): solo lectura descriptiva, sin prescripción.';
     }
-    kovaaksPrescription = sprayTapRatio > 1.5
-      ? 'Pasu Small Reload + 1wall6targets small (Castiga el spray innecesario y entrena micro-clicks estáticos)'
-      : 'Smoothness Sphere + PatTargetSwitch (Afina la fluidez y cambio de objetivo sin perder precisión)';
   }
 
   return {
     player: target,
     agent: playerSummary?.metadata?.agentName || null,
-    rank: playerSummary?.stats?.rank?.displayValue || 'Unranked',
+    rank: playerSummary?.stats?.rank?.displayValue || null,
+    provenance: 'normalized_input',
     hitZoneDistribution: observed
       ? {
         head: `${headPct}% (${totalHead} impactos)`,
@@ -115,8 +117,26 @@ function analyzeWeaponTelemetry(matchData, targetHandle) {
     distanceBands: null,
     distanceNote: 'n/d: sin posiciones observadas; no se infiere distancia por valor de loadout.',
     recoilDiagnosis: observed
-      ? { evaluacion: firingDiscipline, analisisTactico: recoilAdvice, kovaaksPrescription }
-      : { evaluacion: 'n/d', analisisTactico: 'Sin eventos de daño observados: no se emite diagnóstico mecánico.', kovaaksPrescription: null }
+      ? {
+        evaluacion: firingDiscipline,
+        analisisTactico: recoilAdvice,
+        kovaaksPrescription,
+        prescriptionBasis,
+        metric: 'ratio SE/TP y zonas head/body/leg observadas',
+        threshold: 'SE/TP > 1.8 (spray) / < 0.4 con HS > 35% (tap)',
+        provenance: 'normalized_input',
+        limitation: 'Deriva solo de eventos de daño presentes; sin posiciones ni timestamps no mide distancia ni tiempos.'
+      }
+      : {
+        evaluacion: 'n/d',
+        analisisTactico: 'Sin eventos de daño observados: no se emite diagnóstico mecánico.',
+        kovaaksPrescription: null,
+        prescriptionBasis: null,
+        metric: null,
+        threshold: null,
+        provenance: 'normalized_input',
+        limitation: 'Sin eventos de daño no hay evidencia mecánica.'
+      }
   };
 }
 

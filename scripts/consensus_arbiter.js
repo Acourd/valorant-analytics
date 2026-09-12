@@ -98,13 +98,22 @@ class AnchorUtilityLens extends TacticalLens {
     }
     const macro = radarScore(profile, 'macrogamePosicionamiento');
     const clutch = radarScore(profile, 'composturaClutch');
-    let priority = 'TRADE_STABLE';
-    let recommendation = 'Espaciado y trade fragging dentro de lo observado.';
+    let priority = 'SPACING_STABLE';
+    let recommendation = 'KAST/ADR y clutch observados dentro de rangos documentados (sin datos de tradeo por ronda ni timestamps).';
     if ((macro !== null && macro < 45) || (clutch !== null && clutch < 40)) {
       priority = 'TIGHTEN_SPACING';
-      recommendation = 'Macro/clutch bajos observados: cerrar distancia con el compañero y evitar re-peeks aislados.';
+      recommendation = 'Macro (<45) o clutch (<40) observados bajo umbral: cerrar distancia con el compañero y evitar re-peeks aislados.';
     }
-    return { lens: this.name, priority, confidence: 0.8, recommendation, evidence: { macro, clutch } };
+    return {
+      lens: this.name,
+      priority,
+      confidence: 0.8,
+      recommendation,
+      evidence: { macro, clutch },
+      metric: 'KAST/ADR (macro) y clutches observados',
+      threshold: 'macro < 45 o clutch < 40',
+      limitation: 'No hay eventos de tradeo ni timestamps: la recomendación es de espaciado, no de tiempos.'
+    };
   }
 }
 

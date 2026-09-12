@@ -50,7 +50,7 @@ node cli.js duels <match_id_or_json> [player_handle]
 # 6. Multi-Platform Normalized Profile Mapping:
 node cli.js profile "Handle#Tag"
 
-# 7. Zero-Cloud Instant Offline Calibration Mode:
+# 7. SIMULACIÓN offline (no análisis real):
 node cli.js calibrate [player_handle] [target_rank] [role]
 
 
@@ -60,6 +60,8 @@ node cli.js career <profile.json>
 # 9. Heuristic MMR Signal & Impact-vs-Volume Pattern (UNVERIFIED, not internal MMR):
 node cli.js diagnose <profile.json>
 ```
+
+> **Contrato CLI:** códigos de salida documentados (`0` = resultado descriptivo válido, incluye `n/d`/`omitido`; `1` = entrada, objetivo o comando inválido; `2` = evidencia insuficiente en `guardian`/`drift`). Añade `--json` para salida estructurada en los comandos analíticos. Ningún comando selecciona un jugador en silencio: sin objetivo explícito solo se auto-resuelve un roster de un jugador.
 
 ---
 

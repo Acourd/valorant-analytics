@@ -150,6 +150,33 @@ property('P13', 'test_suite.js completa (con gate de manifiesto) sale con Exit 0
   return { pass: r.code === 0 && /All valorant-analytics deterministic tests passed/.test(r.out), details: `exit=${r.code}` };
 });
 
+// P14 — --json produce salida estructurada pura (sin render humano).
+property('P14', '--json en parse devuelve un único JSON parseable con procedencia', () => {
+  const tmp = path.join(require('os').tmpdir(), `tester-json-${process.pid}.txt`);
+  fs.writeFileSync(tmp, 'Focus#NA1\t10\t8\t2\t150\t120\n', 'utf8');
+  let r;
+  try {
+    r = runNode([path.join(scriptsDir, 'cli.js'), 'parse', tmp, 'Focus#NA1', '--json']);
+  } finally {
+    try { fs.unlinkSync(tmp); } catch (e) { /* limpio */ }
+  }
+  let payload = null;
+  try { payload = JSON.parse(r.out); } catch (e) { payload = null; }
+  return {
+    pass: r.code === 0 && payload !== null && payload.provenance === 'normalized_input' && !/=====|📋/.test(r.out),
+    details: payload === null ? `salida no JSON (exit=${r.code})` : 'JSON puro con procedencia'
+  };
+});
+
+// P15 — El paquete publicado no arrastra artefactos de desarrollo.
+property('P15', 'package.json no distribuye tests/suites/herramientas de desarrollo', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
+  const junk = ['tests/', 'test_suite.js', 'opencode_tester.js', 'run_all_tests.js', 'check_syntax.js'];
+  const leaked = junk.filter(j => pkg.files.includes(j));
+  const hasRuntime = pkg.files.includes('scripts/') && pkg.files.includes('CHANGELOG.md');
+  return { pass: leaked.length === 0 && hasRuntime, details: leaked.length ? `filtrados: ${leaked.join(', ')}` : 'paquete runtime + docs' };
+});
+
 const failed = properties.filter(p => !p.pass);
 const report = {
   timestamp: new Date().toISOString(),

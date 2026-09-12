@@ -23,6 +23,20 @@ console.log('[TEST] Empaquetado e instalación desde tarball...');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'va-pack-'));
 try {
+  // 1. Dry-run: el tarball no debe incluir artefactos de desarrollo/cachés.
+  const dry = spawnSync(npmCmd, ['pack', '--dry-run', '--json', '--pack-destination', tmp], {
+    cwd: rootDir, encoding: 'utf8', shell: useShell, timeout: 180000
+  });
+  assert.strictEqual(dry.status, 0, `npm pack --dry-run falló: ${dry.stderr || dry.error}`);
+  let dryJson;
+  try { dryJson = JSON.parse(dry.stdout); } catch (e) { dryJson = null; }
+  const packed = dryJson && dryJson[0] && Array.isArray(dryJson[0].files) ? dryJson[0].files.map(f => f.path) : [];
+  assert.ok(packed.length > 0, 'dry-run sin lista de archivos');
+  assert.ok(packed.includes('scripts/index.js') && packed.includes('package.json'), 'faltan archivos runtime en el tarball');
+  for (const junk of ['tests/', 'test_suite.js', 'opencode_tester.js', 'run_all_tests.js', 'check_syntax.js', '.cache', '.pipeline', '.git']) {
+    assert.ok(!packed.some(p => p === junk || p.startsWith(junk)), `artefacto de desarrollo/caché en el tarball: ${junk}`);
+  }
+
   const pack = spawnSync(npmCmd, ['pack', '--silent', '--pack-destination', tmp], {
     cwd: rootDir, encoding: 'utf8', shell: useShell, timeout: 180000
   });
