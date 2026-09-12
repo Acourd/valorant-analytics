@@ -101,7 +101,7 @@ function extractAccountTelemetry(profileData, options = {}) {
     casualAllowanceSeconds = 25 * 3600; // ~25 hours standard
   }
 
-  const totalCasualSeconds = unratedSeconds + otherSeconds + casualAllowanceSeconds;
+  const totalCasualSeconds = unratedSeconds + otherSeconds;
   const totalGeneralSeconds = competitiveSeconds + totalCasualSeconds;
   const insufficientData = observedSeconds === 0;
 
@@ -130,13 +130,18 @@ function extractAccountTelemetry(profileData, options = {}) {
       allowanceSeconds: casualAllowanceSeconds,
       allowanceHours: Number((casualAllowanceSeconds / 3600).toFixed(1)),
       allowanceNote: casualAllowanceSeconds > 0
-        ? 'Incluye un allowance documentado de ~25h de nivel 1-20 (no medido): no es tiempo observado.'
+        ? 'Asignación teórica documentada (nivel 1-20) expuesta APARTE: NO se suma a las horas observadas.'
         : null
     },
     general: {
       seconds: totalGeneralSeconds,
       hours: Number((totalGeneralSeconds / 3600).toFixed(1)),
-      formatted: formatHours(totalGeneralSeconds)
+      formatted: formatHours(totalGeneralSeconds),
+      estimatedSeconds: casualAllowanceSeconds,
+      estimatedHours: Number((casualAllowanceSeconds / 3600).toFixed(1)),
+      estimatedNote: casualAllowanceSeconds > 0
+        ? 'Estimación NO observada (asignación nivel 1-20): nunca se suma a los totales de telemetría.'
+        : null
     },
     currentRank,
     peakRank: peakRank !== null ? peakRank : currentRank

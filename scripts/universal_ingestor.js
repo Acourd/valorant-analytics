@@ -201,6 +201,11 @@ function assembleRawMatchStructure(extractedPlayers, mapName, roundsPlayed = 24,
   if (options.demo !== true) {
     throw new Error('assembleRawMatchStructure es el constructor SINTÉTICO de demostración: requiere { demo: true }. Para datos observados usa parseTextScoreboard (normalized_input).');
   }
+  if (typeof targetHandle !== 'string' || targetHandle.trim() === '') {
+    const err = new Error('assembleRawMatchStructure requiere un objetivo explícito (Nombre#TAG): el modo demo no selecciona jugadores en silencio.');
+    err.code = 'TARGET_REQUIRED';
+    throw err;
+  }
   const matchId = options.matchId || `demo-${sha256Text(`${mapName}|${roundsPlayed}|${targetHandle}|${(extractedPlayers || []).map(p => p && p.handle).join(',')}`).slice(0, 16)}`;
   const defaultRoster = [
     { handle: targetHandle, agent: 'Iso', rank: 'Gold 2', kills: 18, deaths: 15, assists: 4, acs: 238, adr: 156.4, hs: 24.2, fk: 3, fd: 2 },
@@ -224,7 +229,7 @@ function assembleRawMatchStructure(extractedPlayers, mapName, roundsPlayed = 24,
     }
   }
 
-  if (!finalRoster.some(p => p.handle.toLowerCase() === targetHandle.toLowerCase())) {
+  if (!finalRoster.some(p => p && typeof p.handle === 'string' && p.handle.toLowerCase() === targetHandle.toLowerCase())) {
     finalRoster[0] = defaultRoster[0];
   }
 
@@ -502,7 +507,9 @@ function resolveMatchDataResilient(source, playerHandle = null, options = {}) {
   if (!options.allowSynthetic) {
     throw new Error('Entrada remota no soportada: Tracker.gg no es una fuente estable, autorizada ni consentida. Proporciona un JSON/export del usuario, texto del marcador o captura con confirmación; la vía autorizada es Riot RSO (pendiente de credenciales). Usa --demo solo para demostración.');
   }
-  console.log('\n🛡️ [MODO DEMO EXPLÍCITO] Reconstrucción sintética: NO es una partida real.\n');
+  // Aviso humano SIEMPRE por stderr: stdout queda reservado a la salida del
+  // comando (incluido --json, que debe seguir siendo JSON válido).
+  console.error('\n🛡️ [MODO DEMO EXPLÍCITO] Reconstrucción sintética: NO es una partida real.\n');
   const synthetic = assembleRawMatchStructure([], options.map || 'Ascent', 24, playerHandle, { ...options, demo: true });
   synthetic.data.metadata.matchId = matchId;
   synthetic.data.metadata.synthetic = true;

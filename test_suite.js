@@ -2689,6 +2689,98 @@ check('prescripción mecánica: umbral HS real (24.9 correctiva; 25.0 y 35+ sin 
     }
   });
 
+// ---- Regresiones del veredicto 88 (v4.7.1): equipos observados, JSON demo, demo sin objetivo, allowance separado, atributo no observado, fetchedAt futuro, SHA en CI ----
+
+check('duo: sin teamId observado no se asume mismo equipo (INSUFFICIENT_DATA sin consejo)',
+  () => {
+    const noTeams = {
+      data: {
+        metadata: { matchId: 'nt' },
+        segments: [
+          { type: 'player-summary', attributes: { platformUserIdentifier: 'A#1' }, metadata: { platformUserHandle: 'A#1', agentName: 'Jett' }, stats: { scorePerRound: { displayValue: '200' } } },
+          { type: 'player-summary', attributes: { platformUserIdentifier: 'B#2' }, metadata: { platformUserHandle: 'B#2', agentName: 'Sova' }, stats: { scorePerRound: { displayValue: '150' } } }
+        ]
+      }
+    };
+    const r = auditDuoSynergy(noTeams, 'A#1', 'B#2');
+    assert.strictEqual(r.synergy.verdict, 'INSUFFICIENT_DATA', 'sin equipos => insuficiente');
+    assert.strictEqual(r.synergy.score, null, 'score nulo');
+    assert.strictEqual(r.synergy.carryAnalysis, null, 'sin análisis de carga');
+    assert.strictEqual(r.synergy.tacticalAdvice, null, 'sin consejo táctico');
+    assert.ok(r.synergy.missing.some(m => /teamId/.test(m)), 'declara teamId faltante');
+  });
+
+check('--json en modo demo sigue siendo JSON válido (avisos a stderr)',
+  () => {
+    const out = cliOk(['match', 'https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04', 'kirtmy#000', '--demo', '--json']);
+    const payload = JSON.parse(out);
+    assert.strictEqual(payload.command, 'match');
+    assert.strictEqual(payload.provenance, 'synthetic_demo');
+    assert.ok(out.trimStart().startsWith('{'), 'stdout debe empezar con JSON (avisos humanos solo en stderr)');
+  });
+
+check('demo sin objetivo: error de entrada controlado (sin TypeError interno)',
+  () => {
+    let code = 0;
+    let out = '';
+    try { cliOk(['match', 'https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04', '--demo']); }
+    catch (e) { code = e.status; out = String(e.stdout || '') + String(e.stderr || ''); }
+    assert.strictEqual(code, 1, 'debe salir 1');
+    assert.ok(/objetivo explícito|no selecciona jugadores/i.test(out), 'mensaje accionable');
+    assert.ok(!/TypeError|toLowerCase/.test(out), 'sin excepción interna');
+    assert.throws(() => assembleRawMatchStructure([], 'Ascent', 24, null, { demo: true }), /objetivo explícito/i);
+  });
+
+check('career: la asignación teórica NO se suma a los totales observados',
+  () => {
+    const tel = extractAccountTelemetry({
+      platformInfo: { platformUserHandle: 'C#1' },
+      metadata: { accountLevel: 30 },
+      segments: [{ type: 'playlist', attributes: { playlist: 'competitive' }, stats: { timePlayed: { value: 3600 }, matchesPlayed: { value: 5 } } }]
+    }, { handle: 'C#1' });
+    assert.strictEqual(tel.competitive.seconds, 3600, '1h competitiva observada');
+    assert.strictEqual(tel.casual.seconds, 0, 'sin horas casuales observadas');
+    assert.strictEqual(tel.general.seconds, 3600, 'totales SOLO observados (sin 25h)');
+    assert.strictEqual(tel.general.estimatedSeconds, 25 * 3600, 'estimación expuesta aparte');
+    assert.ok(/nunca se suma/i.test(tel.general.estimatedNote), 'nota explícita');
+    const agg = aggregateCareerTelemetry([{ telemetry: tel }]);
+    assert.strictEqual(agg.summary.totalGeneral.seconds, 3600, 'agregado sin allowance');
+  });
+
+check('autodiagnostic: zeroFpsBackground es no observado (null) salvo aporte explícito',
+  () => {
+    const base = {
+      summary: { totalGeneral: { hours: 100 }, highestPeakRank: 'Gold 2' },
+      accounts: [{ handle: 'A#1', isExcluded: false, competitive: { matches: 10, kd: '1.2', acs: '230', dd: '18', hs: '25' }, peakRank: 'Gold 2' }]
+    };
+    assert.strictEqual(evaluateTalentVsEffort(base).zeroFpsBackground, null, 'sin evidencia debe ser null');
+    assert.strictEqual(evaluateTalentVsEffort(base, { zeroFpsBackground: true }).zeroFpsBackground, true, 'explícito true');
+    assert.strictEqual(evaluateTalentVsEffort(base, { zeroFpsBackground: false }).zeroFpsBackground, false, 'explícito false');
+  });
+
+check('Riot: atestaciones con fetchedAt futuro se rechazan (tolerancia de reloj)',
+  () => {
+    const rs = require(path.join(scriptsDir, 'riot_source.js'));
+    const g = loadRiotGolden();
+    const future = { ...g.attestation, fetchedAt: new Date(Date.now() + 3600 * 1000).toISOString() };
+    const v = rs.verifyAttestation(future, { payload: g.payload, maxAgeMs: RIOT_BIG_MAX_AGE });
+    assert.strictEqual(v.valid, false, 'futuro no debe validar');
+    assert.ok(/futuro/i.test(v.reason), 'motivo declara futuro');
+    const nearFuture = { ...g.attestation, fetchedAt: new Date(Date.now() + 60 * 1000).toISOString() };
+    const withinTolerance = rs.verifyAttestation(nearFuture, { payload: g.payload, maxAgeMs: RIOT_BIG_MAX_AGE });
+    assert.ok(!/futuro/i.test(withinTolerance.reason || ''), 'dentro de la tolerancia no se rechaza por futuro');
+  });
+
+check('CI: acciones de GitHub fijadas por SHA (cadena de suministro)',
+  () => {
+    const ci = fs.readFileSync(path.join(__dirname, '.github', 'workflows', 'ci.yml'), 'utf8');
+    const uses = ci.split('\n').map(l => l.trim()).filter(l => l.startsWith('- uses:') || l.startsWith('uses:'));
+    assert.ok(uses.length >= 2, 'debe haber acciones declaradas');
+    for (const line of uses) {
+      assert.ok(/@[0-9a-f]{40}(\s|$|#)/.test(line), `acción sin SHA: ${line}`);
+    }
+  });
+
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben
 // reflejar EXACTAMENTE el número de casos registrados y ejecutados. Un
 // manifiesto desincronizado hace fallar la suite (imposible sobre-declarar
