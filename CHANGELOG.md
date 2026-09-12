@@ -1,5 +1,15 @@
 # Changelog — valorant-analytics
 
+## 4.7.2 — Correcciones del veredicto 84
+
+- **HIGH — umbral MPC:** `verifyThreshold` exige entero `1 ≤ threshold ≤ keyholders confiables`; sobres vacíos o sin firmas se rechazan (`INVALID_THRESHOLD_FAIL_CLOSED` / `MALFORMED_ENVELOPE_FAIL_CLOSED`). El umbral 0 ya no admite nada.
+- **HIGH — objetivo verificado:** `observeVerifiedMatch` exige el `puuid` exacto; ausente → `TARGET_NOT_FOUND` (con candidatos), vacío → `TARGET_REQUIRED`, duplicado → `TARGET_AMBIGUOUS`. Nunca analiza al primer jugador.
+- **HIGH — launcher raíz:** `cli.js` ejecuta la CLI documentada (`node cli.js --help`) y reexporta la API como módulo.
+- **MED — interoperabilidad DSSE↔MPC:** PAE byte-correcta compartida en `dsse_pae.js`; el firmante MPC codifica PAE sobre el payload crudo, verificable por el verificador DSSE (vector de interop en tests).
+- **MED — Merkle determinista:** sin timestamp se usa la centinela documentada `UNSPECIFIED_TIMESTAMP`; la misma entrada produce la misma raíz.
+- **MED — `runCli` programática:** retorna `{ exitCode, result }` y **nunca** llama `process.exit`; el wrapper ejecutable decide el código de salida.
+- Regresiones añadidas: `tests #147`–`#152` (152/152 checks). Versión 4.7.2.
+
 ## 4.7.1 — Correcciones del veredicto 88
 
 - **HIGH — duo sin equipos observados:** no se asume mismo equipo por `undefined === undefined`; sin `teamId` en ambos → `INSUFFICIENT_DATA`, score nulo, sin consejo ni `carryAnalysis`.

@@ -150,12 +150,15 @@ function buildMatchMerkleLedger(matchData) {
       }
     });
   } else {
-    // Fallback para resúmenes de partida sin desglose por ronda
+    // Fallback para resúmenes de partida sin desglose por ronda. El timestamp
+    // es determinista: si la entrada no lo aporta se usa una centinela
+    // documentada (jamás la hora actual, que haría la raíz no reproducible).
+    const hasTimestamp = typeof matchData.timestamp === 'string' && matchData.timestamp.trim() !== '';
     events.push({
       type: 'match_header',
       id: matchData.id || matchData.matchId || 'match_unknown',
       map: matchData.map || 'Unknown',
-      timestamp: matchData.timestamp || new Date().toISOString()
+      timestamp: hasTimestamp ? matchData.timestamp : 'UNSPECIFIED_TIMESTAMP'
     });
   }
 

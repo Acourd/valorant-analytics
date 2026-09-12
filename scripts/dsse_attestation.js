@@ -16,6 +16,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const { pae } = require('./dsse_pae');
 
 const STATEMENT_TYPE_V1 = 'https://in-toto.io/Statement/v1';
 const PREDICATE_TYPE_VALORANT = 'https://valorant-analytics.dev/attestation/v1';
@@ -74,11 +75,10 @@ function signTelemetryReport(matchReport, keyPair = null) {
   const payloadBytes = Buffer.from(JSON.stringify(statement), 'utf8');
   const payloadBase64 = payloadBytes.toString('base64');
 
-  // Pre-Authentication Encoding (PAE) segÃºn especificaciÃ³n oficial DSSE:
-  // PAE(type, body) = "DSSEv1" + " " + len(type) + " " + type + " " + len(body) + " " + body
+  // Pre-Authentication Encoding (PAE) byte-correcta compartida (DSSE spec):
+  // PAE(type, body) = "DSSEv1" SP len(type) SP type SP len(body) SP body
   const payloadType = 'application/vnd.in-toto+json';
-  const paeString = `DSSEv1 ${payloadType.length} ${payloadType} ${payloadBytes.length} ${payloadBytes.toString('latin1')}`;
-  const paeBuffer = Buffer.from(paeString, 'latin1');
+  const paeBuffer = pae(payloadType, payloadBytes);
 
   const signature = crypto.sign(null, paeBuffer, keys.privateKey);
 
@@ -136,8 +136,7 @@ function verifyWithPem(envelope, pem) {
   try {
     const publicKey = crypto.createPublicKey(pem);
     const payloadBytes = Buffer.from(envelope.payload, 'base64');
-    const paeString = `DSSEv1 ${envelope.payloadType.length} ${envelope.payloadType} ${payloadBytes.length} ${payloadBytes.toString('latin1')}`;
-    const paeBuffer = Buffer.from(paeString, 'latin1');
+    const paeBuffer = pae(envelope.payloadType, payloadBytes);
 
     const sigBuffer = Buffer.from(envelope.signatures[0].sig, 'base64');
     const verified = crypto.verify(null, paeBuffer, publicKey, sigBuffer);

@@ -274,7 +274,16 @@ let JSON_MODE = false;
 // 2 = evidencia insuficiente para el resultado principal (guardian, drift)
 const EXIT = Object.freeze({ OK: 0, INVALID: 1, INSUFFICIENT: 2 });
 
+// Señal de finalización para el wrapper ejecutable. La API programática
+// (runCli) NUNCA llama process.exit: retorna { exitCode, result }.
+class CliExit extends Error {
+  constructor(code) { super(`CLI_EXIT_${code}`); this.name = 'CliExit'; this.code = code; }
+}
+
+let LAST_RESULT = null;
+
 function emit(jsonOut, payload, human) {
+  LAST_RESULT = payload;
   if (jsonOut) { process.stdout.write(JSON.stringify(payload, null, 2) + '\n'); return; }
   human();
 }
@@ -291,7 +300,7 @@ function resolveEffectivePlayer(matchData, player) {
   return require('./data_contract').resolveExactHandle(handles, undefined);
 }
 
-function runCli(argv) {
+function runCliCore(argv) {
   const args = argv.slice();
   DEMO_MODE = args.includes('--demo');
   const jsonOut = args.includes('--json');
@@ -332,20 +341,20 @@ if (!command || command === '--help' || command === '-h') {
   console.log(`                   1 = entrada, objetivo o comando inválido; 2 = evidencia insuficiente para el resultado principal (guardian, drift).`);
   console.log(`OBJETIVO: ningún comando selecciona un jugador silenciosamente; indica el Riot ID exacto (salvo roster de 1 jugador).`);
   console.log(`========================================================================\n`);
-  process.exit(0);
+  throw new CliExit(EXIT.OK);
 }
 
 // Preflight Check
 const pf = runPreflight(command, args);
 if (pf.verdict === 'DENY') {
   console.error(`\n[PREFLIGHT DENY] ${pf.reason}`);
-  process.exit(1);
+  throw new CliExit(EXIT.INVALID);
 }
 
 // Auto-detección: si el primer arg contiene '#' (Riot ID) y no es un archivo → perfil
 if (command.includes('#') && !fs.existsSync(command)) {
   handleProfile(command, jsonOut);
-  process.exit(0);
+  throw new CliExit(EXIT.OK);
 }
 
 try {
@@ -437,7 +446,7 @@ try {
         : 'La telemetría no contiene jugadores válidos.';
       console.error(`Error: duo requiere DOS Riot IDs exactos (p1 y p2); falta ${missing}. ${candidates}`);
       console.error(`Uso: node cli.js duo <archivo_o_id> "Nombre#TAG" "Nombre#TAG"`);
-      process.exit(EXIT.INVALID);
+      throw new CliExit(EXIT.INVALID);
     }
     const res = auditDuoSynergy(matchData, p1, p2);
     validateDuoSynergy(res);
@@ -690,7 +699,7 @@ try {
       console.log(`  • Veredicto Criptográfico: FALLIDO: firmante desconocido (TOFU rechazado).`);
       console.log(`  • Acción requerida: re-ejecuta con --trust-new-key para aprovisionar esta identidad tras verificarla por un canal independiente.`);
       console.log(`------------------------------------------------------------------------`);
-      process.exit(1);
+      throw new CliExit(EXIT.INVALID);
     }
 
     console.log(`  • Tipo de Payload:       ${envelope.payloadType}`);
@@ -751,7 +760,7 @@ try {
       console.log(`========================================================================\n`);
     }
     });
-    if (audit.verdict === 'INSUFFICIENT_DATA') process.exit(EXIT.INSUFFICIENT);
+    if (audit.verdict === 'INSUFFICIENT_DATA') throw new CliExit(EXIT.INSUFFICIENT);
 
   } else if (command === 'drift') {
     const { target, player } = resolveTargetAndPlayer(args);
@@ -778,7 +787,7 @@ try {
       console.log(`========================================================================\n`);
     }
     });
-    if (driftReport.noData) process.exit(EXIT.INSUFFICIENT);
+    if (driftReport.noData) throw new CliExit(EXIT.INSUFFICIENT);
 
   } else if (command === 'consensus') {
     const { target, player } = resolveTargetAndPlayer(args);
@@ -846,7 +855,7 @@ try {
     const handle = args[1];
     if (!handle || !/^[^#\s][^#]*#[^#\s][^#]*$/.test(handle.trim())) {
       console.error('Error: Riot ID inválido. Usa formato Nombre#TAG (ej. node cli.js profile "Derke#0001").');
-      process.exit(EXIT.INVALID);
+      throw new CliExit(EXIT.INVALID);
     }
     handleProfile(handle, jsonOut);
 
@@ -927,7 +936,7 @@ try {
     printBanner();
     console.error('Comando retirado: harvest leía la caché del navegador del usuario (no consentido y no estable).');
     console.error('Vías admitidas: node cli.js match <archivo.json> | node cli.js parse "<texto>" | captura con confirmación | Riot RSO (pendiente).');
-    process.exit(1);
+    throw new CliExit(EXIT.INVALID);
 
   } else if (command === 'career') {
     const inputPath = args[1];
@@ -940,7 +949,7 @@ try {
 
     if (!profileData) {
       console.error('Error: No se encontró el archivo JSON de perfil. Proporciona un JSON/export aportado explícitamente (la cosecha de caché y el handle fueron retirados).');
-      process.exit(1);
+      throw new CliExit(EXIT.INVALID);
     }
 
     const tel = extractAccountTelemetry(profileData, { handle: handleName });
@@ -979,7 +988,7 @@ try {
 
     if (!profileData) {
       console.error('Error: proporciona un JSON/export de perfil aportado explícitamente (la cosecha de caché local fue retirada).');
-      process.exit(1);
+      throw new CliExit(EXIT.INVALID);
     }
 
     const tel = extractAccountTelemetry(profileData, { handle: handleName });
@@ -1035,13 +1044,32 @@ try {
       console.log(`========================================================================\n`);
     } else {
       console.error(`Comando desconocido: "${command}". Ejecuta "node cli.js --help" para ver las opciones.`);
-      process.exit(1);
+      throw new CliExit(EXIT.INVALID);
     }
   }
 } catch (err) {
+  if (err instanceof CliExit) throw err;
   console.error('\n❌ Error al ejecutar comando:', err.message);
-  process.exit(1);
+  throw new CliExit(EXIT.INVALID);
 }
+}
+
+// API programática segura: NUNCA termina el proceso anfitrión.
+function runCli(argv) {
+  LAST_RESULT = null;
+  try {
+    runCliCore(argv);
+    return { exitCode: EXIT.OK, result: LAST_RESULT };
+  } catch (e) {
+    if (e instanceof CliExit) return { exitCode: e.code, result: LAST_RESULT };
+    console.error('\n❌ Error al ejecutar comando:', e.message);
+    return { exitCode: EXIT.INVALID, result: LAST_RESULT };
+  }
+}
+
+if (require.main === module) {
+  const { exitCode } = runCli(process.argv.slice(2));
+  process.exit(exitCode);
 }
 
 module.exports = {
