@@ -22,6 +22,7 @@ const { SessionGuardian } = require(path.join(scriptsDir, 'session_guardian.js')
 const { DriftDetector } = require(path.join(scriptsDir, 'drift_detector.js'));
 const { ConsensusArbiter } = require(path.join(scriptsDir, 'consensus_arbiter.js'));
 const { generateCoachingReport } = require(path.join(scriptsDir, 'coaching_engine.js'));
+const { parseCliArgs } = require(path.join(scriptsDir, 'cli.js'));
 
 const SEED = Number(process.env.PROP_SEED || 0xA11CE5);
 const ITERATIONS = Number(process.env.PROP_ITERATIONS || 250);
@@ -358,6 +359,39 @@ property('contratos: perfiles opuestos producen salidas distintas con evidencia 
   const cWeak = new ConsensusArbiter().synthesizeConsensus(weak);
   const cStrong = new ConsensusArbiter().synthesizeConsensus(strong);
   assert.notStrictEqual(cWeak.verdict, cStrong.verdict, 'veredictos de consenso distintos');
+});
+
+property('cli-args: permutaciones de flags no alteran posicionales ni semántica', () => {
+  const rng = new Rng(SEED + 9);
+  const base = ['match', 'partida.json', 'TenZ#0001'];
+  const flagSet = ['--json', '--demo', '--trust-new-key'];
+  for (let it = 0; it < ITERATIONS; it++) {
+    const chosen = flagSet.filter(() => rng.bool(0.5));
+    // Los flags se INTERCALAN sin reordenar los posicionales entre sí.
+    const tokens = base.slice();
+    for (const flag of chosen) tokens.splice(rng.int(tokens.length + 1), 0, flag);
+    const { flags, positionals } = parseCliArgs(tokens);
+    assert.deepStrictEqual(positionals, base, 'los flags nunca son posicionales ni cambian su orden');
+    assert.deepStrictEqual(flags, {
+      json: chosen.includes('--json'),
+      demo: chosen.includes('--demo'),
+      trustNewKey: chosen.includes('--trust-new-key'),
+      help: false
+    }, 'flags independientes del orden');
+  }
+  assert.throws(() => parseCliArgs(['match', '--bogus']), e => e.code === 'UNKNOWN_FLAG');
+});
+
+property('cli-args: un flag jamás se interpreta como ruta o jugador', () => {
+  const cases = [
+    ['--json', '--trust-new-key', 'attest', 'archivo.json', 'TenZ#0001'],
+    ['attest', '--trust-new-key', '--json', 'archivo.json', 'TenZ#0001'],
+    ['--demo', 'match', 'TenZ#0001', 'archivo.json']
+  ];
+  for (const tokens of cases) {
+    const { positionals } = parseCliArgs(tokens);
+    assert.ok(!positionals.some(p => p.startsWith('--')), `flag filtrado como posicional: ${positionals.join(',')}`);
+  }
 });
 
 console.log(`\n================================================================`);

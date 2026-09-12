@@ -281,10 +281,46 @@ class CliExit extends Error {
 }
 
 let LAST_RESULT = null;
+let JSON_STDOUT_WRITTEN = false;
+
+// Parser determinista de argumentos (sin dependencias): los flags son
+// independientes del orden y NUNCA se interpretan como posicionales.
+const KNOWN_FLAGS = Object.freeze({
+  '--json': 'json',
+  '--demo': 'demo',
+  '--trust-new-key': 'trustNewKey',
+  '--help': 'help',
+  '-h': 'help'
+});
+
+function parseCliArgs(argv) {
+  const flags = { json: false, demo: false, trustNewKey: false, help: false };
+  const positionals = [];
+  for (const token of argv) {
+    if (typeof token !== 'string') throw cliFail('Argumento no textual en argv.', 'BAD_ARGV');
+    if (Object.prototype.hasOwnProperty.call(KNOWN_FLAGS, token)) { flags[KNOWN_FLAGS[token]] = true; continue; }
+    if (token.startsWith('--') && token !== '--') {
+      throw cliFail(`Flag desconocido: "${token}". Flags admitidos: --json, --demo, --trust-new-key.`, 'UNKNOWN_FLAG');
+    }
+    positionals.push(token);
+  }
+  return { flags, positionals };
+}
+
+function cliFail(message, code = 'CLI_ERROR', details = {}) {
+  const err = new Error(message);
+  err.code = code;
+  err.details = details;
+  return err;
+}
 
 function emit(jsonOut, payload, human) {
   LAST_RESULT = payload;
-  if (jsonOut) { process.stdout.write(JSON.stringify(payload, null, 2) + '\n'); return; }
+  if (jsonOut) {
+    JSON_STDOUT_WRITTEN = true;
+    process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+    return;
+  }
   human();
 }
 
@@ -301,12 +337,12 @@ function resolveEffectivePlayer(matchData, player) {
 }
 
 function runCliCore(argv) {
-  const args = argv.slice();
-  DEMO_MODE = args.includes('--demo');
-  const jsonOut = args.includes('--json');
+  const { flags, positionals } = parseCliArgs(argv);
+  const args = positionals;
+  DEMO_MODE = flags.demo;
+  const jsonOut = flags.json;
   JSON_MODE = jsonOut;
-  for (let i = args.length - 1; i >= 0; i--) { if (args[i] === '--demo' || args[i] === '--json') args.splice(i, 1); }
-  const command = args[0];
+  const command = flags.help ? '--help' : args[0];
 
 if (!command || command === '--help' || command === '-h') {
   printBanner();
@@ -337,6 +373,9 @@ if (!command || command === '--help' || command === '-h') {
   console.log(`  node cli.js duo examples/sample_match.json "TenZ#0001" "Chronicle#0001"`);
   console.log(`  node cli.js duels examples/sample_match.json`);
   console.log(`\nSALIDA ESTRUCTURADA: añade --json a match/aim/duels/weapons/economy/coaching/duo/guardian/drift/consensus/synthesize/parse/career/diagnose/sbom/profile.`);
+  console.log(`CONTRATO --json: stdout contiene EXACTAMENTE un JSON parseable (incluso en error); los avisos humanos van a stderr.`);
+  console.log(`ERRORES EN JSON: { ok:false, exitCode, error:{ code, message, details } }.`);
+  console.log(`FLAGS: --json, --demo, --trust-new-key son independientes del orden y nunca se interpretan como archivo o jugador.`);
   console.log(`CÓDIGOS DE SALIDA: 0 = resultado descriptivo válido (incluye n/d y "omitido" como respuesta contractual);`);
   console.log(`                   1 = entrada, objetivo o comando inválido; 2 = evidencia insuficiente para el resultado principal (guardian, drift).`);
   console.log(`OBJETIVO: ningún comando selecciona un jugador silenciosamente; indica el Riot ID exacto (salvo roster de 1 jugador).`);
@@ -347,8 +386,7 @@ if (!command || command === '--help' || command === '-h') {
 // Preflight Check
 const pf = runPreflight(command, args);
 if (pf.verdict === 'DENY') {
-  console.error(`\n[PREFLIGHT DENY] ${pf.reason}`);
-  throw new CliExit(EXIT.INVALID);
+  throw cliFail(`[PREFLIGHT DENY] ${pf.reason}`, 'PREFLIGHT_DENIED');
 }
 
 // Auto-detección: si el primer arg contiene '#' (Riot ID) y no es un archivo → perfil
@@ -444,9 +482,7 @@ try {
       const candidates = uniqueHandles.length > 0
         ? `Candidatos: ${uniqueHandles.slice(0, 10).join(', ')}`
         : 'La telemetría no contiene jugadores válidos.';
-      console.error(`Error: duo requiere DOS Riot IDs exactos (p1 y p2); falta ${missing}. ${candidates}`);
-      console.error(`Uso: node cli.js duo <archivo_o_id> "Nombre#TAG" "Nombre#TAG"`);
-      throw new CliExit(EXIT.INVALID);
+      throw cliFail(`duo requiere DOS Riot IDs exactos (p1 y p2); falta ${missing}. ${candidates} Uso: node cli.js duo <archivo_o_id> "Nombre#TAG" "Nombre#TAG"`, 'TARGET_REQUIRED');
     }
     const res = auditDuoSynergy(matchData, p1, p2);
     validateDuoSynergy(res);
@@ -690,16 +726,13 @@ try {
     const keystore = loadOrCreateKeystore(keystorePath);
     let verifyRes = verifyTelemetryAttestation(envelope, null, { trustedKeystore: keystore.keys });
     let provisioned = false;
-    if (!verifyRes.verified && args.includes('--trust-new-key')) {
+    if (!verifyRes.verified && flags.trustNewKey) {
       const keyid = registerTrustedKey(keystorePath, envelope.publicKeyPem, `attest-${effectivePlayer}`);
       verifyRes = verifyTelemetryAttestation(envelope, null, { trustedKeystore: loadOrCreateKeystore(keystorePath).keys });
       provisioned = true;
     }
-    if (!verifyRes.verified && !args.includes('--trust-new-key')) {
-      console.log(`  • Veredicto Criptográfico: FALLIDO: firmante desconocido (TOFU rechazado).`);
-      console.log(`  • Acción requerida: re-ejecuta con --trust-new-key para aprovisionar esta identidad tras verificarla por un canal independiente.`);
-      console.log(`------------------------------------------------------------------------`);
-      throw new CliExit(EXIT.INVALID);
+    if (!verifyRes.verified && !flags.trustNewKey) {
+      throw cliFail('Firmante desconocido (TOFU rechazado). Acción requerida: re-ejecuta con --trust-new-key para aprovisionar esta identidad tras verificarla por un canal independiente.', 'TRUST_REJECTED');
     }
 
     console.log(`  • Tipo de Payload:       ${envelope.payloadType}`);
@@ -854,22 +887,21 @@ try {
   } else if (command === 'profile') {
     const handle = args[1];
     if (!handle || !/^[^#\s][^#]*#[^#\s][^#]*$/.test(handle.trim())) {
-      console.error('Error: Riot ID inválido. Usa formato Nombre#TAG (ej. node cli.js profile "Derke#0001").');
-      throw new CliExit(EXIT.INVALID);
+      throw cliFail('Riot ID inválido. Usa formato Nombre#TAG (ej. node cli.js profile "Derke#0001").', 'INVALID_HANDLE');
     }
     handleProfile(handle, jsonOut);
 
   } else if (command === 'parse' || command === 'ingest') {
     const fileInput = args[1];
     if (!fileInput) {
-      throw new Error('parse requiere entrada explícita: archivo JSON/Texto, match ID, URL o texto de scoreboard. Sin entrada no se analiza el fixture incluido.');
+      throw cliFail('parse requiere entrada explícita: archivo JSON/Texto, match ID, URL o texto de scoreboard. Sin entrada no se analiza el fixture incluido.', 'INPUT_REQUIRED');
     }
     const player = (args[2] && args[2].includes('#')) ? args[2] : undefined;
     if (args[2] && !player) {
-      throw new Error(`parse: Riot ID inválido "${args[2]}" (formato esperado Nombre#TAG).`);
+      throw cliFail(`parse: Riot ID inválido "${args[2]}" (formato esperado Nombre#TAG).`, 'INVALID_HANDLE');
     }
     if (fileInput && (/[\\/]/.test(fileInput) || /\.(json|txt|md|csv)$/i.test(fileInput)) && !fs.existsSync(fileInput)) {
-      throw new Error(`parse: archivo no encontrado: "${fileInput}".`);
+      throw cliFail(`parse: archivo no encontrado: "${fileInput}".`, 'INPUT_NOT_FOUND');
     }
     const matchData = resolveMatchData(fileInput, player);
     const res = evaluateLearningProfile(matchData, player);
@@ -933,10 +965,7 @@ try {
     });
 
   } else if (command === 'harvest') {
-    printBanner();
-    console.error('Comando retirado: harvest leía la caché del navegador del usuario (no consentido y no estable).');
-    console.error('Vías admitidas: node cli.js match <archivo.json> | node cli.js parse "<texto>" | captura con confirmación | Riot RSO (pendiente).');
-    throw new CliExit(EXIT.INVALID);
+    throw cliFail('Comando retirado: harvest leía la caché del navegador del usuario (no consentido y no estable). Vías admitidas: node cli.js match <archivo.json> | node cli.js parse "<texto>" | captura con confirmación | Riot RSO (pendiente).', 'COMMAND_RETIRED');
 
   } else if (command === 'career') {
     const inputPath = args[1];
@@ -948,8 +977,7 @@ try {
     }
 
     if (!profileData) {
-      console.error('Error: No se encontró el archivo JSON de perfil. Proporciona un JSON/export aportado explícitamente (la cosecha de caché y el handle fueron retirados).');
-      throw new CliExit(EXIT.INVALID);
+      throw cliFail('No se encontró el archivo JSON de perfil. Proporciona un JSON/export aportado explícitamente (la cosecha de caché y el handle fueron retirados).', 'INPUT_REQUIRED');
     }
 
     const tel = extractAccountTelemetry(profileData, { handle: handleName });
@@ -987,8 +1015,7 @@ try {
     }
 
     if (!profileData) {
-      console.error('Error: proporciona un JSON/export de perfil aportado explícitamente (la cosecha de caché local fue retirada).');
-      throw new CliExit(EXIT.INVALID);
+      throw cliFail('Proporciona un JSON/export de perfil aportado explícitamente (la cosecha de caché local fue retirada).', 'INPUT_REQUIRED');
     }
 
     const tel = extractAccountTelemetry(profileData, { handle: handleName });
@@ -1043,37 +1070,75 @@ try {
       console.log(`💡 Regla de timing/tradeo: ${pres ? `OMITIDA — ${pres.limitacion}` : 'omitida (sin HS% observado)'}`);
       console.log(`========================================================================\n`);
     } else {
-      console.error(`Comando desconocido: "${command}". Ejecuta "node cli.js --help" para ver las opciones.`);
-      throw new CliExit(EXIT.INVALID);
+      throw cliFail(`Comando desconocido: "${command}". Ejecuta "node cli.js --help" para ver las opciones.`, 'UNKNOWN_COMMAND');
     }
   }
 } catch (err) {
-  if (err instanceof CliExit) throw err;
-  console.error('\n❌ Error al ejecutar comando:', err.message);
-  throw new CliExit(EXIT.INVALID);
+  // El wrapper (runCli) decide salida humana vs JSON; aquí solo se propaga.
+  throw err;
 }
 }
 
 // API programática segura: NUNCA termina el proceso anfitrión.
 function runCli(argv) {
   LAST_RESULT = null;
+  JSON_STDOUT_WRITTEN = false;
+  const jsonRequested = Array.isArray(argv) && argv.includes('--json');
+  const originalLog = console.log;
+  const originalTable = console.table;
+  // Con --json, stdout queda reservado a UN único JSON parseable; toda salida
+  // humana (banners, tablas, avisos) se redirige a stderr.
+  if (jsonRequested) {
+    console.log = (...a) => console.error(...a);
+    console.table = (...a) => console.error(...a);
+  }
   try {
     runCliCore(argv);
+    if (jsonRequested && !JSON_STDOUT_WRITTEN) {
+      JSON_STDOUT_WRITTEN = true;
+      process.stdout.write(JSON.stringify({ ok: true, exitCode: EXIT.OK, result: LAST_RESULT, note: 'comando sin salida estructurada; salida humana en stderr' }, null, 2) + '\n');
+    }
     return { exitCode: EXIT.OK, result: LAST_RESULT };
   } catch (e) {
-    if (e instanceof CliExit) return { exitCode: e.code, result: LAST_RESULT };
-    console.error('\n❌ Error al ejecutar comando:', e.message);
-    return { exitCode: EXIT.INVALID, result: LAST_RESULT };
+    if (e instanceof CliExit) {
+      if (jsonRequested && !JSON_STDOUT_WRITTEN) {
+        JSON_STDOUT_WRITTEN = true;
+        const isOk = e.code === EXIT.OK;
+        const payload = isOk
+          ? { ok: true, exitCode: e.code, result: LAST_RESULT, note: 'sin salida estructurada; salida humana en stderr' }
+          : { ok: false, exitCode: e.code, error: { code: 'CLI_EXIT', message: e.message, details: {} } };
+        process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+      }
+      return { exitCode: e.code, result: LAST_RESULT };
+    }
+    const message = e && e.message ? e.message : String(e);
+    const errorCode = (e && e.code) || 'CLI_ERROR';
+    const details = (e && e.details) || {};
+    const code = EXIT.INVALID;
+    if (jsonRequested) {
+      if (!JSON_STDOUT_WRITTEN) {
+        JSON_STDOUT_WRITTEN = true;
+        process.stdout.write(JSON.stringify({ ok: false, exitCode: code, error: { code: errorCode, message, details } }, null, 2) + '\n');
+      }
+    } else {
+      console.error('\n❌ Error al ejecutar comando:', message);
+    }
+    return { exitCode: code, result: null };
+  } finally {
+    if (jsonRequested) { console.log = originalLog; console.table = originalTable; }
   }
 }
 
 if (require.main === module) {
   const { exitCode } = runCli(process.argv.slice(2));
-  process.exit(exitCode);
+  // exitCode (no process.exit) permite drenar stdout en pipes: con salidas
+  // grandes + JSON, process.exit podía truncar/perder el buffer.
+  process.exitCode = exitCode;
 }
 
 module.exports = {
   runCli,
+  parseCliArgs,
   buildDuelTable,
   handleProfile,
   resolveMatchData,
@@ -1082,7 +1147,3 @@ module.exports = {
   printProvenance,
   getProjectVersion
 };
-
-if (require.main === module) {
-  runCli(process.argv.slice(2));
-}

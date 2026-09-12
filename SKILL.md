@@ -90,7 +90,7 @@ node .agents/skills/valorant-analytics/scripts/duo_synergy.js <match_id_or_json_
 
 ### 4. Provided Match JSON/Scoreboard Parsing (offline, no network)
 ```powershell
-node cli.js parse <archivo_o_texto> [jugador]
+node cli.js parse <archivo_o_texto> [jugador]   # JSON/export, texto o archivo existente (extensión opcional); sin red
 ```
 * Normaliza JSON/export o volcados de texto aportados por el usuario en telemetría `normalized_input`. **No hay descarga automática**: `fetch_match.js` y `fetch_profile.js` son analizadores/stubs fail-closed que nunca consultan red.
 

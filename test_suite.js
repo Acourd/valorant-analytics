@@ -2885,6 +2885,106 @@ check('Merkle: raíz determinista sin timestamp (centinela documentada) y con ti
     assert.notStrictEqual(c.root, a.root, 'timestamp explícito cambia la hoja de forma trazable');
   });
 
+// ---- Bloque final (v4.7.3): cuota Wasm real, parser determinista de flags, contrato JSON de errores ----
+
+check('wasm: la cuota anunciada es aplicada por el runtime (o no se anuncia)',
+  () => {
+    const WasmSandbox = require(path.join(scriptsDir, 'wasm_sandbox.js'));
+    const sb = new WasmSandbox({ initialPages: 1, maximumPages: 2 });
+    const audit = sb.auditIsolation();
+    assert.strictEqual(audit.quotaEnforced, true, 'la cuota debe estar impuesta por el runtime');
+    assert.strictEqual(audit.maxPagesEnforced, 2, 'el máximo anunciado es el real');
+    assert.strictEqual(audit.moduleImportsHostMemory, true, 'el módulo importa la memoria del host');
+    assert.strictEqual(WasmSandbox.probeQuota(2), true, 'sonda: crecer más allá del máximo falla');
+    assert.throws(() => sb.memory.grow(2), RangeError, 'grow más allá del máximo debe fallar');
+    for (const bad of [{ initialPages: 0 }, { initialPages: 1.5 }, { maximumPages: 0 }, { initialPages: 4, maximumPages: 2 }, { maximumPages: 65 }]) {
+      assert.throws(() => new WasmSandbox(bad), RangeError, `config inválida aceptada: ${JSON.stringify(bad)}`);
+    }
+    assert.doesNotThrow(() => new WasmSandbox({ initialPages: 1, maximumPages: 1 }), 'mínimo 1');
+    assert.doesNotThrow(() => new WasmSandbox({ initialPages: 1, maximumPages: 64 }), 'máximo 64');
+  });
+
+check('cli flags: permutaciones producen el mismo resultado semántico',
+  () => {
+    const a = JSON.parse(cliOk(['match', sampleFile, 'TenZ#0001', '--json']));
+    const b = JSON.parse(cliOk(['--json', 'match', sampleFile, 'TenZ#0001']));
+    assert.strictEqual(a.command, b.command);
+    assert.strictEqual(a.player, b.player);
+    assert.strictEqual(a.provenance, b.provenance);
+    const { parseCliArgs } = require(path.join(scriptsDir, 'cli.js'));
+    assert.deepStrictEqual(parseCliArgs(['--demo', 'match', 'f', 'p']), parseCliArgs(['match', 'f', 'p', '--demo']));
+    assert.throws(() => parseCliArgs(['match', '--bogus']), e => e.code === 'UNKNOWN_FLAG');
+  });
+
+check('cli --trust-new-key: flag independiente, nunca interpretado como ruta',
+  () => {
+    withIsolatedCache(() => {
+      const a = JSON.parse(cliOk(['attest', sampleFile, 'TenZ#0001', '--trust-new-key', '--json']));
+      assert.strictEqual(a.ok, true);
+      assert.strictEqual(a.exitCode, 0);
+    });
+    withIsolatedCache(() => {
+      const b = JSON.parse(cliOk(['--trust-new-key', '--json', 'attest', sampleFile, 'TenZ#0001']));
+      assert.strictEqual(b.ok, true);
+    });
+    let code = 0;
+    let out = '';
+    try { cliOk(['attest', sampleFile, '--trust-new-key', '--json']); }
+    catch (e) { code = e.status; out = String(e.stdout || ''); }
+    assert.strictEqual(code, 1, 'sin jugador debe fallar cerrado');
+    const err = JSON.parse(out);
+    assert.ok(/TARGET_REQUIRED/.test(err.error.code), 'error estructurado de objetivo, no confusión con ruta');
+  });
+
+check('cli parse: archivo existente sin extensión es admitido',
+  () => {
+    const tmp = path.join(os.tmpdir(), `dump-sin-ext-${process.pid}`);
+    fs.writeFileSync(tmp, 'Focus#NA1\tIso\tGold 2\t21\t14\t5\t245\t162\t26%\n', 'utf8');
+    try {
+      const out = cliOk(['parse', tmp, 'Focus#NA1']);
+      assert.ok(/INGESTA UNIVERSAL/.test(out), 'la ruta sin extensión debe reconocerse como archivo');
+    } finally {
+      fs.unlinkSync(tmp);
+    }
+  });
+
+check('cli parse: archivo inexistente falla cerrado (código 1 y JSON de error)',
+  () => {
+    const target = path.join(os.tmpdir(), `no-existe-${process.pid}.json`);
+    let code = 0;
+    try { cliOk(['parse', target]); }
+    catch (e) { code = e.status; }
+    assert.strictEqual(code, 1, 'sin JSON: exit 1');
+    let out = '';
+    let code2 = 0;
+    try { cliOk(['parse', target, '--json']); }
+    catch (e) { code2 = e.status; out = String(e.stdout || ''); }
+    assert.strictEqual(code2, 1, 'con --json: exit 1');
+    const err = JSON.parse(out);
+    assert.strictEqual(err.ok, false);
+    assert.strictEqual(err.error.code, 'INPUT_NOT_FOUND');
+  });
+
+check('--json: válido, inválido, insuficiente y sin salida estructurada son JSON puro',
+  () => {
+    const pure = out => {
+      const t = String(out).trim();
+      if (!t.startsWith('{')) return false;
+      try { JSON.parse(t); return true; } catch (e) { return false; }
+    };
+    assert.ok(pure(cliOk(['sbom', '--json'])), 'sbom --json');
+    let invalidOut = '';
+    try { cliOk(['match', sampleFile, 'NoExiste#9999', '--json']); } catch (e) { invalidOut = String(e.stdout || ''); }
+    assert.ok(pure(invalidOut), 'error de objetivo');
+    assert.strictEqual(JSON.parse(invalidOut).ok, false);
+    let insuffOut = '';
+    try { cliOk(['guardian', sampleFile, 'TenZ#0001', '--json']); } catch (e) { insuffOut = String(e.stdout || ''); }
+    assert.ok(pure(insuffOut), 'evidencia insuficiente');
+    const unsupported = cliOk(['--json', 'invariants', sampleFile, 'TenZ#0001']);
+    assert.ok(pure(unsupported), 'comando sin salida estructurada');
+    assert.strictEqual(JSON.parse(unsupported).ok, true);
+  });
+
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben
 // reflejar EXACTAMENTE el número de casos registrados y ejecutados. Un
 // manifiesto desincronizado hace fallar la suite (imposible sobre-declarar

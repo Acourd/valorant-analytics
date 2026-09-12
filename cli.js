@@ -12,7 +12,8 @@ const cli = require('./scripts/cli.js');
 
 if (require.main === module) {
   const { exitCode } = cli.runCli(process.argv.slice(2));
-  process.exit(exitCode);
+  // exitCode (no process.exit) para no truncar stdout grande en pipes.
+  process.exitCode = exitCode;
 }
 
 module.exports = cli;
