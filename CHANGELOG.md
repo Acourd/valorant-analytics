@@ -1,5 +1,13 @@
 # Changelog — valorant-analytics
 
+## 4.8.2 — FK/FD agregado no habilita tradeo/aperturas sin contexto temporal
+
+- **Corregido (HIGH):** `plan` generaba acción/rutina de apertura ("no entrar solo", "confirmar el tradeo") a partir de FK/FD agregado, sin rondas, timestamps, posiciones ni marcas de trade — contradiciendo su propio límite.
+- **Regla raíz en `routine_contract`:** `ANGLE_ISOLATION` exige **contexto temporal observado** (`trade`/`posición`/`timestamp`); sin él queda bloqueada (`areasBlockedByTemporal`) y los datos requeridos incluyen los eventos con contexto. Se conserva la ruta positiva cuando el contexto existe.
+- **`data_contract.detectTemporalContext`** es ahora la única implementación (la usan `plan`, `kovaaks_generator`, `routine_synthesizer` vía CLI y `learning_profile`).
+- Sin contexto: `plan` devuelve `RECOLECCION_REQUERIDA`, sin acción ni rutina, y pide **eventos de ronda con marcas de trade, posición o timestamp**.
+- Regresión `tests #166` + invariante en la propiedad `plan:*` (166/166 checks). Versión 4.8.2.
+
 ## 4.8.1 — Procedencia honesta en `plan` (regresión del modo demo)
 
 - **Corregido (HIGH):** `plan --demo` etiquetaba las métricas como `normalized_input` y generaba acción/rutina correctiva con datos inventados.

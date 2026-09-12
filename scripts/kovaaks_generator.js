@@ -13,7 +13,7 @@
 const fs = require('fs');
 const { extractMatchId, fetchMatch } = require('./fetch_match');
 const { parseDuels } = require('./duel_matrix');
-const { resolveExactHandle, sourceProvenance, provenanceLabel, observedNumber } = require('./data_contract');
+const { resolveExactHandle, sourceProvenance, provenanceLabel, observedNumber, detectTemporalContext } = require('./data_contract');
 const { buildEvidence, canGenerateRoutine, KOVAAKS_SCENARIOS } = require('./routine_contract');
 const { analyzeWeaponTelemetry } = require('./weapon_telemetry');
 
@@ -47,7 +47,7 @@ function generateKovaaksRoutine(matchData, targetHandle) {
   }
 
   const provenance = sourceProvenance(meta);
-  const evidence = buildEvidence({ profile: { player: handle, provenance, mechanical }, weapon, matchProvenance: provenance, player: handle });
+  const evidence = buildEvidence({ profile: { player: handle, provenance, mechanical }, weapon, matchProvenance: provenance, player: handle, temporalContext: detectTemporalContext(matchData) });
   const gate = canGenerateRoutine(evidence);
 
   const base = {

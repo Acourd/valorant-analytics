@@ -50,7 +50,7 @@ const { resolveMatchDataResilient, parseTextScoreboard } = require('./universal_
 const { extractAccountTelemetry, aggregateCareerTelemetry, generateMilestonesTimeline } = require('./career_telemetry');
 const { evaluateMmrDrag, evaluateTalentVsEffort } = require('./autodiagnostic_engine');
 const { classifyEvidence, observeMatchTelemetry, observeDuelRows } = require('./evidence_policy');
-const { sourceProvenance, provenanceLabel } = require('./data_contract');
+const { sourceProvenance, provenanceLabel, detectTemporalContext } = require('./data_contract');
 const { analyzeEconomy } = require('./economy_analyzer');
 const { generateCoachingReport } = require('./coaching_engine');
 const { buildPlan } = require('./plan');
@@ -906,7 +906,7 @@ try {
     const matchData = resolveMatchData(target, player);
     const profile = evaluateLearningProfile(matchData, player);
     const synthesizer = new RoutineSynthesizer({ targetDurationMinutes: 15 });
-    const routine = synthesizer.synthesizeRoutine(profile);
+    const routine = synthesizer.synthesizeRoutine(Object.assign({}, profile, { temporalContext: detectTemporalContext(matchData) }));
 
     emit(jsonOut, Object.assign({ command: 'synthesize' }, routine), () => {
     printBanner();

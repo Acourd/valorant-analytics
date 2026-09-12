@@ -3131,6 +3131,43 @@ check('plan --demo: simulación explícita, sin etiquetas normalized_input ni re
     assert.ok(/no habilitada en modo demo/.test(human), 'acción/rutina no habilitadas en demo');
   });
 
+check('plan: FK/FD agregado sin contexto temporal no habilita tradeo/aperturas (recolección)',
+  () => {
+    const tmp = path.join(os.tmpdir(), `plan-fkfd-${process.pid}.json`);
+    fs.writeFileSync(tmp, JSON.stringify({
+      data: {
+        metadata: { matchId: 'fkfd', provenance: 'normalized_input' },
+        segments: [{
+          type: 'player-summary',
+          attributes: { platformUserIdentifier: 'F#1' },
+          metadata: { platformUserHandle: 'F#1' },
+          stats: { firstKills: { value: 0 }, firstDeaths: { value: 5 } }
+        }]
+      }
+    }), 'utf8');
+    try {
+      let code = 0;
+      let out = '';
+      try { cliOk(['plan', tmp, 'F#1', '--json']); }
+      catch (e) { code = e.status; out = String(e.stdout || ''); }
+      assert.strictEqual(code, 2, 'sin contexto temporal => recolección (2)');
+      const plan = JSON.parse(out);
+      assert.strictEqual(plan.estado, 'RECOLECCION_REQUERIDA');
+      assert.strictEqual(plan.accion, null, 'FK/FD agregado no habilita acción de aperturas');
+      assert.strictEqual(plan.rutina, null, 'sin rutina de tradeo');
+      const advice = JSON.stringify({ accion: plan.accion, rutina: plan.rutina });
+      assert.ok(!/entrar solo|tradeo|confirmar el tradeo|campo abierto|ANGLE_ISOLATION/i.test(advice), 'sin consejo de tradeo/posición');
+      assert.ok(/trade, posición o timestamp/i.test(plan.siguiente_dato.dato), 'pide eventos con contexto observado');
+      assert.ok(/trade, posición o timestamp/i.test(plan.no_se_puede_saber.faltantes.join(' ')), 'faltante explícito');
+      let human = '';
+      try { human = cliOk(['plan', tmp, 'F#1']); }
+      catch (e) { human = String(e.stdout || ''); }
+      assert.ok(!/entrar solo|confirmar el tradeo|campo abierto/i.test(human), 'salida humana sin tradeo');
+    } finally {
+      fs.unlinkSync(tmp);
+    }
+  });
+
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben
 // reflejar EXACTAMENTE el número de casos registrados y ejecutados. Un
 // manifiesto desincronizado hace fallar la suite (imposible sobre-declarar

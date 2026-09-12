@@ -31,17 +31,25 @@ assert(consensusResult.synthesis.length === 3);
 
 // 2. Routine Synthesizer (contrato de evidencia mecánica observada)
 const synthesizer = new RoutineSynthesizer({ targetDurationMinutes: 15 });
-const plan = synthesizer.synthesizeRoutine({
+const baseProfile = {
   player: 'TenZ#0001',
   provenance: 'normalized_input',
   mechanical: { hsPct: 14.0, fk: 1, fd: 4, acs: 200, legPct: 18.0 }
-});
+};
+// Sin contexto temporal observado, la apertura/tradeo no se habilita.
+const planSinTemporal = synthesizer.synthesizeRoutine(baseProfile);
+assert.strictEqual(planSinTemporal.omitted, false, 'HS/leg observados sí habilitan rutina mecánica');
+assert(!planSinTemporal.identifiedWeaknesses.some(w => w.area === 'ANGLE_ISOLATION'), 'FD>FK sin trade/posición/tiempo no detecta apertura');
+// Con eventos observados de trade, la apertura sí puede leerse.
+const plan = synthesizer.synthesizeRoutine(Object.assign({}, baseProfile, {
+  temporalContext: { trade: true, timing: false, position: false, sufficient: true }
+}));
 
 assert.strictEqual(plan.omitted, false, 'Con evidencia observada debe sintetizar');
 assert(plan.drillPlan.length > 0, 'Debe sintetizar al menos un ejercicio');
 assert(plan.totalRoutineMinutes <= 15.5, 'Rutina no debe superar sustancialmente los 15 minutos');
 assert(plan.identifiedWeaknesses.some(w => w.area === 'MICRO_ADJUSTMENT'), 'HS bajo debe detectar micro-ajuste');
-assert(plan.identifiedWeaknesses.some(w => w.area === 'ANGLE_ISOLATION'), 'FD>FK debe detectar apertura');
+assert(plan.identifiedWeaknesses.some(w => w.area === 'ANGLE_ISOLATION'), 'FD>FK con contexto de trade debe detectar apertura');
 assert.ok(/normali/i.test(plan.provenanceLabel), 'Procedencia visible');
 assert(plan.omitted === false && plan.identifiedWeaknesses.every(w => w.enablingMetric), 'Cada debilidad cita su métrica habilitante');
 // Sin evidencia mecánica: omitir, sin defaults.

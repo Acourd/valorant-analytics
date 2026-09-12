@@ -23,7 +23,7 @@
  * Zero external dependencies.
  */
 
-const { resolveExactHandle, sourceProvenance, provenanceLabel, observedNumber } = require('./data_contract');
+const { resolveExactHandle, sourceProvenance, provenanceLabel, observedNumber, detectTemporalContext } = require('./data_contract');
 const { evaluateLearningProfile } = require('./learning_profile');
 const { analyzeWeaponTelemetry } = require('./weapon_telemetry');
 const { buildEvidence, canGenerateRoutine, KOVAAKS_SCENARIOS, THRESHOLDS } = require('./routine_contract');
@@ -80,24 +80,14 @@ function buildObservations(profile) {
   return obs.slice(0, 3);
 }
 
-function detectTemporalContext(matchData) {
-  const segments = (matchData && matchData.data && matchData.data.segments) || [];
-  let timing = false;
-  let position = false;
-  let trade = false;
-  for (const s of segments) {
-    const a = s.attributes || {};
-    const m = s.metadata || {};
-    if (Number.isFinite(Number(a.roundTime)) || Number.isFinite(Number(m.roundTimeMs)) || /T\d{2}:\d{2}/.test(String(m.timestamp || ''))) timing = true;
-    if (m.position || a.position || (Number.isFinite(Number(m.x)) && Number.isFinite(Number(m.y)))) position = true;
-    if (m.traded === true || a.traded === true || Number.isFinite(Number(m.tradeTimeMs))) trade = true;
-  }
-  return { timing, position, trade, sufficient: timing || position || trade };
-}
-
 function nextDataFor(profile, gate, hasRoundEvents, temporal) {
   const m = profile.mechanical || {};
   const como = 'node cli.js plan <archivo.json o export> "Nombre#TAG"';
+  // Prioridad: si la única lectura bloqueada es la de aperturas/tradeo, el dato
+  // que habilita el siguiente informe son eventos con contexto observado.
+  if (gate.areasBlockedByTemporal && gate.areasBlockedByTemporal.length > 0) {
+    return { dato: 'eventos de ronda con marcas de trade, posición o timestamp', porQue: 'es el requisito para leer aperturas/tradeo con evidencia observada.', como };
+  }
   if (m.hsPct === null && gate.weaknesses.length === 0 && gate.missingMetrics.includes('hsPct')) {
     return { dato: 'HS% del marcador', porQue: 'habilita la acción de precisión y su umbral documentado (25%).', como };
   }
@@ -140,6 +130,7 @@ function buildPlan(matchData, targetHandle) {
   const handle = resolveExactHandle(handles, targetHandle);
   const profile = evaluateLearningProfile(matchData, handle);
 
+  const temporal = detectTemporalContext(matchData);
   let weapon = null;
   try { weapon = analyzeWeaponTelemetry(matchData, handle); } catch (e) { weapon = null; }
 
@@ -147,10 +138,10 @@ function buildPlan(matchData, targetHandle) {
     profile: { player: handle, provenance: profile.provenance, mechanical: profile.mechanical },
     weapon,
     matchProvenance: profile.provenance,
-    player: handle
+    player: handle,
+    temporalContext: temporal
   });
   const gate = canGenerateRoutine(evidence);
-  const temporal = detectTemporalContext(matchData);
   const hasRoundEvents = segments.some(s => s.type === 'player-round' || s.type === 'player-round-damage' || s.type === 'player-round-kills');
   const esSimulacion = profile.provenance === 'synthetic_demo';
 

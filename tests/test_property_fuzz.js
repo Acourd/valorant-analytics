@@ -412,6 +412,9 @@ property('plan: la acción solo cita métricas observadas y es determinista', ()
       assert.strictEqual(plan.estado, 'ACCION_DISPONIBLE');
       assert.ok(plan.accion.metrica && plan.accion.umbral !== undefined && plan.accion.procedencia && plan.accion.limitacion, 'acción completa');
       assert.ok(plan.rutina, 'acción con rutina disponible');
+      assert.notStrictEqual(plan.accion.area, 'ANGLE_ISOLATION', 'sin contexto temporal no hay lectura de aperturas');
+      const advice = JSON.stringify({ accion: plan.accion, rutina: plan.rutina });
+      assert.ok(!/entrar solo|tradeo|confirmar el tradeo|campo abierto/i.test(advice), 'sin consejo de tradeo/posición sin eventos');
       const m = plan.accion.metrica;
       if (m === 'hsPct') assert.ok(stats.headshotsPercentage !== undefined, 'HS citado y observado');
       if (m === 'fdMinusFk') assert.ok(stats.firstKills !== undefined && stats.firstDeaths !== undefined, 'FD/FK citados y observados');

@@ -72,7 +72,7 @@ function metricOrNull(metrics, key) {
  * Construye la evidencia mecánica a partir de las salidas de los módulos.
  * Solo lee campos OBSERVADOS; null cuando no existen.
  */
-function buildEvidence({ profile, weapon, matchProvenance, player } = {}) {
+function buildEvidence({ profile, weapon, matchProvenance, player, temporalContext } = {}) {
   const mech = (profile && profile.mechanical) || {};
   const zones = (weapon && weapon.zoneMetrics) || {};
   const metrics = {
@@ -88,7 +88,12 @@ function buildEvidence({ profile, weapon, matchProvenance, player } = {}) {
   const observed = {};
   for (const k of Object.keys(metrics)) observed[k] = metrics[k] !== null;
   const provenance = (profile && profile.provenance) || matchProvenance || sourceProvenance((profile && profile.meta) || {});
-  return { player: player || (profile && profile.player) || null, provenance, metrics, observed };
+  // Por defecto NO hay contexto temporal: las áreas que exigen trade/posición/
+  // tiempo quedan bloqueadas salvo que el llamador aporte evidencia observada.
+  const temporal = temporalContext && temporalContext.sufficient === true
+    ? temporalContext
+    : { timing: false, position: false, trade: false, sufficient: false };
+  return { player: player || (profile && profile.player) || null, provenance, metrics, observed, temporal };
 }
 
 /**
@@ -101,6 +106,7 @@ function evaluateWeaknesses(evidence) {
   const weaknesses = [];
   const missingMetrics = [];
   const requiredData = [];
+  const blockedByTemporal = [];
 
   const hs = o.hsPct ? metricOrNull(m, 'hsPct') : null;
   if (hs === null) {
@@ -124,7 +130,21 @@ function evaluateWeaknesses(evidence) {
     missingMetrics.push('fk/fd');
     requiredData.push('First kills y first deaths observados');
   } else if (fd > fk) {
-    weaknesses.push({ area: 'ANGLE_ISOLATION', reason: `Muertes de apertura (FD ${fd}) por encima de kills de apertura (FK ${fk})`, enablingMetric: 'fdMinusFk', threshold: THRESHOLDS.OPENING_DEFICIT.value });
+    const opening = {
+      area: 'ANGLE_ISOLATION',
+      requiresTemporal: true,
+      reason: `Muertes de apertura (FD ${fd}) por encima de kills de apertura (FK ${fk})`,
+      enablingMetric: 'fdMinusFk',
+      threshold: THRESHOLDS.OPENING_DEFICIT.value
+    };
+    // Regla dura: el agregado FK/FD NO habilita lectura de aperturas/tradeo.
+    // Se exige contexto observado (trade/posición/timestamp).
+    if (evidence.temporal && evidence.temporal.sufficient) {
+      weaknesses.push(opening);
+    } else {
+      blockedByTemporal.push(opening);
+      requiredData.push('eventos de ronda con marcas de trade, posición o timestamp (requisito para leer aperturas)');
+    }
   }
 
   const spray = o.sprayTapRatio ? metricOrNull(m, 'sprayTapRatio') : null;
@@ -145,25 +165,29 @@ function evaluateWeaknesses(evidence) {
     weaknesses: withExercise,
     missingMetrics: [...new Set(missingMetrics)],
     requiredData: [...new Set(requiredData)],
-    areasWithoutExercise
+    areasWithoutExercise,
+    areasBlockedByTemporal: blockedByTemporal.map(w => w.area)
   };
 }
 
 /** Decisión de rutina: solo si hay ≥1 debilidad fundamentada con ejercicio. */
 function canGenerateRoutine(evidence) {
-  const { weaknesses, missingMetrics, requiredData, areasWithoutExercise } = evaluateWeaknesses(evidence);
+  const { weaknesses, missingMetrics, requiredData, areasWithoutExercise, areasBlockedByTemporal } = evaluateWeaknesses(evidence);
   const anyObserved = Object.values(evidence.observed).some(Boolean);
   const omittedReason = weaknesses.length > 0
     ? null
-    : (anyObserved
-      ? 'Sin debilidad mecánica fundamentada: métricas observadas dentro del umbral documentado.'
-      : 'Sin evidencia mecánica observada suficiente.');
+    : (areasBlockedByTemporal.length > 0
+      ? 'Sin debilidad accionable: la lectura de aperturas/tradeo exige eventos de ronda con trade, posición o timestamp (no observados).'
+      : (anyObserved
+        ? 'Sin debilidad mecánica fundamentada: métricas observadas dentro del umbral documentado.'
+        : 'Sin evidencia mecánica observada suficiente.'));
   return {
     canGenerate: weaknesses.length > 0,
     weaknesses,
     missingMetrics,
     requiredData,
     areasWithoutExercise,
+    areasBlockedByTemporal,
     provenance: evidence.provenance,
     omittedReason,
     thresholds: THRESHOLDS
