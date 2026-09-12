@@ -1147,7 +1147,3 @@ module.exports = {
   printProvenance,
   getProjectVersion
 };
-
-if (require.main === module) {
-  runCli(process.argv.slice(2));
-}
