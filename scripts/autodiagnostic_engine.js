@@ -162,7 +162,9 @@ function evaluateTalentVsEffort(careerReport, options = {}) {
   if (!careerReport.summary || !careerReport.summary.totalGeneral) {
     throw new Error('evaluateTalentVsEffort requiere careerReport.summary.totalGeneral. Resumen ausente.');
   }
-  const zeroFpsBackground = options.zeroFpsBackground !== false; // default true based on user profile
+  // Atributo personal: solo si el usuario lo aporta explícitamente; sin él es
+  // NO OBSERVADO (null), jamás un default de perfil.
+  const zeroFpsBackground = typeof options.zeroFpsBackground === 'boolean' ? options.zeroFpsBackground : null;
   // Identidad estable por ID de cuenta (handle normalizado): trim + minúsculas
   // + NFC. Variantes Unicode canónicamente equivalentes son LA MISMA cuenta.
   // El primer snapshot de cada handle gana; los snapshots cambiantes jamás

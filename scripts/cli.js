@@ -952,8 +952,9 @@ try {
     console.log(`⏱️ AUDITORÍA DE CARRERA Y TIEMPO REAL: ${tel.handle}`);
     console.log(`------------------------------------------------------------------------`);
     console.log(`  • Horas en Competitivo (aportadas):  ${tel.competitive.formatted} (${tel.competitive.hours}h)`);
-    console.log(`  • Horas en Otros Modos (Casual):   ${tel.casual.formatted} (${tel.casual.hours}h)${tel.casual.allowanceHours > 0 ? ` [incluye allowance ${tel.casual.allowanceHours}h NO medidas]` : ''}`);
-    console.log(`  • Horas Totales Efectivas:         ${tel.general.formatted} (${tel.general.hours}h)`);
+    console.log(`  • Horas en Otros Modos (Casual):   ${tel.casual.formatted} (${tel.casual.hours}h)`);
+    console.log(`  • Horas Totales Observadas:        ${tel.general.formatted} (${tel.general.hours}h)`);
+    if (tel.general.estimatedSeconds > 0) console.log(`  • Estimación NO observada (aparte): ${tel.general.estimatedHours}h — no sumada a los totales`);
     console.log(`  • Rango Actual: ${tel.currentRank || 'n/d'} | Pico: ${tel.peakRank || 'n/d'}`);
     console.log(`  • Partidas: ${tel.competitive.matches} (Victorias: ${tel.competitive.wins}) | K/D: ${tel.competitive.kd} | HS: ${tel.competitive.hs}`);
     if (tel.casual.allowanceNote) console.log(`  • Nota casual: ${tel.casual.allowanceNote}`);

@@ -1,5 +1,16 @@
 # Changelog — valorant-analytics
 
+## 4.7.1 — Correcciones del veredicto 88
+
+- **HIGH — duo sin equipos observados:** no se asume mismo equipo por `undefined === undefined`; sin `teamId` en ambos → `INSUFFICIENT_DATA`, score nulo, sin consejo ni `carryAnalysis`.
+- **HIGH — `--json` en modo demo:** el aviso de demo se emite por `stderr`; `stdout` queda reservado a JSON válido.
+- **MED — demo sin objetivo:** error de entrada controlado (`TARGET_REQUIRED`) en lugar de `TypeError` interno.
+- **MED — career:** la asignación teórica de 25 h se expone aparte (`general.estimatedSeconds`) y **nunca** se suma a los totales observados.
+- **MED — autodiagnóstico:** `zeroFpsBackground` es `null` (no observado) salvo aporte explícito del usuario.
+- **MED — Riot:** se rechazan atestaciones con `fetchedAt` futuro más allá de la tolerancia de reloj documentada (5 min).
+- **LOW — CI:** `actions/checkout` y `actions/setup-node` fijadas por commit SHA.
+- Regresiones añadidas: `tests #140`–`#146` (146/146 checks).
+
 ## 4.7.0 — Bloque de madurez interna (sin terceros)
 
 - **Bloque A — Propiedades y fuzzing determinista:** nueva suite `tests/test_property_fuzz.js` (semilla fija, minimización por líneas al fallar) para parser Unicode/BOM, resolución de objetivo, sellado de procedencia y contratos entre módulos. Script `npm run test:properties`; CI la ejecuta con **3 semillas fijas**.

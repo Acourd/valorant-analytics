@@ -212,7 +212,12 @@ function verifyAttestation(attestation, options = {}) {
   if (att.endpoint !== matchEndpoint(matchId)) return { valid: false, reason: 'endpoint no corresponde al matchId' };
   if (Number.isNaN(Date.parse(String(att.fetchedAt)))) return { valid: false, reason: 'fetchedAt inválido' };
   const maxAgeMs = options.maxAgeMs || (7 * 24 * 3600 * 1000);
-  if (Date.now() - Date.parse(att.fetchedAt) > maxAgeMs) return { valid: false, reason: 'atestación caducada' };
+  const CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000; // tolerancia de reloj documentada (5 min)
+  const fetchedMs = Date.parse(att.fetchedAt);
+  if (fetchedMs - Date.now() > CLOCK_SKEW_TOLERANCE_MS) {
+    return { valid: false, reason: 'fetchedAt en el futuro (más allá de la tolerancia de reloj)' };
+  }
+  if (Date.now() - fetchedMs > maxAgeMs) return { valid: false, reason: 'atestación caducada' };
   if (options.payload !== undefined) {
     if (payloadDigest(options.payload) !== att.payloadDigest) return { valid: false, reason: 'digest del payload no coincide' };
   }

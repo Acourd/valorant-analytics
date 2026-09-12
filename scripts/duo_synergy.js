@@ -47,7 +47,11 @@ function auditDuoSynergy(matchData, handle1, handle2) {
 
   const p1 = playerMap[p1Key];
   const p2 = playerMap[p2Key];
-  const sameTeam = p1.team === p2.team;
+  // Pertenencia a equipo OBSERVADA: sin teamId en ambos no se puede saber si
+  // son compañeros (undefined === undefined NO es mismo equipo).
+  const teamsObserved = typeof p1.team === 'string' && p1.team.trim() !== '' &&
+    typeof p2.team === 'string' && p2.team.trim() !== '';
+  const sameTeam = teamsObserved && p1.team === p2.team;
 
   const { observedNumber, sourceProvenance, provenanceLabel } = require('./data_contract');
   const provenance = sourceProvenance(meta);
@@ -84,7 +88,10 @@ function auditDuoSynergy(matchData, handle1, handle2) {
     'Sin timestamps de ronda no se afirman tiempos de tradeo, refrags ni posicionamiento.'
   ];
 
-  if (!observedAcs) {
+  if (!observedAcs || !teamsObserved) {
+    const missing = [];
+    if (!observedAcs) missing.push('ACS (scorePerRound) observado para ambos jugadores');
+    if (!teamsObserved) missing.push('teamId observado para ambos jugadores (no se asume mismo equipo)');
     return {
       map: meta.mapName || null,
       matchId: meta.matchId || null,
@@ -98,7 +105,7 @@ function auditDuoSynergy(matchData, handle1, handle2) {
         acsDifferential: null,
         tacticalAdvice: null,
         carryAnalysis: null,
-        missing: ['ACS (scorePerRound) observado para ambos jugadores'],
+        missing,
         limitations
       }
     };
