@@ -1,5 +1,12 @@
 # Changelog — valorant-analytics
 
+## 4.7.3 — Bloque final de madurez técnica
+
+- **Wasm con cuota REAL:** el módulo del sandbox importa la memoria del host (`env.memory`), por lo que `maximum` es aplicado por el runtime (verificado con sonda de crecimiento); configuración validada (entero 1–64, máximo ≥ inicial) y auditoría que solo declara límites impuestos (`quotaEnforced`, `maxPagesEnforced`, `moduleImportsHostMemory`). Sin afirmaciones de cuota decorativa.
+- **CLI con parser determinista:** flags `--json`/`--demo`/`--trust-new-key` independientes del orden, nunca interpretados como archivo o jugador; flag desconocido → error controlado; un archivo existente sin extensión se admite sin sondear match IDs ni URLs; entradas inexistentes fallan cerradas.
+- **Contrato uniforme de errores JSON:** con `--json`, `stdout` contiene **exactamente un JSON parseable** (incluso en error) y los avisos humanos van a `stderr`; errores con forma estable `{ ok:false, exitCode, error:{ code, message, details } }`; códigos `0/1/2` preservados.
+- Regresiones: `tests #153`–`#158` + propiedades de permutación de flags (158/158 checks). Versión 4.7.3.
+
 ## 4.7.2 — Correcciones del veredicto 84
 
 - **HIGH — umbral MPC:** `verifyThreshold` exige entero `1 ≤ threshold ≤ keyholders confiables`; sobres vacíos o sin firmas se rechazan (`INVALID_THRESHOLD_FAIL_CLOSED` / `MALFORMED_ENVELOPE_FAIL_CLOSED`). El umbral 0 ya no admite nada.

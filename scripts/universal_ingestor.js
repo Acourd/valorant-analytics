@@ -470,7 +470,17 @@ function resolveMatchDataResilient(source, playerHandle = null, options = {}) {
   // Los IDs/URLs jamás provocan sondas: se clasifican por sintaxis primero.
   // Las URLs (https://...) se excluyen de la rama archivo aunque contengan '/'.
   const isUrl = typeof source === 'string' && /^https?:\/\//i.test(source);
-  const looksLikeFile = typeof source === 'string' && !isUrl && (/[\\/]/.test(source) || /\.(json|txt|md|csv)$/i.test(source));
+  const sep = typeof source === 'string' && /[\\/]/.test(source);
+  const ext = typeof source === 'string' && /\.(json|txt|md|csv)$/i.test(source);
+  // Archivo sin extensión: solo se sondea el filesystem para tokens que NO
+  // puedan ser match IDs, URLs ni cadenas codificadas (los IDs jamás sondean).
+  let bareExistingFile = false;
+  if (typeof source === 'string' && !isUrl && !sep && !ext && /^[^\s%?#]+$/.test(source)) {
+    let canonical = false;
+    try { canonical = require('./fetch_match').CANONICAL_MATCH_ID.test(source.trim()); } catch (e) { canonical = false; }
+    if (!canonical) bareExistingFile = fs.existsSync(source);
+  }
+  const looksLikeFile = typeof source === 'string' && !isUrl && (sep || ext || bareExistingFile);
   if (looksLikeFile) {
     if (!fs.existsSync(source)) {
       throw new Error(`Archivo no encontrado: "${source}". Proporciona una ruta existente, un volcado de scoreboard, un match ID canónico o usa --demo.`);
