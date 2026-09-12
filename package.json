@@ -1,6 +1,6 @@
 {
   "name": "valorant-analytics",
-  "version": "4.6.0",
+  "version": "4.7.0",
   "description": "Motor determinista de telemetría competitiva de Valorant (Node.js nativo, cero dependencias); biblioteca y CLI",
   "main": "scripts/index.js",
   "bin": {
@@ -16,13 +16,10 @@
     "examples/",
     "templates/",
     "docs/",
-    "tests/",
-    "test_suite.js",
-    "run_all_tests.js",
-    "opencode_tester.js",
     "README.md",
     "README.es.md",
     "README.en.md",
+    "CHANGELOG.md",
     "SKILL.md",
     "standalone_prompt.md",
     "LICENSE"
@@ -34,6 +31,8 @@
     "start": "node scripts/cli.js",
     "test": "node run_all_tests.js",
     "test:core": "node test_suite.js",
+    "test:properties": "node tests/test_property_fuzz.js",
+    "test:syntax": "node check_syntax.js",
     "audit": "node opencode_tester.js"
   },
   "license": "MIT",

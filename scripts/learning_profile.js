@@ -12,6 +12,27 @@ const { extractMatchId, fetchMatch } = require('./fetch_match');
 const { parseDuels } = require('./duel_matrix');
 const { analyzeEconomy } = require('./economy_analyzer');
 const { resolveExactHandle, sourceProvenance, provenanceLabel, mayAssertCauses, observedNumber } = require('./data_contract');
+const { THRESHOLDS } = require('./routine_contract');
+
+/**
+ * Detecta contexto temporal/posicional/trade OBSERVADO en los segmentos.
+ * Sin timestamps, posiciones o marcas de trade, queda PROHIBIDO emitir reglas
+ * de timing/tradeo/posicionamiento (solo rutina mecánica vinculada a HS%).
+ */
+function detectTemporalContext(matchData) {
+  const segments = (matchData && matchData.data && matchData.data.segments) || [];
+  const ctx = { timing: false, position: false, trade: false };
+  for (const s of segments) {
+    const a = s.attributes || {};
+    const m = s.metadata || {};
+    if (Number.isFinite(Number(a.roundTime)) || Number.isFinite(Number(m.roundTimeMs)) ||
+        Number.isFinite(Number(m.timestampMs)) || /T\d{2}:\d{2}/.test(String(m.timestamp || ''))) ctx.timing = true;
+    if (m.position || a.position || (Number.isFinite(Number(m.x)) && Number.isFinite(Number(m.y)))) ctx.position = true;
+    if (m.traded === true || a.traded === true || Number.isFinite(Number(m.tradeTimeMs))) ctx.trade = true;
+  }
+  ctx.sufficient = ctx.timing || ctx.position || ctx.trade;
+  return ctx;
+}
 
 function evaluateLearningProfile(matchData, targetHandle) {
   if (!matchData || typeof matchData !== 'object') {
@@ -146,11 +167,31 @@ function evaluateLearningProfile(matchData, targetHandle) {
       ? `Procedencia: ${provenanceLabel(provenance)}. Se describen observaciones; NO se emiten causas/fugas (requieren fuente verificada).`
       : (unknowns.length > 0 ? `Métricas no disponibles y excluidas del diagnóstico: ${unknowns.join(', ')}.` : null));
 
-  // 3. Prescripción SOLO con evidencia mecánica observada (HS%); sin datos: null.
-  const prescripcionInmediata = mechanical.hsPct === null ? null : {
-    reglaMental: 'Aplica la regla de los 2 segundos: antes de cada asomo, verifica en el minimapa si tienes un compañero a distancia de tradeo.',
-    sesionKovaaks: mechanical.hsPct >= 35 ? '5 min de Valorant Microshot Speed + 5 min de Thin Aiming Long' : '5 min de Pasu Small Reload + 5 min de 1wall6targets extra small'
-  };
+  // 3. Prescripción mecánica CONDICIONADA por el umbral documentado, no solo
+  // por la existencia de la métrica: correctiva si HS% < 25; con HS% ≥ 25 se
+  // declara "sin debilidad mecánica cubierta por esta regla" y NO se recomienda
+  // entrenamiento remedial. Las reglas de timing/tradeo siguen prohibidas sin
+  // timestamps/posición/trade observados.
+  const hsThreshold = THRESHOLDS.HS_LOW.value;
+  const hsObserved = mechanical.hsPct !== null;
+  const hsBelow = hsObserved && mechanical.hsPct < hsThreshold;
+  const temporalContext = detectTemporalContext(matchData);
+  const limitacion = temporalContext.sufficient
+    ? `Contexto temporal parcial detectado (${Object.keys(temporalContext).filter(k => temporalContext[k]).join('/')}): este contrato todavía no deriva reglas de tradeo verificadas.`
+    : 'Sin timestamps/posición/trade observados: se omite toda regla de timing/tradeo; solo rutina mecánica vinculada a HS% y su umbral.';
+  const prescripcionInmediata = hsObserved ? {
+    tipo: hsBelow ? 'correctiva' : 'sin_debilidad',
+    estado: hsBelow ? 'debilidad_cubierta' : 'sin_debilidad',
+    metrica: `HS% observado (${Number(mechanical.hsPct.toFixed(1))}%)`,
+    umbral: `${hsThreshold}% (${THRESHOLDS.HS_LOW.description})`,
+    reglaEvaluada: `HS% < ${hsThreshold}`,
+    sesionKovaaks: hsBelow ? '5 min de Pasu Small Reload + 5 min de 1wall6targets extra small' : null,
+    reglaMental: null,
+    motivo: hsBelow
+      ? `HS% ${Number(mechanical.hsPct.toFixed(1))} < umbral ${hsThreshold}%: debilidad mecánica cubierta por la regla.`
+      : `HS% ${Number(mechanical.hsPct.toFixed(1))} ≥ umbral ${hsThreshold}%: sin debilidad mecánica cubierta por esta regla; no se recomienda entrenamiento remedial.`,
+    limitacion
+  } : null;
 
   return {
     player: target,
@@ -218,10 +259,13 @@ if (require.main === module) {
     });
   }
 
-  if (res.prescripcionInmediata) {
-    console.log(`\n💡 PRESCRIPCIÓN INMEDIATA PARA TU SIGUIENTE SESIÓN:`);
-    console.log(`  • Regla Táctica:   ${res.prescripcionInmediata.reglaMental}`);
+  if (res.prescripcionInmediata && res.prescripcionInmediata.sesionKovaaks) {
+    console.log(`\n💡 PRESCRIPCIÓN CORRECTIVA (${res.prescripcionInmediata.metrica}; umbral ${res.prescripcionInmediata.umbral}):`);
     console.log(`  • Práctica Kovaaks: ${res.prescripcionInmediata.sesionKovaaks}`);
+    console.log(`  • Regla de timing/tradeo: OMITIDA — ${res.prescripcionInmediata.limitacion}`);
+  } else if (res.prescripcionInmediata) {
+    console.log(`\n✓ Sin debilidad mecánica cubierta por esta regla — ${res.prescripcionInmediata.motivo}`);
+    console.log(`  • Regla de timing/tradeo: OMITIDA — ${res.prescripcionInmediata.limitacion}`);
   } else {
     console.log(`\n💡 Prescripción omitida: sin HS% observado no se emite rutina.`);
   }

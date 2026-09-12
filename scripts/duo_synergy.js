@@ -49,77 +49,122 @@ function auditDuoSynergy(matchData, handle1, handle2) {
   const p2 = playerMap[p2Key];
   const sameTeam = p1.team === p2.team;
 
-  const totalRounds = meta.rounds || 20;
-  const p1Acs = parseFloat(p1.stats.scorePerRound?.displayValue || ((p1.stats.score?.value || 0) / totalRounds).toFixed(1));
-  const p2Acs = parseFloat(p2.stats.scorePerRound?.displayValue || ((p2.stats.score?.value || 0) / totalRounds).toFixed(1));
-  const p1Kd = parseFloat(p1.stats.kdRatio?.displayValue || ((p1.stats.kills?.value || 0) / Math.max(1, p1.stats.deaths?.value || 1)).toFixed(2));
-  const p2Kd = parseFloat(p2.stats.kdRatio?.displayValue || ((p2.stats.kills?.value || 0) / Math.max(1, p2.stats.deaths?.value || 1)).toFixed(2));
-  const p1Hs = parseFloat(p1.stats.hsAccuracy?.displayValue || p1.stats.headshotsPercentage?.displayValue || '0%');
-  const p2Hs = parseFloat(p2.stats.hsAccuracy?.displayValue || p2.stats.headshotsPercentage?.displayValue || '0%');
+  const { observedNumber, sourceProvenance, provenanceLabel } = require('./data_contract');
+  const provenance = sourceProvenance(meta);
+  // Métricas OBSERVADAS: null cuando no existen (sin defaults plausibles).
+  const p1Acs = observedNumber(p1.stats, ['scorePerRound']);
+  const p2Acs = observedNumber(p2.stats, ['scorePerRound']);
+  const p1Kd = observedNumber(p1.stats, ['kdRatio']);
+  const p2Kd = observedNumber(p2.stats, ['kdRatio']);
+  const p1Hs = observedNumber(p1.stats, ['hsAccuracy', 'headshotsPercentage']);
+  const p2Hs = observedNumber(p2.stats, ['hsAccuracy', 'headshotsPercentage']);
+  const observedAcs = p1Acs !== null && p2Acs !== null;
+  const agentsObserved = Boolean(p1.agent && p2.agent);
 
-  // Role compatibility check
-  const dualDuelist = ['Reyna', 'Jett', 'Iso', 'Raze', 'Phoenix', 'Yoru', 'Neon'].includes(p1.agent) &&
-                      ['Reyna', 'Jett', 'Iso', 'Raze', 'Phoenix', 'Yoru', 'Neon'].includes(p2.agent);
-  
-  const supportiveSetup = (['Iso', 'Jett', 'Reyna'].includes(p1.agent) && ['Sova', 'Skye', 'Fade', 'Clove', 'Omen'].includes(p2.agent)) ||
-                          (['Iso', 'Jett', 'Reyna'].includes(p2.agent) && ['Sova', 'Skye', 'Fade', 'Clove', 'Omen'].includes(p1.agent));
+  const playerView = (p, acs, kd, hs) => ({
+    handle: p.handle,
+    agent: p.agent || null,
+    rank: p.rank === 'Unranked' ? null : p.rank,
+    acs,
+    kd,
+    hs
+  });
 
-  // Carry load differential
+  // Role compatibility check (solo si los agentes están observados).
+  const duelists = ['Reyna', 'Jett', 'Iso', 'Raze', 'Phoenix', 'Yoru', 'Neon'];
+  const supports = ['Sova', 'Skye', 'Fade', 'Clove', 'Omen'];
+  const dualDuelist = agentsObserved && duelists.includes(p1.agent) && duelists.includes(p2.agent);
+  const supportiveSetup = agentsObserved && (
+    (duelists.includes(p1.agent) && supports.includes(p2.agent)) ||
+    (duelists.includes(p2.agent) && supports.includes(p1.agent))
+  );
+
+  const limitations = [
+    'Datos locales normalizados (NO verificados): describen agregados del marcador, no causalidad ni mejora.',
+    'Sin timestamps de ronda no se afirman tiempos de tradeo, refrags ni posicionamiento.'
+  ];
+
+  if (!observedAcs) {
+    return {
+      map: meta.mapName || null,
+      matchId: meta.matchId || null,
+      provenance,
+      provenanceLabel: provenanceLabel(provenance),
+      p1: playerView(p1, p1Acs, p1Kd, p1Hs),
+      p2: playerView(p2, p2Acs, p2Kd, p2Hs),
+      synergy: {
+        score: null,
+        verdict: 'INSUFFICIENT_DATA',
+        acsDifferential: null,
+        tacticalAdvice: null,
+        carryAnalysis: null,
+        missing: ['ACS (scorePerRound) observado para ambos jugadores'],
+        limitations
+      }
+    };
+  }
+
   const acsDiff = Math.abs(p1Acs - p2Acs);
   const primaryCarrier = p1Acs >= p2Acs ? p1.handle : p2.handle;
   const secondaryPlayer = p1Acs >= p2Acs ? p2.handle : p1.handle;
   const carrierAcs = Math.max(p1Acs, p2Acs);
   const secondaryAcs = Math.min(p1Acs, p2Acs);
-  // Clasificación honesta de carga: asimetría extrema + brecha de K/D => candidato a boost
-  const carryGapRatio = carrierAcs > 0 ? Math.round((carrierAcs / Math.max(1, secondaryAcs)) * 10) / 10 : 1;
-  const boostCandidate = acsDiff >= 120 && carryGapRatio >= 2.0;
+  const carryGapRatio = secondaryAcs > 0 ? Math.round((carrierAcs / Math.max(1, secondaryAcs)) * 10) / 10 : null;
+  const boostCandidate = acsDiff >= 120 && carryGapRatio !== null && carryGapRatio >= 2.0;
   const carryAnalysis = {
     primaryCarrier,
     secondaryPlayer,
     acsDifferential: Math.round(acsDiff * 10) / 10,
-    carrierToSecondaryRatio: `${carryGapRatio}x`,
+    carrierToSecondaryRatio: carryGapRatio === null ? 'n/d' : `${carryGapRatio}x`,
     boostCandidate,
     note: boostCandidate
-      ? `El diferencial de impacto es extremo (${carryGapRatio}x). ${primaryCarrier} sostiene la partida; ${secondaryPlayer} debe priorizar utilidad y supervivencia, no duelos de entrada.`
-      : 'Carga razonablemente distribuida. Mantener el orden de entrada definido por rol.'
+      ? `Diferencial de ACS observado extremo (${carryGapRatio}x). Heurística descriptiva, no un veredicto de boosting.`
+      : 'Carga de impacto distribuida según el ACS observado.'
   };
 
-  let synergyRating = 75;
-  let verdict = 'EQUILIBRADO';
-  let tacticalAdvice = '';
+  // Rating heurístico SOLO con ACS observado; se declara su base y límite.
+  const scoreBasis = 'Heurística sobre ΔACS y agentes observados (no validada con resultados de victoria).';
+  let synergyRating = 70;
+  let verdict = 'REGULAR';
+  let tacticalAdvice = 'Sinergia neutra según los agregados observados.';
 
   if (!sameTeam) {
     verdict = 'RIVALES DIRECTOS (Equipos opuestos)';
-    tacticalAdvice = 'Los jugadores no están en el mismo equipo en este enfrentamiento.';
+    tacticalAdvice = 'Los jugadores no están en el mismo equipo en este enfrentamiento; no hay sinergia que evaluar.';
   } else if (dualDuelist) {
     synergyRating = Math.max(40, 70 - Math.round(acsDiff / 8));
-    verdict = '🔴 FRICCIÓN DE ROL (Doble Duelista)';
-    tacticalAdvice = 'Ambos jugadores compiten por los mismos recursos de apertura y orbes. Uno de los dos debe flexear a Iniciador o Controlador para maximizar el win rate.';
+    verdict = 'FRICCIÓN DE ROL (Doble Duelista)';
+    tacticalAdvice = 'Ambos agentes observados son duelistas: según la composición, uno podría flexear a Iniciador o Controlador.';
   } else if (supportiveSetup && acsDiff > 100) {
     synergyRating = 82;
-    verdict = '🟡 ASIMÉTRICO FUNCIONAL (Motor + Soporte de Utilidad)';
-    tacticalAdvice = `${primaryCarrier} asume el 65%+ de la carga de bajas, mientras ${secondaryPlayer} debe priorizar la supervivencia para mantener la utilidad activa (drones, flechas, humos).`;
+    verdict = 'ASIMÉTRICO FUNCIONAL (Motor + Soporte de Utilidad)';
+    tacticalAdvice = `${primaryCarrier} concentra el impacto observado; ${secondaryPlayer} sostiene utilidad según los agentes registrados.`;
   } else if (supportiveSetup) {
     synergyRating = 94;
-    verdict = '🟢 SINERGIA DE ÉLITE (Dúo Complementario)';
-    tacticalAdvice = 'Excelente balance de utilidad y entrada. Mantengan las distancias cortas para asegurar el 100% de re-frags en menos de 2 segundos.';
+    verdict = 'COMPLEMENTARIO (Duelista + Soporte observados)';
+    tacticalAdvice = 'Composición complementaria según agentes observados; mantened distancias de tradeo sin asumir tiempos no medidos.';
   } else {
     synergyRating = 70;
-    verdict = '🟡 REGULAR';
-    tacticalAdvice = 'Sinergia neutra. Aseguren coordinar sus compras económicas para nunca tener a uno forzado y al otro en eco.';
+    verdict = 'REGULAR';
+    tacticalAdvice = 'Sinergia neutra según los agregados observados; coordinad compras económicas para evitar desfases.';
   }
 
   return {
-    map: meta.mapName,
-    matchId: meta.matchId,
-    p1: { handle: p1.handle, agent: p1.agent, rank: p1.rank, acs: p1Acs, kd: p1Kd, hs: `${p1Hs}%` },
-    p2: { handle: p2.handle, agent: p2.agent, rank: p2.rank, acs: p2Acs, kd: p2Kd, hs: `${p2Hs}%` },
+    map: meta.mapName || null,
+    matchId: meta.matchId || null,
+    provenance,
+    provenanceLabel: provenanceLabel(provenance),
+    p1: playerView(p1, p1Acs, p1Kd, p1Hs),
+    p2: playerView(p2, p2Acs, p2Kd, p2Hs),
     synergy: {
       score: `${synergyRating} / 100`,
+      scoreBasis,
       verdict,
       acsDifferential: `Δ ${acsDiff.toFixed(1)} ACS`,
       tacticalAdvice,
-      carryAnalysis
+      carryAnalysis,
+      missing: [],
+      limitations
     }
   };
 }

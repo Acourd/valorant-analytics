@@ -17,5 +17,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
+      - run: node check_syntax.js
       - run: node run_all_tests.js
       - run: node opencode_tester.js

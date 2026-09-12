@@ -263,7 +263,11 @@ check('analyzeWeaponTelemetry: cálculo de zonas (Head/Body/Leg) y SE/TP spray r
     assert.ok(res.hitZoneDistribution.body.includes('%'));
     assert.ok(res.hitZoneDistribution.leg.includes('%'));
     assert.ok(typeof res.metrics.sprayTapRatio === 'number');
-    assert.ok(res.recoilDiagnosis && res.recoilDiagnosis.kovaaksPrescription);
+    assert.ok(res.recoilDiagnosis && typeof res.recoilDiagnosis.analisisTactico === 'string', 'diagnóstico mecánico estructurado ausente');
+    assert.ok(res.recoilDiagnosis.metric && res.recoilDiagnosis.threshold && res.recoilDiagnosis.limitation, 'diagnóstico sin métrica/umbral/limitación');
+    if (res.recoilDiagnosis.kovaaksPrescription !== null) {
+      assert.ok(res.recoilDiagnosis.prescriptionBasis, 'prescripción exige base/umbral documentado');
+    }
   });
 
 check('analyzeWeaponTelemetry: zonas observadas y distancia n/d (sin inferir por loadout)',
@@ -590,7 +594,8 @@ check('career milestones: opciones personalizadas (mainAgent/speedrunHours) sin 
     assert.ok(t1.some(m => m.contexto.includes('Jett')), 'mainAgent no aplicado');
     assert.ok(t1.some(m => m.tramoHoras === 12.5), 'speedrunHours no aplicado');
     const t2 = generateMilestonesTimeline(career);
-    assert.ok(t2.some(m => m.contexto.includes('Iso')), 'default Iso no preservado');
+    assert.ok(t2.some(m => m.tipo === 'ilustrativo'), 'escenarios ilustrativos presentes');
+    assert.ok(!t2.some(m => /Iso/.test(m.contexto)), 'sin agente por defecto inventado');
   });
 
 check('autodiagnostic: cuenta malformada parcial no truena en agregados',
@@ -653,12 +658,15 @@ check('cli.js duels: objetivo ausente no auto-selecciona (fail-closed con candid
     assert.ok(!/MATRIZ DE DUELOS 1v1 DIRECTOS/.test(out), 'no debe analizar a un jugador arbitrario');
   });
 
-check('cli.js duo: dispatcher sin jugadores resuelve compañeros dinámicamente con Exit Code 0',
+check('cli.js duo: sin jugadores falla cerrado (exit 1, candidatos, sin informe)',
   () => {
-    const out = execFileSync(process.execPath, [cliPath, 'duo', sampleFile], { encoding: 'utf8' });
-    assert.ok(out.includes('AUDITORÍA DE DÚO'), 'Encabezado ausente');
-    assert.ok(out.includes('Sinergia:'), 'Puntuación de sinergia ausente');
-    assert.ok(!out.includes('None and None'), 'No debe fallar por jugadores no encontrados');
+    let code = 0;
+    let out = '';
+    try { execFileSync(process.execPath, [cliPath, 'duo', sampleFile], { encoding: 'utf8' }); }
+    catch (e) { code = e.status; out = String(e.stdout || '') + String(e.stderr || ''); }
+    assert.strictEqual(code, 1, 'debe salir 1');
+    assert.ok(/requiere DOS Riot IDs/.test(out) && /Candidatos/.test(out), 'debe pedir ambos IDs y listar candidatos');
+    assert.ok(!/AUDITORÍA DE DÚO/.test(out), 'no debe emitir informe');
   });
 
 check('cli.js economy: dispatcher ejecuta desglose de buy-tiers con Exit Code 0',
@@ -673,8 +681,16 @@ check('cli.js coaching: dispatcher ejecuta reporte introspectivo con Exit Code 0
   () => {
     const out = execFileSync(process.execPath, [cliPath, 'coaching', sampleFile, 'TenZ#0001'], { encoding: 'utf8' });
     assert.ok(out.includes('REPORTE INTROSPECTIVO DE COACHING TÁCTICO'), 'Encabezado ausente');
-    assert.ok(out.includes('MÓDULOS Y GUÍAS DE APRENDIZAJE'), 'Módulos ausentes');
-    assert.ok(out.includes('youtube.com'), 'Enlaces ausentes');
+    assert.ok(/RECOMENDACIONES|EVIDENCIA INSUFICIENTE/.test(out), 'estado de recomendaciones ausente');
+    if (out.includes('RECOMENDACIONES')) {
+      if (/ninguna recomendación habilitada/.test(out)) {
+        assert.ok(!/youtube.com/.test(out), 'sin recomendaciones no debe renderizar recursos');
+      } else {
+        assert.ok(out.includes('Métrica:') && out.includes('Umbral:') && out.includes('Limitación:'), 'recomendación sin métrica/umbral/limitación');
+        assert.ok(out.includes('youtube.com'), 'Enlaces de recursos recomendados ausentes');
+      }
+      assert.ok(!/Dominio favorable/.test(out), 'no debe afirmar dominio sin datos');
+    }
   });
 
 check('cli.js match: shorthand de jugador resuelve sobre sample_match sin WAF sintético',
@@ -2526,6 +2542,150 @@ check('cli.js parse: sin fugas ni rutina cuando solo hay métricas mínimas',
       assert.ok(!/RUTINA KOVAAKS:|REGLA MENTAL:/.test(out), 'no debe prescribir rutina sin HS% observado');
     } finally {
       fs.unlinkSync(tmp);
+    }
+  });
+
+// ---- Bloque de madurez (v4.7): contrato CLI, códigos de salida, empaquetado ----
+
+check('cli.js --json parse: salida estructurada pura (sin líneas humanas)',
+  () => {
+    const tmp = path.join(os.tmpdir(), `parse-json-${process.pid}.txt`);
+    fs.writeFileSync(tmp, 'Focus#NA1\t10\t8\t2\t150\t120\n', 'utf8');
+    try {
+      const out = cliOk(['parse', tmp, 'Focus#NA1', '--json']);
+      const payload = JSON.parse(out);
+      assert.strictEqual(payload.command, 'parse');
+      assert.strictEqual(payload.player, 'Focus#NA1');
+      assert.strictEqual(payload.provenance, 'normalized_input');
+      assert.ok(payload.radar && typeof payload.radar === 'object');
+      assert.ok(!/=====|📋/.test(out), 'la salida JSON no debe contener render humano');
+    } finally {
+      fs.unlinkSync(tmp);
+    }
+  });
+
+check('cli.js --json match: JSON válido con procedencia y evidencia',
+  () => {
+    const out = cliOk(['match', sampleFile, 'TenZ#0001', '--json']);
+    const payload = JSON.parse(out);
+    assert.strictEqual(payload.command, 'match');
+    assert.strictEqual(payload.provenance, 'normalized_input');
+    assert.ok(payload.evidence && typeof payload.evidence.level === 'string');
+    assert.ok(Array.isArray(payload.eloLeaks));
+    assert.ok(!/=====|🎯/.test(out), 'la salida JSON no debe contener render humano');
+  });
+
+check('códigos de salida: 0 válido, 1 objetivo inválido, 2 evidencia insuficiente',
+  () => {
+    const ok = execFileSync(process.execPath, [cliPath, 'match', sampleFile, 'TenZ#0001'], { encoding: 'utf8' });
+    assert.ok(ok.length > 0, 'resultado válido con exit 0');
+    let code = 0;
+    let out = '';
+    try { cliOk(['match', sampleFile, 'NoExiste#9999']); }
+    catch (e) { code = e.status; out = String(e.stdout || '') + String(e.stderr || ''); }
+    assert.strictEqual(code, 1, 'objetivo inválido => 1');
+    assert.ok(/no encontrado/i.test(out), 'error accionable');
+    code = 0;
+    out = '';
+    try { cliOk(['guardian', sampleFile, 'TenZ#0001']); }
+    catch (e) { code = e.status; out = String(e.stdout || '') + String(e.stderr || ''); }
+    assert.strictEqual(code, 2, 'evidencia insuficiente => 2');
+    assert.ok(/INSUFICIENTE|NO_DATA/.test(out), 'declara insuficiencia');
+  });
+
+check('ayuda CLI: documenta --json y los códigos de salida 0/1/2',
+  () => {
+    const out = cliOk(['--help']);
+    assert.ok(/--json/.test(out), 'debe documentar --json');
+    assert.ok(/CÓDIGOS DE SALIDA/.test(out) && /0 = resultado/.test(out) && /2 = evidencia insuficiente/.test(out), 'debe documentar códigos de salida');
+    assert.ok(/ningún comando selecciona un jugador silenciosamente/i.test(out), 'debe declarar selección explícita');
+    assert.ok(!/Anti-WAF/i.test(out), 'no debe prometer anti-WAF retirado');
+  });
+
+check('sin selección silenciosa: invariants sin jugador falla con candidatos',
+  () => {
+    let code = 0;
+    let out = '';
+    try { cliOk(['invariants', sampleFile]); }
+    catch (e) { code = e.status; out = String(e.stdout || '') + String(e.stderr || ''); }
+    assert.notStrictEqual(code, 0, 'debe fallar sin objetivo explícito');
+    assert.ok(/Objetivo no especificado/.test(out) && /Candidatos/.test(out), 'debe pedir selección y listar candidatos');
+  });
+
+check('paquete: files excluye artefactos de desarrollo y CI ejecuta syntax check',
+  () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+    assert.ok(pkg.files.includes('scripts/') && pkg.files.includes('CHANGELOG.md'), 'runtime y changelog en el paquete');
+    for (const junk of ['tests/', 'test_suite.js', 'opencode_tester.js', 'run_all_tests.js', 'check_syntax.js']) {
+      assert.ok(!pkg.files.includes(junk), `no debe distribuirse: ${junk}`);
+    }
+    assert.ok(fs.existsSync(path.join(__dirname, 'check_syntax.js')), 'check_syntax.js debe existir');
+    const ci = fs.readFileSync(path.join(__dirname, '.github', 'workflows', 'ci.yml'), 'utf8');
+    assert.ok(/check_syntax\.js/.test(ci), 'CI debe ejecutar la comprobación de sintaxis');
+    assert.ok(/test:properties|test_property_fuzz/.test(JSON.stringify(pkg.scripts)), 'script npm de propiedades');
+  });
+
+check('duo: sin jugadores falla cerrado (exit 1, candidatos, sin informe)',
+  () => {
+    let code = 0;
+    let out = '';
+    try { cliOk(['duo', sampleFile]); }
+    catch (e) { code = e.status; out = String(e.stdout || '') + String(e.stderr || ''); }
+    assert.strictEqual(code, 1, 'duo sin jugadores => exit 1');
+    assert.ok(/requiere DOS Riot IDs/.test(out) && /Candidatos/.test(out), 'debe exigir ambos IDs y listar candidatos');
+    assert.ok(!/AUDITORÍA DE DÚO|Sinergia:/.test(out), 'no debe analizar a jugadores no solicitados');
+  });
+
+check('prescripción: sin eventos temporales no hay regla de timing/tradeo',
+  () => {
+    const p = evaluateLearningProfile(sample, 'TenZ#0001');
+    if (p.prescripcionInmediata) {
+      assert.strictEqual(p.prescripcionInmediata.reglaMental, null, 'regla mental bloqueada sin timestamps/posición/trade');
+      assert.ok(/HS% observado/i.test(p.prescripcionInmediata.metrica), 'rutina vinculada a HS% observado');
+      assert.ok(/25/.test(p.prescripcionInmediata.umbral), 'umbral documentado');
+      assert.ok(p.prescripcionInmediata.limitacion, 'limitación declarada');
+      const hs = p.mechanical.hsPct;
+      if (hs !== null && hs < 25) assert.ok(p.prescripcionInmediata.sesionKovaaks, 'HS<25 => rutina correctiva');
+      if (hs !== null && hs >= 25) {
+        assert.strictEqual(p.prescripcionInmediata.sesionKovaaks, null, 'HS>=25 => sin entrenamiento remedial');
+        assert.ok(/sin debilidad mecánica cubierta/i.test(p.prescripcionInmediata.motivo), 'declara sin debilidad');
+      }
+    }
+    const tmp = path.join(os.tmpdir(), `presc-${process.pid}.txt`);
+    fs.writeFileSync(tmp, 'kirtmy#000\tIso\tGold 2\t21\t14\t5\t245\t162\t26%\n', 'utf8');
+    try {
+      for (const out of [cliOk(['match', sampleFile, 'TenZ#0001']), cliOk(['parse', tmp, 'kirtmy#000'])]) {
+        assert.ok(!/regla de los 2 segundos|compañero a distancia de tradeo/i.test(out), 'no debe emitir timing/tradeo sin contexto');
+        assert.ok(!/REGLA MENTAL:/.test(out), 'no debe renderizar regla mental');
+        assert.ok(!/RUTINA CORRECTIVA|RUTINA KOVAAKS:/.test(out), 'HS>=25 no debe recomendar entrenamiento remedial');
+      }
+    } finally {
+      fs.unlinkSync(tmp);
+    }
+  });
+
+check('prescripción mecánica: umbral HS real (24.9 correctiva; 25.0 y 35+ sin debilidad)',
+  () => {
+    const mk = hs => ({
+      data: {
+        metadata: { matchId: 'th', provenance: 'normalized_input' },
+        segments: [{
+          type: 'player-summary',
+          attributes: { platformUserIdentifier: 'F#1' },
+          metadata: { platformUserHandle: 'F#1' },
+          stats: { headshotsPercentage: { displayValue: `${hs}%` } }
+        }]
+      }
+    });
+    const low = evaluateLearningProfile(mk(24.9), 'F#1');
+    assert.strictEqual(low.prescripcionInmediata.tipo, 'correctiva', '24.9 < 25 debe ser correctiva');
+    assert.ok(low.prescripcionInmediata.sesionKovaaks, '24.9 debe recomendar rutina');
+    assert.ok(/< 25/.test(low.prescripcionInmediata.reglaEvaluada), 'regla evaluada explícita');
+    for (const hs of [25.0, 35.0]) {
+      const p = evaluateLearningProfile(mk(hs), 'F#1');
+      assert.strictEqual(p.prescripcionInmediata.tipo, 'sin_debilidad', `${hs} >= 25 => sin debilidad`);
+      assert.strictEqual(p.prescripcionInmediata.sesionKovaaks, null, `${hs} no debe recomendar entrenamiento remedial`);
+      assert.ok(/sin debilidad mecánica cubierta/i.test(p.prescripcionInmediata.motivo), 'motivo explícito');
     }
   });
 

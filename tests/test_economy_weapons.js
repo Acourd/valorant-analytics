@@ -27,7 +27,10 @@ assert.strictEqual(weapons.zoneMetrics.observed, true, 'Debe haber impactos obse
 assert.strictEqual(weapons.distanceBands, null, 'Sin posiciones no se infieren bandas de distancia');
 assert.ok(/n\/d/.test(weapons.distanceNote), 'La ausencia de distancia debe declararse n/d');
 assert.ok(typeof weapons.metrics.sprayTapRatio === 'number', 'Ratio SE/TP debe ser numérico');
-assert.ok(weapons.recoilDiagnosis.kovaaksPrescription.length > 0, 'Debe prescribir ejercicio de Kovaaks para recoil');
+assert.ok(weapons.recoilDiagnosis.metric && weapons.recoilDiagnosis.threshold && weapons.recoilDiagnosis.limitation, 'Diagnóstico con métrica/umbral/limitación');
+if (weapons.recoilDiagnosis.kovaaksPrescription !== null) {
+  assert.ok(weapons.recoilDiagnosis.prescriptionBasis.length > 0, 'Prescripción exige base/umbral documentado');
+}
 // Sin eventos de daño: no se prescribe y no se inventan zonas.
 const empty = { data: { metadata: { matchId: 'x' }, segments: [{ type: 'player-summary', attributes: { platformUserIdentifier: 'A#1' }, metadata: { platformUserHandle: 'A#1' }, stats: {} }] } };
 const none = analyzeWeaponTelemetry(empty, 'A#1');

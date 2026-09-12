@@ -1,9 +1,15 @@
 #!/usr/bin/env node
 /**
- * coaching_engine.js - Introspective Performance Diagnosis & Visual Learning Engine
- * Analyzes match telemetry errors and pairs them with specific tactical adjustments,
- * training drills, and curated YouTube learning resources.
- * 
+ * coaching_engine.js - Introspective Performance Diagnosis & Learning Resources
+ *
+ * Vincula errores OBSERVADOS en la telemetría (duelos por ronda y K/D del
+ * marcador) con recursos educativos GENÉRICOS. Reglas:
+ *   - Recomendación SOLO si hay métrica observada que cruce un umbral explícito.
+ *   - Los recursos no recomendados NO se renderizan ni se presentan como
+ *     diagnóstico.
+ *   - Cada recomendación declara métrica, umbral, procedencia y limitación.
+ *   - Sin datos observados: INSUFFICIENT_DATA, sin recomendaciones.
+ *
  * Usage: node coaching_engine.js <match_id_or_json> [target_handle]
  */
 
@@ -13,46 +19,53 @@ const { parseDuels } = require('./duel_matrix');
 
 const CURATED_RESOURCES = {
   iso_site_entry: {
-    title: 'Apertura de Sitios con ISO & Uso Angular de Contingency',
+    title: 'Apertura de Sitios con Agentes de Entrada & Uso Angular de Utilidad',
     creators: ['Zonda FPS (Español)', 'Woohoojin (Inglés)', 'SkillCapped Valorant', 'ikahQT (Radiant Iso)'],
     keyConcepts: [
-      'Uso diagonal de la muralla (Contingency) para cortar crossfires en vez de avanzar en línea recta',
-      'Combo Undercut + Double Tap: debufeo a través de pared para asegurar 1-tap al cuerpo',
-      'Esperar la utilidad de soporte de iniciador antes de cruzar cables de Cypher / Vyse'
+      'Uso diagonal de la utilidad de entrada para cortar crossfires en vez de avanzar en línea recta',
+      'Combo de utilidad + double tap coordinado con el soporte',
+      'Esperar la utilidad de soporte de iniciador antes de cruzar utilidades de anclaje'
     ],
     searchQuery: 'https://www.youtube.com/results?search_query=valorant+iso+site+entry+guide'
   },
   gunfight_hygiene: {
-    title: 'Higiene de Duelo (Gunfight Hygiene) & Counter-Strafing vs Diamantes',
+    title: 'Higiene de Duelo (Gunfight Hygiene) & Counter-Strafing',
     creators: ['Woohoojin (Gunfight Hygiene Guide)', 'Sero Valorant (Movement & Peeking)', 'Valorant Domingo (Español)'],
     keyConcepts: [
       'Dead-zoning y A-D counter-strafing para evitar quedar estático al disparar',
-      'Pre-aiming a off-angles verticales (cajas de B en Sunset, generador en Ascent)',
-      'Nunca agacharse (crouch spray) en el primer micro-segundo de un duelo contra rifles'
+      'Pre-aiming a off-angles verticales',
+      'Evitar el crouch-spray instantáneo en el primer contacto contra rifles'
     ],
     searchQuery: 'https://www.youtube.com/results?search_query=valorant+gunfight+hygiene+woohoojin'
   },
   disadvantage_pacing: {
-    title: 'Gestión de Desventaja Numérica (3v5 y 2v4) & Pacing de Retake',
+    title: 'Gestión de Desventaja Numérica & Pacing de Retake',
     creators: ['Valorant Domingo (Español)', 'Sovereign Guides', 'Coach Mills'],
     keyConcepts: [
-      'Freno de emergencia: si 2 compañeros mueren a los 15s, congelar el empuje y jugar a rotación/fake',
-      'Ceder el sitio en defensa para jugar el retake 5v4/4v4 agrupado con escudo de Iso',
-      'Aislar duelos 1v1 individuales en vez de intentar un spray-transfer contra 2 enemigos'
+      'Freno de emergencia tras muertes tempranas: congelar el empuje y jugar rotación/fake',
+      'Ceder el sitio en defensa para jugar el retake agrupado',
+      'Aislar duelos 1v1 en vez de intentar un spray-transfer contra dos enemigos'
     ],
     searchQuery: 'https://www.youtube.com/results?search_query=valorant+how+to+play+numbers+disadvantage+guide'
   },
   fatigue_and_consistency: {
-    title: 'Gestión de Fatiga Neuromuscular & Consistencia en Baja Sensibilidad',
+    title: 'Gestión de Fatiga y Consistencia Mecánica',
     creators: ['Voltaic Aim Community', 'Ronn Rhythms', 'Zonda FPS'],
     keyConcepts: [
-      'Estructura 3+1: máximo 3 partidas competitivas por bloque para evitar caída de HS% (de 42% a 24%)',
-      'Rutina de 10 min de reseteo motor entre partidas (micro-ajustes de dedos)',
-      'Cero partidas de promoción con privación de sueño'
+      'Bloques de juego acotados con pausas de reseteo motor entre partidas',
+      'Rutina breve de micro-ajustes antes de competir',
+      'Evitar sesiones de promoción con privación de sueño'
     ],
     searchQuery: 'https://www.youtube.com/results?search_query=valorant+aim+consistency+voltaic'
   }
 };
+
+const RESOURCE_NOTE = 'Recurso educativo GENÉRICO: no es un diagnóstico ni deriva de métricas observadas.';
+
+function findSummary(segments, handle) {
+  return segments.find(s => s.type === 'player-summary' &&
+    (s.metadata?.platformUserHandle === handle || s.attributes?.platformUserIdentifier === handle)) || null;
+}
 
 function generateCoachingReport(matchData, targetHandle) {
   if (!matchData || typeof matchData !== 'object') {
@@ -60,57 +73,113 @@ function generateCoachingReport(matchData, targetHandle) {
   }
   const { playerMap, duelMatrix, target } = parseDuels(matchData, targetHandle);
   const effectiveTarget = target || require('./data_contract').resolveExactHandle(Object.keys(playerMap), targetHandle);
-  
+
   if (!effectiveTarget || !playerMap[effectiveTarget]) {
     return { error: `Player ${targetHandle || 'desconocido'} not found in match.` };
   }
 
+  const segments = matchData.data?.segments || [];
+  const killSegments = segments.filter(s => s.type === 'player-round-kills');
   const p = playerMap[effectiveTarget];
-  const opponents = Object.values(playerMap).filter(o => o.team !== p.team);
-  const killsOnOpponents = duelMatrix[effectiveTarget] || {};
+  const summary = findSummary(segments, effectiveTarget);
+  const st = (summary && summary.stats) || {};
+  const killsObserved = st.kills && st.kills.value !== undefined && st.kills.value !== null;
+  const deathsObserved = st.deaths && st.deaths.value !== undefined && st.deaths.value !== null;
+  const pKills = killsObserved ? Number(st.kills.value) : null;
+  const pDeaths = deathsObserved ? Number(st.deaths.value) : null;
+  const duelDataObserved = killSegments.length > 0;
+
+  const basePlayer = {
+    handle: p.handle,
+    agent: p.agent || null,
+    rank: p.rank === 'Unranked' ? null : p.rank,
+    team: p.team || null
+  };
+  const provenance = 'normalized_input';
+  const globalLimitations = [
+    'Datos locales normalizados (NO verificados): describen duelos observados, no causas ni mejora garantizada.',
+    'Sin timestamps de ronda no se afirman tiempos de tradeo ni refrags.'
+  ];
+
+  if (!duelDataObserved && !(killsObserved && deathsObserved)) {
+    return {
+      player: basePlayer,
+      provenance,
+      insufficient: true,
+      hardOpponents: [],
+      resources: {},
+      recommendations: [],
+      unrecommended: Object.keys(CURATED_RESOURCES),
+      missing: ['eventos player-round-kills o K/D del marcador observados'],
+      limitations: globalLimitations
+    };
+  }
 
   const hardOpponents = [];
-  opponents.forEach(opp => {
-    const kills = killsOnOpponents[opp.handle] || 0;
-    const deaths = (duelMatrix[opp.handle] || {})[effectiveTarget] || 0;
-    if (deaths > kills) {
-      hardOpponents.push({ opp, kills, deaths, diff: deaths - kills });
-    }
-  });
-
-  // Recomendaciones SOLO con condición respaldada por la telemetría del objetivo.
-  const isEntryAgent = ['Iso', 'Jett', 'Raze', 'Neon', 'Yoru', 'Reyna', 'Phoenix'].includes(p.agent);
-  const pKills = p.kills || 0;
-  const pDeaths = p.deaths || 0;
-  const recommendations = [];
-  if (isEntryAgent || hardOpponents.length > 0) {
-    recommendations.push({
-      module: 'iso_site_entry',
-      trigger: isEntryAgent ? `Agente de entrada (${p.agent})` : `Fricción real vs ${hardOpponents.map(h => h.opp.handle).join(', ')}`,
-      rationale: 'Aperturas de sitio respaldadas por telemetría de duelos del objetivo.'
+  if (duelDataObserved) {
+    const opponents = Object.values(playerMap).filter(o => o.team !== p.team);
+    const killsOnOpponents = duelMatrix[effectiveTarget] || {};
+    opponents.forEach(opp => {
+      const kills = killsOnOpponents[opp.handle] || 0;
+      const deaths = (duelMatrix[opp.handle] || {})[effectiveTarget] || 0;
+      if (deaths > kills) {
+        hardOpponents.push({ opp, kills, deaths, diff: deaths - kills });
+      }
     });
   }
-  if (hardOpponents.length > 0 || pDeaths > pKills) {
+
+  const isEntryAgent = ['Iso', 'Jett', 'Raze', 'Neon', 'Yoru', 'Reyna', 'Phoenix'].includes(p.agent);
+  const recommendations = [];
+  if (duelDataObserved && hardOpponents.length > 0) {
     recommendations.push({
       module: 'gunfight_hygiene',
-      trigger: hardOpponents.length > 0 ? `K/D negativo vs ${hardOpponents[0].opp.handle}` : `K/D global ${pKills}/${pDeaths}`,
-      rationale: 'Higiene de duelo prescrita por derrotas verificadas, no por defecto.'
+      metric: 'duelos por ronda (muertes > bajas)',
+      threshold: 'deaths > kills vs el rival',
+      evidence: hardOpponents.slice(0, 3).map(h => `${h.opp.handle}: ${h.kills}K/${h.deaths}D`),
+      provenance,
+      limitation: 'Solo refleja los duelos registrados en estos datos; sin timestamps no indica cuándo ni por qué.',
+      rationale: 'Higiene de duelo sugerida por derrotas observadas en duelos directos, no por defecto.'
     });
   }
-  if (pDeaths >= pKills) {
+  if (killsObserved && deathsObserved && pDeaths > pKills && isEntryAgent) {
+    recommendations.push({
+      module: 'iso_site_entry',
+      metric: 'K/D del marcador + agente de entrada observado',
+      threshold: 'deaths > kills y agente de entrada',
+      evidence: [`${pKills}K/${pDeaths}D`, `agente ${p.agent}`],
+      provenance,
+      limitation: 'No hay datos de utilidad ni de rondas para verificar aperturas concretas.',
+      rationale: 'Aperturas de sitio sugeridas por balance negativo con agente de entrada.'
+    });
+  }
+  if (killsObserved && deathsObserved && pDeaths > pKills) {
     recommendations.push({
       module: 'disadvantage_pacing',
-      trigger: `Balance ${pKills}K/${pDeaths}D`,
-      rationale: 'Gestión de desventaja cuando el objetivo pierde más duelos de los que gana.'
+      metric: 'K/D del marcador',
+      threshold: 'deaths > kills',
+      evidence: [`${pKills}K/${pDeaths}D`],
+      provenance,
+      limitation: 'No se dispone de economía ni de tiempos de ronda para atribuir causas.',
+      rationale: 'Gestión de desventaja sugerida cuando el balance de bajas observado es negativo.'
     });
   }
 
+  const resources = {};
+  recommendations.forEach(r => {
+    if (CURATED_RESOURCES[r.module]) resources[r.module] = CURATED_RESOURCES[r.module];
+  });
+
   return {
-    player: p,
+    player: basePlayer,
+    provenance,
+    insufficient: false,
     hardOpponents,
-    resources: CURATED_RESOURCES,
+    resources,
     recommendations,
-    unrecommended: Object.keys(CURATED_RESOURCES).filter(k => !recommendations.some(r => r.module === k))
+    unrecommended: Object.keys(CURATED_RESOURCES).filter(k => !resources[k]),
+    resourceNote: RESOURCE_NOTE,
+    missing: [],
+    limitations: globalLimitations
   };
 }
 
@@ -137,20 +206,34 @@ if (require.main === module) {
   }
 
   console.log(`\n=== INTROSPECTIVE COACHING & LEARNING REPORT ===`);
-  console.log(`Player: ${report.player.handle} (${report.player.agent} - ${report.player.rank})`);
+  console.log(`Player: ${report.player.handle} (${report.player.agent || 'n/d'} - ${report.player.rank || 'n/d'})`);
+  if (report.insufficient) {
+    console.log(`\nINSUFFICIENT_DATA: faltan ${report.missing.join(', ')}.`);
+    console.log(`No se emiten recomendaciones. Limitaciones: ${report.limitations.join(' ')}`);
+    process.exit(0);
+  }
   console.log(`\n1. Duelos con Mayor Fricción en la Partida:`);
+  if (report.hardOpponents.length === 0) console.log('  (sin duelos observados con balance negativo)');
   report.hardOpponents.forEach(h => {
-    console.log(`  - vs ${h.opp.handle} (${h.opp.agent} - ${h.opp.rank}): ${h.kills} Kills / ${h.deaths} Deaths (-${h.diff})`);
+    console.log(`  - vs ${h.opp.handle} (${h.opp.agent || 'n/d'} - ${h.opp.rank || 'n/d'}): ${h.kills} Kills / ${h.deaths} Deaths (-${h.diff})`);
   });
-
-  console.log(`\n2. Módulos de Aprendizaje Visual Recomendados:`);
+  console.log(`\n2. Recomendaciones (con métrica observada + umbral):`);
+  report.recommendations.forEach(r => {
+    console.log(`  • ${r.module}: ${r.rationale}`);
+    console.log(`    Métrica: ${r.metric} | Umbral: ${r.threshold} | Procedencia: ${r.provenance}`);
+    console.log(`    Evidencia: ${r.evidence.join('; ')}`);
+    console.log(`    Limitación: ${r.limitation}`);
+  });
+  console.log(`\n3. Recursos educativos recomendados:`);
   Object.values(report.resources).forEach(r => {
     console.log(`\n▶ ${r.title}`);
-    console.log(`  Creadores recomendados: ${r.creators.join(', ')}`);
+    console.log(`  Creadores: ${r.creators.join(', ')}`);
     console.log(`  Conceptos clave:`);
     r.keyConcepts.forEach(c => console.log(`    * ${c}`));
     console.log(`  Búsqueda directa: ${r.searchQuery}`);
   });
+  if (report.unrecommended.length > 0) console.log(`\n(No recomendados, no renderizados: ${report.unrecommended.join(', ')})`);
+  console.log(`\nNota: ${report.resourceNote}`);
 }
 
 module.exports = { generateCoachingReport, CURATED_RESOURCES };

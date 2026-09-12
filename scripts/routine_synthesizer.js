@@ -89,7 +89,8 @@ class RoutineSynthesizer {
         threshold: w.threshold
       })),
       drillPlan,
-      neuroMuscleAdvice: 'Mantener respiración diafragmática en secuencias de micro-corrección. Priorizar precisión (>92%) sobre velocidad pura.'
+      neuroMuscleAdvice: 'Consejo general (no derivado de tus métricas): mantener respiración diafragmática y priorizar precisión sobre velocidad pura durante los bloques de micro-corrección.',
+      neuroMuscleAdviceBasis: 'genérico'
     };
   }
 }
