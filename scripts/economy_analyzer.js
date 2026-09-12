@@ -28,7 +28,7 @@ function analyzeEconomy(matchData, targetHandle) {
     };
   });
 
-  const target = require('./data_contract').resolveExactHandle(Object.keys(playerMap), targetHandle, { allowFirstIfMissing: true });
+  const target = require('./data_contract').resolveExactHandle(Object.keys(playerMap), targetHandle);
 
   const userLoadouts = loadoutSegments.filter(l => (l.metadata?.platformUserHandle || l.attributes?.platformUserIdentifier) === target);
 

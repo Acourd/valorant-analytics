@@ -86,17 +86,17 @@ node .agents/skills/valorant-analytics/scripts/duo_synergy.js <match_id_or_json_
 ```
 * Audits premade synergies, trade rates, and carry load differentials between two players.
 
-### 4. Fetch & Summarize Match Telemetry (Native HTTPS)
+### 4. Provided Match JSON/Scoreboard Parsing (offline, no network)
 ```powershell
-node .agents/skills/valorant-analytics/scripts/fetch_match.js <match_id_or_url> [output.json]
+node cli.js parse <archivo_o_texto> [jugador]
 ```
-* Bypasses Cloudflare WAF via custom User-Agent headers against Tracker API with exponential backoff and native synchronous HTTPS (`http_fetch.js`).
+* Normaliza JSON/export o volcados de texto aportados por el usuario en telemetría `normalized_input`. **No hay descarga automática**: `fetch_match.js` y `fetch_profile.js` son analizadores/stubs fail-closed que nunca consultan red.
 
-### 5. Fetch Player Profile & Season History
+### 5. Player Profile Normalization (offline, no network)
 ```powershell
-node .agents/skills/valorant-analytics/scripts/fetch_profile.js <riot_handle> [season_id]
+node cli.js profile "Nombre#TAG"
 ```
-* Supports URL-encoded Unicode handles (`TenZ#0001`, `Boaster#0001`, `Derke#0001`, `Chronicle#0001`, `aspas#0001`).
+* Normaliza el Riot ID y muestra **enlaces informativos** a OP.GG/VLR/Tracker; no se consulta ninguna plataforma.
 
 ### 6. Head-to-Head Duel Matrix (1v1 Matchup Breakdown)
 ```powershell
@@ -120,7 +120,7 @@ node .agents/skills/valorant-analytics/scripts/kovaaks_generator.js <match_id_or
 ```powershell
 node .agents/skills/valorant-analytics/scripts/coaching_engine.js <match_id_or_json_file> [target_player_handle]
 ```
-* Analyzes high-friction duels and rounds and automatically links verified video guides (Woohoojin, Zonda FPS, Valorant Domingo).
+* Analyzes high-friction duels and rounds and links curated learning searches (Woohoojin, Zonda FPS, Valorant Domingo); los enlaces son informativos, no validación de las hipótesis.
 
 ---
 

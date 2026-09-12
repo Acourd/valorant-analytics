@@ -36,102 +36,14 @@ function evaluateLearningProfile(matchData, targetHandle) {
   if (Object.keys(playerMap).length === 0) {
     throw new Error('No se encontraron jugadores válidos en la telemetría de la partida.');
   }
-  const target = resolveExactHandle(Object.keys(playerMap), targetHandle, { allowFirstIfMissing: true });
+  const target = resolveExactHandle(Object.keys(playerMap), targetHandle);
   const p = playerMap[target];
   if (!p) {
     throw new Error(`Jugador "${targetHandle}" no encontrado en la partida. Sin telemetría del objetivo no se emite diagnóstico.`);
   }
   const st = p.stats;
-  const totalRounds = meta.rounds || 20;
 
-  // Extract key metrics (track which ones fell back to defaults: unknowns)
-  const unknowns = [];
-  const track = (key, hasValue) => { if (!hasValue) unknowns.push(key); return hasValue; };
-  const hasHs = st.hsAccuracy?.displayValue !== undefined || st.headshotsPercentage?.displayValue !== undefined;
-  const hasKd = st.kdRatio?.displayValue !== undefined;
-  const hasAcs = st.scorePerRound?.displayValue !== undefined;
-  const hasAdr = st.damagePerRound?.displayValue !== undefined;
-  const hasKast = st.kast?.displayValue !== undefined;
-  track('headshot%', hasHs);
-  track('kd', hasKd);
-  track('acs', hasAcs);
-  track('adr', hasAdr);
-  track('kast', hasKast);
-
-  // Extract key metrics
-  const hsPct = parseFloat(st.hsAccuracy?.displayValue || st.headshotsPercentage?.displayValue || '25%');
-  const kd = parseFloat(st.kdRatio?.displayValue || ((st.kills?.value || 0) / Math.max(1, st.deaths?.value || 1)).toFixed(2));
-  const acs = parseFloat(st.scorePerRound?.displayValue || ((st.score?.value || 0) / totalRounds).toFixed(1));
-  const adr = parseFloat(st.damagePerRound?.displayValue || ((st.damage?.value || 0) / totalRounds).toFixed(1));
-  const kast = parseFloat(st.kast?.displayValue || '70%');
-  const fk = st.firstKills?.value || 0;
-  const fd = st.firstDeaths?.value || 0;
-  const clutches = st.clutches?.value || 0;
-
-  // 1. Calculate the 5-Pillar Learning Radar (0 - 100)
-  // Pillar A: Mechanical Precision & First-Bullet Accuracy
-  let mechanicalScore = Math.min(100, Math.round((hsPct / 45) * 60 + (kd / 1.8) * 40));
-  
-  // Pillar B: Macrogame, Positioning & Space Control
-  let macroScore = Math.min(100, Math.round((kast / 85) * 50 + ((adr / 180) * 50)));
-
-  // Pillar C: Opening Duel Efficiency (First Blood Impact)
-  const fkRatio = fk / Math.max(1, fd);
-  let openingScore = Math.min(100, Math.round((fkRatio / 2.0) * 70 + (fk / 5) * 30));
-
-  // Pillar D: Economic Discipline & Buy Conversion
-  let economyScore = 75; // Baseline
-  let economyObserved = false;
-  try {
-    const econ = analyzeEconomy(matchData, target);
-    const fullTier = econ.tiers.find(t => t.tier?.toLowerCase().includes('full'));
-    if (fullTier) {
-      const fullWinPct = parseFloat(fullTier.winPct);
-      economyScore = Math.min(100, Math.round(fullWinPct * 0.8 + 20));
-      economyObserved = true;
-    }
-  } catch(e) {}
-
-  // Pillar E: Clutch Factor & Late-Round Composure
-  let composureScore = Math.min(100, Math.round(50 + clutches * 25 + (st.kills3K?.value || 0) * 10));
-
-  // 2. Identify the Top 3 ELO Leaks (Root causes of lost rounds)
-  const eloLeaks = [];
-  if (fd >= 3 && fd > fk) {
-    eloLeaks.push({
-      issue: 'Fuga de Primera Sangre (First Death Deficit)',
-      detail: `Moriste primero en ${fd} rondas (${fk}/${fd} FK/FD), dejando a tu equipo en desventaja 4v5 constante.`,
-      solution: 'Espera el contacto visual de la utilidad de tus iniciadores antes de cruzar la línea de visión principal.'
-    });
-  }
-  if (hsPct < 25) {
-    eloLeaks.push({
-      issue: 'Inconsistencia en Puntería de Primer Tiro',
-      detail: `Tu tasa de headshot fue de ${hsPct}%, forzando duelos por ráfagas al cuerpo que en rangos altos se castigan en <200ms.`,
-      solution: 'Dedica 10 minutos a micro-flicks estáticos en Kovaaks (1w4ts / Pasu Small) antes de jugar.'
-    });
-  }
-  if (kast < 68) {
-    eloLeaks.push({
-      issue: 'Baja Participación por Ronda (KAST < 68%)',
-      detail: `En el ${Math.round(100 - kast)}% de las rondas no conseguiste Kill, Asistencia, Supervivencia ni fuiste Tradeado.`,
-      solution: 'Juega más cerca de un compañero de apoyo para garantizar que cuando mueras, ellos obtengan el re-frag inmediato.'
-    });
-  }
-  const hasRealData = unknowns.length < 5;
-  if (hasRealData && eloLeaks.length < 3) {
-    eloLeaks.push({
-      issue: 'Aceleración Prematura del Ritmo de Ronda',
-      detail: 'Tendencia a empujar de forma reactiva en rondas donde el equipo ya cuenta con ventaja numérica de 5v3 o 4v2.',
-      solution: 'Congela el avance tras conseguir el primer frag; obliga al rival a gastar su tiempo y utilidad.',
-      confidence: 'media'
-    });
-  }
-
-  const provenance = sourceProvenance(meta);
-  const causesAllowed = mayAssertCauses(provenance);
-  // Evidencia mecánica OBSERVADA (null cuando no existe): es la única fuente
-  // que habilita rutinas; no se rellenan valores plausibles.
+  // Métricas OBSERVADAS (null cuando no existen; jamás defaults plausibles).
   const mechanical = {
     hsPct: observedNumber(st, ['hsAccuracy', 'headshotsPercentage']),
     kd: observedNumber(st, ['kdRatio']) !== null
@@ -144,8 +56,80 @@ function evaluateLearningProfile(matchData, targetHandle) {
     acs: observedNumber(st, ['scorePerRound']),
     adr: observedNumber(st, ['damagePerRound']),
     kast: observedNumber(st, ['kast']),
-    clutches: observedNumber(st, ['clutches'])
+    clutches: observedNumber(st, ['clutches']),
+    multikills3k: observedNumber(st, ['kills3K'])
   };
+  const unknownNames = { hsPct: 'headshot%', kd: 'kd', acs: 'acs', adr: 'adr', kast: 'kast', fk: 'firstKills', fd: 'firstDeaths', clutches: 'clutches' };
+  const unknowns = Object.keys(unknownNames).filter(k => mechanical[k] === null).map(k => unknownNames[k]);
+
+  // 1. Radar dimensional (0-100): cada pilar se calcula SOLO con componentes
+  // OBSERVADOS (renormalizando el peso disponible); sin componentes => null.
+  const weightedScore = parts => {
+    const usable = parts.filter(x => x.score !== null);
+    if (usable.length === 0) return null;
+    const weight = usable.reduce((acc, x) => acc + x.weight, 0);
+    const raw = usable.reduce((acc, x) => acc + x.score * x.weight, 0) / weight;
+    return Math.min(100, Math.round(raw));
+  };
+  const mechanicalScore = weightedScore([
+    { score: mechanical.hsPct === null ? null : (mechanical.hsPct / 45) * 100, weight: 60 },
+    { score: mechanical.kd === null ? null : (mechanical.kd / 1.8) * 100, weight: 40 }
+  ]);
+  const macroScore = weightedScore([
+    { score: mechanical.kast === null ? null : (mechanical.kast / 85) * 100, weight: 50 },
+    { score: mechanical.adr === null ? null : (mechanical.adr / 180) * 100, weight: 50 }
+  ]);
+  const openingScore = (mechanical.fk === null || mechanical.fd === null)
+    ? null
+    : Math.min(100, Math.round(((mechanical.fk / Math.max(1, mechanical.fd)) / 2.0) * 70 + (mechanical.fk / 5) * 30));
+
+  let economyScore = null;
+  let economyObserved = false;
+  try {
+    const econ = analyzeEconomy(matchData, target);
+    const fullTier = econ.tiers.find(t => t.tier?.toLowerCase().includes('full'));
+    if (fullTier) {
+      const fullWinPct = parseFloat(fullTier.winPct);
+      if (Number.isFinite(fullWinPct)) {
+        economyScore = Math.min(100, Math.round(fullWinPct * 0.8 + 20));
+        economyObserved = true;
+      }
+    }
+  } catch(e) {}
+
+  let composureScore = null;
+  if (mechanical.clutches !== null) {
+    let base = 50 + mechanical.clutches * 25;
+    if (mechanical.multikills3k !== null) base += mechanical.multikills3k * 10;
+    composureScore = Math.min(100, Math.round(base));
+  }
+
+  // 2. Leaks SOLO sobre métricas observadas (sin causas por defecto).
+  const eloLeaks = [];
+  if (mechanical.fd !== null && mechanical.fk !== null && mechanical.fd >= 3 && mechanical.fd > mechanical.fk) {
+    eloLeaks.push({
+      issue: 'Fuga de Primera Sangre (First Death Deficit)',
+      detail: `Moriste primero en ${mechanical.fd} rondas (${mechanical.fk}/${mechanical.fd} FK/FD), dejando a tu equipo en desventaja 4v5 constante.`,
+      solution: 'Espera el contacto visual de la utilidad de tus iniciadores antes de cruzar la línea de visión principal.'
+    });
+  }
+  if (mechanical.hsPct !== null && mechanical.hsPct < 25) {
+    eloLeaks.push({
+      issue: 'Inconsistencia en Puntería de Primer Tiro',
+      detail: `Tu tasa de headshot fue de ${mechanical.hsPct}%, forzando duelos por ráfagas al cuerpo que en rangos altos se castigan en <200ms.`,
+      solution: 'Dedica 10 minutos a micro-flicks estáticos en Kovaaks (1w4ts / Pasu Small) antes de jugar.'
+    });
+  }
+  if (mechanical.kast !== null && mechanical.kast < 68) {
+    eloLeaks.push({
+      issue: 'Baja Participación por Ronda (KAST < 68%)',
+      detail: `En el ${Math.round(100 - mechanical.kast)}% de las rondas no conseguiste Kill, Asistencia, Supervivencia ni fuiste Tradeado.`,
+      solution: 'Juega más cerca de un compañero de apoyo para garantizar que cuando mueras, ellos obtengan el re-frag inmediato.'
+    });
+  }
+
+  const provenance = sourceProvenance(meta);
+  const causesAllowed = mayAssertCauses(provenance);
   // Qué pilares tienen métrica OBSERVADA (consensus no usa los no observados).
   const pillarsObserved = {
     precision: mechanical.hsPct !== null || mechanical.kd !== null,
@@ -162,7 +146,12 @@ function evaluateLearningProfile(matchData, targetHandle) {
       ? `Procedencia: ${provenanceLabel(provenance)}. Se describen observaciones; NO se emiten causas/fugas (requieren fuente verificada).`
       : (unknowns.length > 0 ? `Métricas no disponibles y excluidas del diagnóstico: ${unknowns.join(', ')}.` : null));
 
-  // 3. Actionable Self-Improvement Prescription
+  // 3. Prescripción SOLO con evidencia mecánica observada (HS%); sin datos: null.
+  const prescripcionInmediata = mechanical.hsPct === null ? null : {
+    reglaMental: 'Aplica la regla de los 2 segundos: antes de cada asomo, verifica en el minimapa si tienes un compañero a distancia de tradeo.',
+    sesionKovaaks: mechanical.hsPct >= 35 ? '5 min de Valorant Microshot Speed + 5 min de Thin Aiming Long' : '5 min de Pasu Small Reload + 5 min de 1wall6targets extra small'
+  };
+
   return {
     player: target,
     agent: p.agent,
@@ -176,17 +165,14 @@ function evaluateLearningProfile(matchData, targetHandle) {
     unknowns,
     warning: dataWarning,
     radar: {
-      precisionMecanica: `${mechanicalScore} / 100`,
-      macrogamePosicionamiento: `${macroScore} / 100`,
-      duelosDeApertura: `${openingScore} / 100`,
-      disciplinaEconomica: `${economyScore} / 100`,
-      composturaClutch: `${composureScore} / 100`
+      precisionMecanica: mechanicalScore,
+      macrogamePosicionamiento: macroScore,
+      duelosDeApertura: openingScore,
+      disciplinaEconomica: economyScore,
+      composturaClutch: composureScore
     },
     eloLeaks: finalLeaks,
-    prescripcionInmediata: {
-      reglaMental: 'Aplica la regla de los 2 segundos: antes de cada asomo, verifica en el minimapa si tienes un compañero a distancia de tradeo.',
-      sesionKovaaks: hsPct >= 35 ? '5 min de Valorant Microshot Speed + 5 min de Thin Aiming Long' : '5 min de Pasu Small Reload + 5 min de 1wall6targets extra small'
-    }
+    prescripcionInmediata
   };
 }
 
@@ -213,23 +199,32 @@ if (require.main === module) {
   console.log(`Mapa: ${res.map} | Resultado: ${res.result}`);
   console.log(`========================================================================`);
   
+  const fmt = v => (v === null ? 'n/d (sin métrica observada)' : `${v} / 100`);
   console.log(`\n📊 RADAR DE DOMINIO COMPETITIVO (5 PILARES):`);
-  console.log(`  • Precisión Mecánica (First-Bullet):       ${res.radar.precisionMecanica}`);
-  console.log(`  • Macrogame, Espacio y Posicionamiento:   ${res.radar.macrogamePosicionamiento}`);
-  console.log(`  • Duelos de Apertura e Impacto (FK):       ${res.radar.duelosDeApertura}`);
-  console.log(`  • Disciplina Económica y Conversión:       ${res.radar.disciplinaEconomica}`);
-  console.log(`  • Compostura en Clutch y Late-Round:       ${res.radar.composturaClutch}`);
+  console.log(`  • Precisión Mecánica (First-Bullet):       ${fmt(res.radar.precisionMecanica)}`);
+  console.log(`  • Macrogame, Espacio y Posicionamiento:   ${fmt(res.radar.macrogamePosicionamiento)}`);
+  console.log(`  • Duelos de Apertura e Impacto (FK):       ${fmt(res.radar.duelosDeApertura)}`);
+  console.log(`  • Disciplina Económica y Conversión:       ${fmt(res.radar.disciplinaEconomica)}`);
+  console.log(`  • Compostura en Clutch y Late-Round:       ${fmt(res.radar.composturaClutch)}`);
 
-  console.log(`\n🚨 LAS 3 FUGAS DE ELO IDENTIFICADAS (¿DÓNDE SE PIERDEN LAS RONDAS?):`);
-  res.eloLeaks.forEach((leak, idx) => {
-    console.log(`\n  [Fuga ${idx + 1}] ⚠️ ${leak.issue}`);
-    console.log(`    Detalle:   ${leak.detail}`);
-    console.log(`    Solución:  ${leak.solution}`);
-  });
+  if (res.eloLeaks.length === 0) {
+    console.log(`\n🚨 FUGAS DE ELO: ninguna atribuible (se requieren métricas observadas + fuente verificada).`);
+  } else {
+    console.log(`\n🚨 FUGAS DE ELO IDENTIFICADAS (${res.eloLeaks.length}):`);
+    res.eloLeaks.forEach((leak, idx) => {
+      console.log(`\n  [Fuga ${idx + 1}] ⚠️ ${leak.issue}`);
+      console.log(`    Detalle:   ${leak.detail}`);
+      console.log(`    Solución:  ${leak.solution}`);
+    });
+  }
 
-  console.log(`\n💡 PRESCRIPCIÓN INMEDIATA PARA TU SIGUIENTE SESIÓN:`);
-  console.log(`  • Regla Táctica:   ${res.prescripcionInmediata.reglaMental}`);
-  console.log(`  • Práctica Kovaaks: ${res.prescripcionInmediata.sesionKovaaks}`);
+  if (res.prescripcionInmediata) {
+    console.log(`\n💡 PRESCRIPCIÓN INMEDIATA PARA TU SIGUIENTE SESIÓN:`);
+    console.log(`  • Regla Táctica:   ${res.prescripcionInmediata.reglaMental}`);
+    console.log(`  • Práctica Kovaaks: ${res.prescripcionInmediata.sesionKovaaks}`);
+  } else {
+    console.log(`\n💡 Prescripción omitida: sin HS% observado no se emite rutina.`);
+  }
   console.log(`========================================================================\n`);
 }
 
