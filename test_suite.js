@@ -3097,6 +3097,29 @@ check('plan: sin entrada o sin objetivo falla cerrado (sin fixture ni jugador en
     assert.strictEqual(JSON.parse(out2).error.code, 'TARGET_REQUIRED');
   });
 
+check('plan --demo: simulación explícita, sin etiquetas normalized_input ni recomendaciones',
+  () => {
+    const url = 'https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04';
+    let code = 0;
+    let out = '';
+    try { cliOk(['plan', url, 'kirtmy#000', '--demo', '--json']); }
+    catch (e) { code = e.status; out = String(e.stdout || ''); }
+    assert.strictEqual(code, 2, 'demo sin acción => 2');
+    const plan = JSON.parse(out);
+    assert.strictEqual(plan.provenance, 'synthetic_demo');
+    assert.strictEqual(plan.estado, 'SIMULACION_DEMO');
+    assert.strictEqual(plan.es_simulacion, true);
+    assert.strictEqual(plan.accion, null, 'el demo no habilita acción');
+    assert.strictEqual(plan.rutina, null, 'el demo no habilita rutina');
+    assert.ok(!/normalized_input/.test(out), 'ninguna etiqueta normalized_input en modo demo');
+    assert.ok(plan.observado.length > 0 && plan.observado.every(o => o.tipo === 'sintetica' && /SINTÉTICA/.test(o.fuente)), 'observaciones rotuladas sintéticas');
+    let human = '';
+    try { human = cliOk(['plan', url, 'kirtmy#000', '--demo']); }
+    catch (e) { human = String(e.stdout || ''); }
+    assert.ok(/SIMULACION_DEMO/.test(human) && /LO QUE EL DEMO SIMULA/.test(human), 'salida humana explícita');
+    assert.ok(/no habilitada en modo demo/.test(human), 'acción/rutina no habilitadas en demo');
+  });
+
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben
 // reflejar EXACTAMENTE el número de casos registrados y ejecutados. Un
 // manifiesto desincronizado hace fallar la suite (imposible sobre-declarar

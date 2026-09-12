@@ -15,7 +15,7 @@ const assert = require('assert');
 const path = require('path');
 
 const scriptsDir = path.join(__dirname, '..', 'scripts');
-const { parseTextScoreboard } = require(path.join(scriptsDir, 'universal_ingestor.js'));
+const { parseTextScoreboard, assembleRawMatchStructure } = require(path.join(scriptsDir, 'universal_ingestor.js'));
 const { resolveExactHandle, sourceProvenance, mayAssertCauses } = require(path.join(scriptsDir, 'data_contract.js'));
 const { evaluateLearningProfile } = require(path.join(scriptsDir, 'learning_profile.js'));
 const { SessionGuardian } = require(path.join(scriptsDir, 'session_guardian.js'));
@@ -424,6 +424,18 @@ property('plan: la acción solo cita métricas observadas y es determinista', ()
     const again = buildPlan(JSON.parse(JSON.stringify(match)), 'Focus#NA1');
     assert.deepStrictEqual(plan, again, 'plan determinista');
   }
+});
+
+property('plan demo: nunca habilita acción ni etiqueta observada', () => {
+  const synthetic = assembleRawMatchStructure([], 'Ascent', 24, 'F#1', { demo: true });
+  synthetic.data.metadata.synthetic = true; // como lo entrega resolveMatchDataResilient en --demo
+  const plan = buildPlan(synthetic, 'F#1');
+  assert.strictEqual(plan.provenance, 'synthetic_demo', 'procedencia sintética');
+  assert.strictEqual(plan.estado, 'SIMULACION_DEMO', 'estado explícito de simulación');
+  assert.strictEqual(plan.accion, null, 'sin acción en demo');
+  assert.strictEqual(plan.rutina, null, 'sin rutina en demo');
+  assert.ok(plan.es_simulacion === true && plan.advertencia, 'advertencia de simulación');
+  assert.ok(plan.observado.every(o => o.tipo === 'sintetica' && !/normalized_input/.test(o.fuente)), 'etiquetas sintéticas, jamás normalized_input');
 });
 
 console.log(`\n================================================================`);

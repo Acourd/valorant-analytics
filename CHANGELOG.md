@@ -1,5 +1,12 @@
 # Changelog — valorant-analytics
 
+## 4.8.1 — Procedencia honesta en `plan` (regresión del modo demo)
+
+- **Corregido (HIGH):** `plan --demo` etiquetaba las métricas como `normalized_input` y generaba acción/rutina correctiva con datos inventados.
+- **Política de demo (documentada):** en `synthetic_demo` el plan es **SIMULACIÓN explícita**: `estado: "SIMULACION_DEMO"`, `es_simulacion: true`, advertencia, **sin acción, sin rutina y sin medición**; las observaciones se rotulan `SINTÉTICA --demo (NO observada)` y `tipo: "sintetica"`.
+- La etiqueta de cada observación ahora **deriva de la procedencia real** (normalized/verified/synthetic); ninguna ruta fija `normalized_input`.
+- Regresión `tests #165` + propiedad `plan demo:*` (165/165 checks). Versión 4.8.1.
+
 ## 4.8.0 — Flujo guiado para el jugador (`plan`) y modo avanzado
 
 - **`plan <entrada> "Nombre#TAG"`** (nuevo comando principal): un único camino `aportar datos → entender límites → UNA acción priorizada → UNA rutina → qué aportar después`. Máximo 3 observaciones con métrica presente; acción solo si una métrica observada cruza un umbral documentado (métrica, umbral, procedencia y limitación explícitos); sin evidencia suficiente devuelve **plan de recolección** con límites y dato requerido (exit 2). Sin puntajes decorativos ni causas/fugas.

@@ -371,6 +371,7 @@ if (!command || command === '--help' || command === '-h') {
   console.log(`  node cli.js parse <archivo_o_texto> [jugador]      ➔ Ingesta offline (JSON/texto aportado; sin red)`);
   console.log(`  node cli.js match <partida_o_texto> "<Nombre#TAG>" ➔ Diagnóstico descriptivo 360° (lectura amplia)`);
   console.log(`  node cli.js aim <partida_o_texto> "<Nombre#TAG>"   ➔ Rutina Kovaaks 15 min (solo con evidencia)`);
+  console.log(`  --demo: simulación explícita; NO habilita acción, rutina ni medición (política de honestidad).`);
   console.log(`\nOTROS ANÁLISIS (misma entrada):`);
   console.log(`  duo <partida> "<p1>" "<p2>" · duels <partida> [jugador] · weapons <partida> [jugador]`);
   console.log(`  economy <partida> [jugador] · coaching <partida> [jugador] · career <perfil.json> · diagnose <perfil.json>`);
@@ -416,9 +417,10 @@ try {
       printBanner();
       console.log(`🧭 PLAN PARA LA SIGUIENTE PARTIDA: ${plan.player} | ${plan.estado}`);
       console.log(`Procedencia: ${plan.provenanceLabel}`);
+      if (plan.es_simulacion) console.log(`⚠️  ${plan.advertencia}`);
       console.log(`------------------------------------------------------------------------`);
-      console.log(`1. LO OBSERVADO (solo métricas presentes):`);
-      if (plan.observado.length === 0) console.log(`   (sin métricas observadas en esta entrada)`);
+      console.log(plan.es_simulacion ? `1. LO QUE EL DEMO SIMULA (NO observado):` : `1. LO OBSERVADO (solo métricas presentes):`);
+      if (plan.observado.length === 0) console.log(`   (sin métricas en esta entrada)`);
       plan.observado.forEach(o => console.log(`   • ${o.metrica}: ${o.valor} [${o.fuente}]`));
       console.log(`\n2. LO QUE NO PUEDE SABERSE:`);
       plan.no_se_puede_saber.limites.forEach(l => console.log(`   • ${l}`));
@@ -429,6 +431,8 @@ try {
         console.log(`     Métrica: ${plan.accion.metrica} | Umbral: ${plan.accion.umbral} | Procedencia: ${plan.accion.procedencia}`);
         console.log(`     Motivo: ${plan.accion.motivo}`);
         console.log(`     Limitación: ${plan.accion.limitacion}`);
+      } else if (plan.es_simulacion) {
+        console.log(`   (no habilitada en modo demo: aporta datos reales)`);
       } else {
         console.log(`   (sin acción: ninguna métrica observada cruza un umbral documentado)`);
       }
@@ -437,6 +441,8 @@ try {
         console.log(`   • ${plan.rutina.escenario} (${plan.rutina.duracion})`);
         console.log(`     ${plan.rutina.instruccion}`);
         console.log(`     Limitación: ${plan.rutina.limitacion}`);
+      } else if (plan.es_simulacion) {
+        console.log(`   (no habilitada en modo demo)`);
       } else {
         console.log(`   (sin rutina: no hay ejercicio asociado a una acción habilitada)`);
       }

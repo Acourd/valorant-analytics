@@ -15,6 +15,9 @@
  *     requerido (exit 2).
  *   - Sin eventos de ronda con timestamps/posición/trade: no se aconseja
  *     tradeo, timing ni posicionamiento.
+ *   - POLÍTICA DE DEMO: en `synthetic_demo` el plan es una SIMULACIÓN explícita;
+ *     NO habilita acción, rutina ni medición, y ninguna etiqueta puede decir
+ *     "observado"/"normalized_input". Sus métricas son inventadas por el demo.
  *   - Máximo 3 observaciones, una acción, una rutina. Cero puntajes decorativos.
  *
  * Zero external dependencies.
@@ -56,15 +59,24 @@ function firstRoutine(area) {
   };
 }
 
+function observationSource(provenance) {
+  if (provenance === 'synthetic_demo') return 'SINTÉTICA --demo (NO observada)';
+  if (provenance === 'verified_source') return 'fuente verificada (origen autenticado)';
+  return 'marcador (normalized_input)';
+}
+
 function buildObservations(profile) {
   const m = profile.mechanical || {};
+  const fuente = observationSource(profile.provenance);
+  const esSintetica = profile.provenance === 'synthetic_demo';
   const obs = [];
-  if (m.hsPct !== null && m.hsPct !== undefined) obs.push({ metrica: 'HS%', valor: `${Number(m.hsPct.toFixed(1))}%`, fuente: 'marcador (normalized_input)' });
-  if (m.kast !== null && m.kast !== undefined) obs.push({ metrica: 'KAST%', valor: `${m.kast}%`, fuente: 'marcador (normalized_input)' });
-  if (m.fk !== null && m.fd !== null && m.fk !== undefined && m.fd !== undefined) obs.push({ metrica: 'FK/FD', valor: `${m.fk}/${m.fd}`, fuente: 'marcador (normalized_input)' });
-  if (m.adr !== null && m.adr !== undefined) obs.push({ metrica: 'ADR', valor: String(m.adr), fuente: 'marcador (normalized_input)' });
-  if (m.acs !== null && m.acs !== undefined) obs.push({ metrica: 'ACS', valor: String(m.acs), fuente: 'marcador (normalized_input)' });
-  if (m.clutches !== null && m.clutches !== undefined) obs.push({ metrica: 'Clutches', valor: String(m.clutches), fuente: 'marcador (normalized_input)' });
+  const push = (metrica, valor) => obs.push({ metrica, valor, fuente, tipo: esSintetica ? 'sintetica' : 'observada' });
+  if (m.hsPct !== null && m.hsPct !== undefined) push('HS%', `${Number(m.hsPct.toFixed(1))}%`);
+  if (m.kast !== null && m.kast !== undefined) push('KAST%', `${m.kast}%`);
+  if (m.fk !== null && m.fd !== null && m.fk !== undefined && m.fd !== undefined) push('FK/FD', `${m.fk}/${m.fd}`);
+  if (m.adr !== null && m.adr !== undefined) push('ADR', String(m.adr));
+  if (m.acs !== null && m.acs !== undefined) push('ACS', String(m.acs));
+  if (m.clutches !== null && m.clutches !== undefined) push('Clutches', String(m.clutches));
   return obs.slice(0, 3);
 }
 
@@ -140,18 +152,23 @@ function buildPlan(matchData, targetHandle) {
   const gate = canGenerateRoutine(evidence);
   const temporal = detectTemporalContext(matchData);
   const hasRoundEvents = segments.some(s => s.type === 'player-round' || s.type === 'player-round-damage' || s.type === 'player-round-kills');
+  const esSimulacion = profile.provenance === 'synthetic_demo';
 
   const observado = buildObservations(profile);
   const limites = [
     `Procedencia: ${provenanceLabel(profile.provenance)}. No habilita causas ni fugas atribuibles.`,
     'Sin validación con jugadores ni telemetría Riot real: el plan es descriptivo, no una promesa de mejora.'
   ];
+  if (esSimulacion) {
+    limites.push('Modo demo: las métricas son inventadas por el generador sintético; no son observaciones ni permiten recomendaciones.');
+  }
   if (!temporal.sufficient) {
     limites.push('Sin timestamps, posición ni marcas de trade observadas: no se emiten reglas de timing, tradeo o posicionamiento.');
   }
   const faltantes = [...new Set([...(gate.missingMetrics || []), ...(gate.requiredData || [])])];
 
-  const weakness = gate.weaknesses[0] || null;
+  // Política de demo: sin recomendaciones. Solo datos reales habilitan acción.
+  const weakness = esSimulacion ? null : (gate.weaknesses[0] || null);
   const accion = weakness ? {
     orden: 1,
     area: weakness.area,
@@ -164,16 +181,26 @@ function buildPlan(matchData, targetHandle) {
   } : null;
 
   const routine = weakness ? firstRoutine(weakness.area) : null;
-  const siguienteDato = accion
-    ? { dato: `nueva medición de ${accion.metrica} en otra partida`, porQue: 'permite comprobar si el plan movió la métrica observada.', como: 'node cli.js plan <archivo.json> "Nombre#TAG"' }
-    : nextDataFor(profile, gate, hasRoundEvents, temporal);
+  const siguienteDato = esSimulacion
+    ? {
+      dato: 'datos reales (JSON/export, texto del marcador o captura con confirmación)',
+      porQue: 'el modo demo es ilustrativo: no habilita recomendaciones ni mediciones; aporta una partida real para un plan accionable.',
+      como: 'node cli.js plan <archivo.json o export> "Nombre#TAG"'
+    }
+    : (accion
+      ? { dato: `nueva medición de ${accion.metrica} en otra partida`, porQue: 'permite comprobar si el plan movió la métrica observada.', como: 'node cli.js plan <archivo.json> "Nombre#TAG"' }
+      : nextDataFor(profile, gate, hasRoundEvents, temporal));
 
   return {
     command: 'plan',
     player: handle,
     provenance: profile.provenance,
     provenanceLabel: provenanceLabel(profile.provenance),
-    estado: accion ? 'ACCION_DISPONIBLE' : 'RECOLECCION_REQUERIDA',
+    es_simulacion: esSimulacion,
+    advertencia: esSimulacion
+      ? 'SINTÉTICA --demo: métricas inventadas por el demo; no son observaciones reales ni habilitan recomendaciones.'
+      : null,
+    estado: esSimulacion ? 'SIMULACION_DEMO' : (accion ? 'ACCION_DISPONIBLE' : 'RECOLECCION_REQUERIDA'),
     observado,
     no_se_puede_saber: { limites, faltantes },
     accion,
