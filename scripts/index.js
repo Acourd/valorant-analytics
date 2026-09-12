@@ -18,6 +18,7 @@ const { analyzeEconomy } = require('./economy_analyzer');
 const { generateKovaaksRoutine } = require('./kovaaks_generator');
 const { analyzeWeaponTelemetry } = require('./weapon_telemetry');
 const { generateCoachingReport } = require('./coaching_engine');
+const { buildPlan } = require('./plan');
 const {
   validateRadar,
   validateHitZones,
@@ -69,6 +70,7 @@ module.exports = {
   generateKovaaksRoutine,
   analyzeWeaponTelemetry,
   generateCoachingReport,
+  buildPlan,
   // Política de evidencia y contrato de datos
   classifyEvidence,
   observeMatchTelemetry,

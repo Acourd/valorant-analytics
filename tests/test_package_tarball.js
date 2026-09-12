@@ -71,7 +71,7 @@ try {
     cwd: app, encoding: 'utf8', timeout: 60000
   });
   assert.strictEqual(bin.status, 0, `el bin --help falló: ${bin.stderr}`);
-  assert.ok(/USO INTUITIVO/.test(bin.stdout), 'el bin no muestra la ayuda de la CLI');
+  assert.ok(/FLUJO PRINCIPAL/.test(bin.stdout), 'el bin no muestra la ayuda de la CLI');
 
   console.log('✓ Paquete instalable desde tarball verificado: biblioteca sin efectos + bin CLI + metadatos. Exit Code 0');
 } finally {

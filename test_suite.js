@@ -2599,7 +2599,7 @@ check('ayuda CLI: documenta --json y los códigos de salida 0/1/2',
     const out = cliOk(['--help']);
     assert.ok(/--json/.test(out), 'debe documentar --json');
     assert.ok(/CÓDIGOS DE SALIDA/.test(out) && /0 = resultado/.test(out) && /2 = evidencia insuficiente/.test(out), 'debe documentar códigos de salida');
-    assert.ok(/ningún comando selecciona un jugador silenciosamente/i.test(out), 'debe declarar selección explícita');
+    assert.ok(/ningún comando selecciona.*en silencio/i.test(out), 'debe declarar selección explícita');
     assert.ok(!/Anti-WAF/i.test(out), 'no debe prometer anti-WAF retirado');
   });
 
@@ -2854,7 +2854,7 @@ check('Riot verificado: puuid inexistente => TARGET_NOT_FOUND sin analizar a otr
 check('launcher raíz: node cli.js --help ejecuta la CLI documentada (exit 0)',
   () => {
     const out = execFileSync(process.execPath, [path.join(__dirname, 'cli.js'), '--help'], { encoding: 'utf8' });
-    assert.ok(/USO INTUITIVO/.test(out), 'la raíz debe mostrar la ayuda real');
+    assert.ok(/FLUJO PRINCIPAL|AYUDA AVANZADA/.test(out), 'la raíz debe mostrar la ayuda real');
     assert.ok(/CÓDIGOS DE SALIDA/.test(out), 'la ayuda documenta códigos de salida');
   });
 
@@ -2983,6 +2983,118 @@ check('--json: válido, inválido, insuficiente y sin salida estructurada son JS
     const unsupported = cliOk(['--json', 'invariants', sampleFile, 'TenZ#0001']);
     assert.ok(pure(unsupported), 'comando sin salida estructurada');
     assert.strictEqual(JSON.parse(unsupported).ok, true);
+  });
+
+// ---- Bloque de simplificación conceptual (v4.8.0): plan guiado + --advanced ----
+
+check('plan: evidencia mecánica suficiente => 1 observación, 1 acción y 1 rutina (exit 0)',
+  () => {
+    const out = cliOk(['plan', sampleFile, 'aspas#0001']);
+    assert.ok(/PLAN PARA LA SIGUIENTE PARTIDA/.test(out), 'debe mostrar el plan');
+    assert.ok(/ACCION_DISPONIBLE/.test(out), 'estado con acción');
+    assert.ok(/1\. LO OBSERVADO/.test(out) && /3\. ACCIÓN PRIORIZADA/.test(out) && /4\. RUTINA ASOCIADA/.test(out), 'secciones 1/3/4');
+    assert.ok(/Métrica: \w+ \| Umbral: [\d.]+ \| Procedencia: normalized_input/.test(out), 'acción con métrica, umbral y procedencia');
+    assert.ok(/Limitación:/.test(out), 'acción con limitación');
+    assert.ok(/5\. QUÉ APORTAR DESPUÉS/.test(out), 'siguiente dato');
+  });
+
+check('plan: datos parciales => sin recomendación y faltantes explícitos (exit 2)',
+  () => {
+    const tmp = path.join(os.tmpdir(), `plan-parcial-${process.pid}.txt`);
+    fs.writeFileSync(tmp, 'Focus#NA1\t10\t8\t2\t150\t120\n', 'utf8');
+    try {
+      let code = 0;
+      let out = '';
+      try { cliOk(['plan', tmp, 'Focus#NA1']); }
+      catch (e) { code = e.status; out = String(e.stdout || ''); }
+      assert.strictEqual(code, 2, 'evidencia insuficiente => 2');
+      assert.ok(/RECOLECCION_REQUERIDA/.test(out), 'estado de recolección');
+      assert.ok(/sin acción: ninguna métrica observada cruza un umbral/.test(out), 'sin recomendación');
+      assert.ok(/Faltantes:/.test(out), 'faltantes explícitos');
+      assert.ok(/5\. QUÉ APORTAR DESPUÉS/.test(out), 'dato siguiente');
+    } finally {
+      fs.unlinkSync(tmp);
+    }
+  });
+
+check('plan: objetivo inexistente o ambiguo => código 1 y sin informe',
+  () => {
+    let code = 0;
+    let out = '';
+    try { cliOk(['plan', sampleFile, 'NoExiste#9999']); }
+    catch (e) { code = e.status; out = String(e.stdout || '') + String(e.stderr || ''); }
+    assert.strictEqual(code, 1, 'objetivo inexistente => 1');
+    assert.ok(!/PLAN PARA LA SIGUIENTE PARTIDA/.test(out), 'sin informe');
+    assert.ok(/no encontrado|Candidatos/i.test(out), 'error accionable');
+    const { buildPlan } = require(path.join(scriptsDir, 'plan.js'));
+    const dup = {
+      data: { metadata: { matchId: 'dup' }, segments: [
+        { type: 'player-summary', attributes: { platformUserIdentifier: 'A#1' }, metadata: { platformUserHandle: 'A#1' }, stats: {} },
+        { type: 'player-summary', attributes: { platformUserIdentifier: 'A#1' }, metadata: { platformUserHandle: 'A#1' }, stats: {} }
+      ] }
+    };
+    assert.throws(() => buildPlan(dup, 'A#1'), e => e.code === 'TARGET_AMBIGUOUS');
+  });
+
+check('plan: evidencia insuficiente => código 2 y JSON válido con límites y dato requerido',
+  () => {
+    const tmp = path.join(os.tmpdir(), `plan-json-${process.pid}.json`);
+    fs.writeFileSync(tmp, '\uFEFF' + JSON.stringify({
+      data: {
+        metadata: { matchId: 'plan-insuf', provenance: 'normalized_input' },
+        segments: [{
+          type: 'player-summary',
+          attributes: { platformUserIdentifier: 'Focus#NA1' },
+          metadata: { platformUserHandle: 'Focus#NA1', agentName: null },
+          stats: {}
+        }]
+      }
+    }), 'utf8');
+    try {
+      let code = 0;
+      let out = '';
+      try { cliOk(['plan', tmp, 'Focus#NA1', '--json']); }
+      catch (e) { code = e.status; out = String(e.stdout || ''); }
+      assert.strictEqual(code, 2, 'insuficiente => 2');
+      const plan = JSON.parse(out);
+      assert.strictEqual(plan.estado, 'RECOLECCION_REQUERIDA');
+      assert.strictEqual(plan.accion, null);
+      assert.strictEqual(plan.rutina, null);
+      assert.strictEqual(plan.provenance, 'normalized_input');
+      assert.ok(plan.no_se_puede_saber.limites.length > 0, 'límites declarados');
+      assert.ok(typeof plan.siguiente_dato.dato === 'string' && plan.siguiente_dato.dato.length > 0, 'dato requerido');
+    } finally {
+      fs.unlinkSync(tmp);
+    }
+  });
+
+check('--advanced: revela herramientas técnicas; la ayuda normal no las presenta como ruta principal',
+  () => {
+    const base = cliOk(['--help']);
+    assert.ok(/FLUJO PRINCIPAL/.test(base) && /node cli\.js plan/.test(base), 'la ayuda prioriza plan');
+    assert.ok(/node cli\.js parse/.test(base) && /node cli\.js match/.test(base) && /node cli\.js aim/.test(base), 'prioriza parse/match/aim');
+    assert.ok(!/DSSE/.test(base) && !/Merkle/.test(base), 'la ayuda normal no expone cripto como ruta principal');
+    const adv = cliOk(['--advanced', '--help']);
+    assert.ok(/AYUDA AVANZADA/.test(adv), 'cabecera avanzada');
+    assert.ok(/DSSE/.test(adv) && /Merkle/.test(adv) && /MPC/.test(adv) && /Wasm/.test(adv) && /invariants/.test(adv), 'herramientas técnicas listadas');
+    assert.ok(/no coaching para jugadores/i.test(adv) || /NO miden tu rendimiento/i.test(adv), 'advertencia de alcance');
+    assert.ok(/plan/.test(adv), 'señala el flujo de jugador');
+  });
+
+check('plan: sin entrada o sin objetivo falla cerrado (sin fixture ni jugador en silencio)',
+  () => {
+    let code = 0;
+    let out = '';
+    try { cliOk(['plan', '--json']); }
+    catch (e) { code = e.status; out = String(e.stdout || ''); }
+    assert.strictEqual(code, 1, 'sin entrada => 1');
+    assert.strictEqual(JSON.parse(out).error.code, 'INPUT_REQUIRED');
+    let code2 = 0;
+    let out2 = '';
+    try { cliOk(['plan', sampleFile, '--json']); }
+    catch (e) { code2 = e.status; out2 = String(e.stdout || ''); }
+    assert.strictEqual(code2, 1, 'roster múltiple sin jugador => 1');
+    assert.strictEqual(JSON.parse(out2).error.code, 'TARGET_REQUIRED');
   });
 
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben

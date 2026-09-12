@@ -23,6 +23,7 @@ const { DriftDetector } = require(path.join(scriptsDir, 'drift_detector.js'));
 const { ConsensusArbiter } = require(path.join(scriptsDir, 'consensus_arbiter.js'));
 const { generateCoachingReport } = require(path.join(scriptsDir, 'coaching_engine.js'));
 const { parseCliArgs } = require(path.join(scriptsDir, 'cli.js'));
+const { buildPlan } = require(path.join(scriptsDir, 'plan.js'));
 
 const SEED = Number(process.env.PROP_SEED || 0xA11CE5);
 const ITERATIONS = Number(process.env.PROP_ITERATIONS || 250);
@@ -376,6 +377,7 @@ property('cli-args: permutaciones de flags no alteran posicionales ni semántica
       json: chosen.includes('--json'),
       demo: chosen.includes('--demo'),
       trustNewKey: chosen.includes('--trust-new-key'),
+      advanced: false,
       help: false
     }, 'flags independientes del orden');
   }
@@ -391,6 +393,36 @@ property('cli-args: un flag jamás se interpreta como ruta o jugador', () => {
   for (const tokens of cases) {
     const { positionals } = parseCliArgs(tokens);
     assert.ok(!positionals.some(p => p.startsWith('--')), `flag filtrado como posicional: ${positionals.join(',')}`);
+  }
+});
+
+property('plan: la acción solo cita métricas observadas y es determinista', () => {
+  const rng = new Rng(SEED + 10);
+  const statKeys = ['kills', 'deaths', 'kdRatio', 'scorePerRound', 'damagePerRound', 'kast', 'headshotsPercentage', 'firstKills', 'firstDeaths', 'clutches'];
+  for (let it = 0; it < ITERATIONS; it++) {
+    const stats = {};
+    for (const k of statKeys) if (rng.bool(0.5)) stats[k] = { value: 5 + rng.int(120) };
+    if (rng.bool(0.5)) stats.headshotsPercentage = { displayValue: `${rng.int(60)}%` };
+    const match = observedMatch('Focus#NA1', stats);
+    const plan = buildPlan(match, 'Focus#NA1');
+    assert.ok(plan.observado.length <= 3, 'máximo 3 observaciones');
+    assert.strictEqual(plan.provenance, 'normalized_input', 'procedencia sellada');
+    for (const o of plan.observado) assert.ok(o.metrica && o.valor !== null && o.valor !== undefined, 'observación con valor real');
+    if (plan.accion) {
+      assert.strictEqual(plan.estado, 'ACCION_DISPONIBLE');
+      assert.ok(plan.accion.metrica && plan.accion.umbral !== undefined && plan.accion.procedencia && plan.accion.limitacion, 'acción completa');
+      assert.ok(plan.rutina, 'acción con rutina disponible');
+      const m = plan.accion.metrica;
+      if (m === 'hsPct') assert.ok(stats.headshotsPercentage !== undefined, 'HS citado y observado');
+      if (m === 'fdMinusFk') assert.ok(stats.firstKills !== undefined && stats.firstDeaths !== undefined, 'FD/FK citados y observados');
+      assert.ok(!['legPct', 'sprayTapRatio'].includes(m), 'sin eventos de daño no se cita leg/spray');
+    } else {
+      assert.strictEqual(plan.estado, 'RECOLECCION_REQUERIDA');
+      assert.strictEqual(plan.rutina, null, 'sin acción no hay rutina');
+      assert.ok(plan.siguiente_dato.dato.length > 0, 'dato requerido explícito');
+    }
+    const again = buildPlan(JSON.parse(JSON.stringify(match)), 'Focus#NA1');
+    assert.deepStrictEqual(plan, again, 'plan determinista');
   }
 });
 

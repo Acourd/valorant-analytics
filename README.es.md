@@ -4,10 +4,10 @@
 
 ### Telemetría Competitiva Local · Diagnóstico Descriptivo 360° · Motor de Puntería Adaptativo
 
-[![Versión](https://img.shields.io/badge/versión-4.7.3_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
+[![Versión](https://img.shields.io/badge/versión-4.8.0_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
 [![Runtime](https://img.shields.io/badge/runtime-Node.js_18%2B_Nativo-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Dependencias](https://img.shields.io/badge/dependencias-0_npm_(Core)-38BDF8.svg?style=for-the-badge&logo=codeforces&logoColor=white)](package.json)
-[![Pruebas](https://img.shields.io/badge/tests-158%2F158_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
+[![Pruebas](https://img.shields.io/badge/tests-164%2F164_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
 [![Auditoría](https://img.shields.io/badge/auditoría-15%2F15_propiedades_PASS-8B5CF6.svg?style=for-the-badge&logo=codereview&logoColor=white)](opencode_tester.js)
 [![Licencia](https://img.shields.io/badge/licencia-MIT-6B7280.svg?style=for-the-badge)](LICENSE)
 
@@ -95,14 +95,18 @@ Diseñado para adaptarse a cualquier flujo de trabajo sin fricciones:
 git clone https://github.com/Acourd/valorant-analytics.git
 cd valorant-analytics
 
-# 2. Diagnóstico 360° inmediato (resuelve sobre sample_match.json automáticamente)
-node cli.js match "TenZ#0001"
+# 2. PLAN para la siguiente partida (flujo recomendado: aportar → entender → una acción → medir)
+node cli.js plan examples/sample_match.json "TenZ#0001"
 
-# 3. Rutina biomecánica adaptativa de 15 minutos en KovaaK's / Aim Lab
-node cli.js aim "TenZ#0001"
+# 3. Ingesta de tu propio marcador (JSON/export o texto; sin red)
+node cli.js parse mi_marcador.txt "TenZ#0001"
 
-# 4. Auditoría de economía y buy-tiers
-node cli.js economy "TenZ#0001"
+# 4. Lectura amplia y rutina (cuando el plan las habilite)
+node cli.js match examples/sample_match.json "TenZ#0001"
+node cli.js aim examples/sample_match.json "TenZ#0001"
+
+# 5. Herramientas técnicas de integridad (no son coaching): DSSE, Merkle, MPC, Wasm, invariantes
+node cli.js --advanced --help
 ```
 
 ### 🤖 Opción 3: Modo Agente Autónomo (Antigravity / Claude Code / OpenCode)
@@ -200,7 +204,7 @@ Si utilizas **Google Gemini (Gems)** o **OpenAI (Custom GPTs)**, el archivo [`st
 - **Sin red por defecto:** el análisis es local. No se cosecha la caché del navegador ni se consulta Tracker.gg. La entrada es un JSON/export, texto o captura que aportas explícitamente.
 - **Zero Dependencias NPM:** Diseñado exclusivamente sobre las librerías estándar de Node.js (`fs`, `path`, `zlib`, `crypto`, `child_process`). Cero descargas externas.
 - **Compatibilidad Multiplataforma:** Probado y garantizado en Windows 11 (PowerShell/CMD), macOS (zsh) y Linux (bash).
-- **Garantía Determinista:** 158 pruebas automatizadas y suites modulares verificadas con Exit Code 0 (`node run_all_tests.js`) y auditoría semántica de propiedades fail-closed, sin puntuación promocional (`node opencode_tester.js`).
+- **Garantía Determinista:** 164 pruebas automatizadas y suites modulares verificadas con Exit Code 0 (`node run_all_tests.js`) y auditoría semántica de propiedades fail-closed, sin puntuación promocional (`node opencode_tester.js`).
 - **Contrato CLI:** salida humana y `--json`; códigos `0`/`1`/`2` documentados (resultado válido / entrada inválida / evidencia insuficiente); ningún comando selecciona un jugador en silencio.
 
 ---

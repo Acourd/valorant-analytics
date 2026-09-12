@@ -53,6 +53,7 @@ const { classifyEvidence, observeMatchTelemetry, observeDuelRows } = require('./
 const { sourceProvenance, provenanceLabel } = require('./data_contract');
 const { analyzeEconomy } = require('./economy_analyzer');
 const { generateCoachingReport } = require('./coaching_engine');
+const { buildPlan } = require('./plan');
 
 // Deriva la evidencia de una partida usando el ADAPTADOR CONFIABLE del módulo
 // de política (mint privado). El CLI no puede fabricar eventos observados ni
@@ -289,12 +290,13 @@ const KNOWN_FLAGS = Object.freeze({
   '--json': 'json',
   '--demo': 'demo',
   '--trust-new-key': 'trustNewKey',
+  '--advanced': 'advanced',
   '--help': 'help',
   '-h': 'help'
 });
 
 function parseCliArgs(argv) {
-  const flags = { json: false, demo: false, trustNewKey: false, help: false };
+  const flags = { json: false, demo: false, trustNewKey: false, advanced: false, help: false };
   const positionals = [];
   for (const token of argv) {
     if (typeof token !== 'string') throw cliFail('Argumento no textual en argv.', 'BAD_ARGV');
@@ -346,39 +348,44 @@ function runCliCore(argv) {
 
 if (!command || command === '--help' || command === '-h') {
   printBanner();
-  console.log(`USO INTUITIVO (CLI RÁPIDO & AUTO-DISPATCHER):`);
-  console.log(`  node cli.js "<riot_handle>"                       ➔ Detección automática de perfil`);
-  console.log(`  node cli.js match <partida_o_id> [jugador]        ➔ Autodiagnóstico 360° y Fugas de ELO`);
-  console.log(`  node cli.js duo <partida_o_id> [p1] [p2]          ➔ Auditoría de Sinergia y Tradeo de Dúo`);
-  console.log(`  node cli.js aim <partida_o_id> [jugador]          ➔ Rutina Kovaaks 15 min adaptativa`);
-  console.log(`  node cli.js duels <partida_o_id> [jugador]        ➔ Matriz de duelos 1v1 vs rivales`);
-  console.log(`  node cli.js weapons <partida_o_id> [jugador]      ➔ Telemetría de Armas y Recoil`);
-  console.log(`  node cli.js economy <partida_o_id> [jugador]      ➔ Desglose de Economía y Buy-Tiers`);
-  console.log(`  node cli.js coaching <partida_o_id> [jugador]     ➔ Reporte Introspectivo y Recursos Tácticos`);
-  console.log(`  node cli.js calibrate [jugador] [rango] [rol]     ➔ SIMULACIÓN offline (no análisis real)`);
-  console.log(`  node cli.js career <perfil.json>           ➔ Auditoría de Horas y Trayectoria`);
-  console.log(`  node cli.js diagnose <perfil.json>         ➜ Señal heurística de MMR y estimación de rango (hipótesis no verificada)`);
-  console.log(`  node cli.js parse <texto_o_archivo> [jugador]     ➔ Ingesta offline (JSON/texto aportado; sin red)`);
-  console.log(`  node cli.js invariants <partida_o_id> [jugador]   ➔ Verificación Formal de Invariantes`);
-  console.log(`  node cli.js attest <partida_o_id> [jugador]       ➔ Sobre DSSE in-toto firmado con Ed25519`);
-  console.log(`  node cli.js merkle <partida_o_id>                 ➔ Árbol Merkle de Eventos y Pruebas`);
-  console.log(`  node cli.js guardian <partida_o_id> [jugador]     ➔ Monitor de Fatiga y Tilt`);
-  console.log(`  node cli.js drift <partida_o_id> [jugador]        ➔ Radar de Deriva y Entropía`);
-  console.log(`  node cli.js consensus <partida_o_id> [jugador]    ➔ Síntesis Multi-Lente (determinista)`);
-  console.log(`  node cli.js synthesize <partida_o_id> [jugador]   ➔ Rutina Adaptativa Evolutiva`);
-  console.log(`  node cli.js sbom                                  ➔ Manifiesto CycloneDX SBOM`);
+  if (flags.advanced) {
+    console.log(`AYUDA AVANZADA — HERRAMIENTAS TÉCNICAS (no coaching para jugadores):`);
+    console.log(`  node cli.js invariants <partida> [jugador]  ➔ Verificación formal de invariantes matemáticos`);
+    console.log(`  node cli.js attest <partida> [jugador]      ➔ Sobre DSSE in-toto firmado con Ed25519`);
+    console.log(`  node cli.js merkle <partida>                ➔ Árbol Merkle de eventos y pruebas de inclusión`);
+    console.log(`  node cli.js guardian <partida> [jugador]    ➔ Monitor de fatiga/tilt (datos explícitos)`);
+    console.log(`  node cli.js drift <partida> [jugador]       ➔ Radar de deriva y entropía`);
+    console.log(`  node cli.js consensus <partida> [jugador]   ➔ Síntesis multi-lente determinista`);
+    console.log(`  node cli.js sbom                            ➔ Manifiesto CycloneDX SBOM`);
+    console.log(`  node cli.js calibrate [jugador] [rango]     ➔ SIMULACIÓN offline (no análisis real)`);
+    console.log(`\nADVERTENCIA: DSSE, Merkle, MPC, Wasm e invariantes son herramientas de INTEGRIDAD y`);
+    console.log(`VERIFICACIÓN CRIPTOGRÁFICA del software. NO miden tu rendimiento ni sustituyen coaching.`);
+    console.log(`El flujo para jugadores es: plan → aportar datos → una acción → volver a medir.`);
+    console.log(`\nSALIDA ESTRUCTURADA: --json en todos los comandos analíticos.`);
+    console.log(`CÓDIGOS DE SALIDA: 0 válido · 1 entrada/objetivo inválido · 2 evidencia insuficiente (plan/guardian/drift).`);
+    console.log(`========================================================================\n`);
+    throw new CliExit(EXIT.OK);
+  }
+  console.log(`FLUJO PRINCIPAL (jugador): aportar datos → entender límites → plan → volver a medir`);
+  console.log(`  node cli.js plan <partida_o_texto> "<Nombre#TAG>"  ➔ PLAN para la siguiente partida (recomendado)`);
+  console.log(`  node cli.js parse <archivo_o_texto> [jugador]      ➔ Ingesta offline (JSON/texto aportado; sin red)`);
+  console.log(`  node cli.js match <partida_o_texto> "<Nombre#TAG>" ➔ Diagnóstico descriptivo 360° (lectura amplia)`);
+  console.log(`  node cli.js aim <partida_o_texto> "<Nombre#TAG>"   ➔ Rutina Kovaaks 15 min (solo con evidencia)`);
+  console.log(`\nOTROS ANÁLISIS (misma entrada):`);
+  console.log(`  duo <partida> "<p1>" "<p2>" · duels <partida> [jugador] · weapons <partida> [jugador]`);
+  console.log(`  economy <partida> [jugador] · coaching <partida> [jugador] · career <perfil.json> · diagnose <perfil.json>`);
   console.log(`\nEJEMPLOS:`);
-  console.log(`  node cli.js "Derke#0001"`);
-  console.log(`  node cli.js match examples/sample_match.json "TenZ#0001"`);
-  console.log(`  node cli.js duo examples/sample_match.json "TenZ#0001" "Chronicle#0001"`);
-  console.log(`  node cli.js duels examples/sample_match.json`);
-  console.log(`\nSALIDA ESTRUCTURADA: añade --json a match/aim/duels/weapons/economy/coaching/duo/guardian/drift/consensus/synthesize/parse/career/diagnose/sbom/profile.`);
+  console.log(`  node cli.js plan examples/sample_match.json "TenZ#0001"`);
+  console.log(`  node cli.js parse mi_marcador.txt "TenZ#0001"`);
+  console.log(`  node cli.js                            (esta ayuda)`);
+  console.log(`  node cli.js --advanced --help          (herramientas técnicas de integridad)`);
+  console.log(`\nSALIDA ESTRUCTURADA: --json en los comandos analíticos.`);
   console.log(`CONTRATO --json: stdout contiene EXACTAMENTE un JSON parseable (incluso en error); los avisos humanos van a stderr.`);
   console.log(`ERRORES EN JSON: { ok:false, exitCode, error:{ code, message, details } }.`);
-  console.log(`FLAGS: --json, --demo, --trust-new-key son independientes del orden y nunca se interpretan como archivo o jugador.`);
+  console.log(`FLAGS: --json, --demo, --trust-new-key, --advanced son independientes del orden y nunca se interpretan como posicionales.`);
   console.log(`CÓDIGOS DE SALIDA: 0 = resultado descriptivo válido (incluye n/d y "omitido" como respuesta contractual);`);
-  console.log(`                   1 = entrada, objetivo o comando inválido; 2 = evidencia insuficiente para el resultado principal (guardian, drift).`);
-  console.log(`OBJETIVO: ningún comando selecciona un jugador silenciosamente; indica el Riot ID exacto (salvo roster de 1 jugador).`);
+  console.log(`                   1 = entrada, objetivo o comando inválido; 2 = evidencia insuficiente para el resultado principal (plan, guardian, drift).`);
+  console.log(`OBJETIVO: ningún comando selecciona un jugador, archivo o fixture en silencio.`);
   console.log(`========================================================================\n`);
   throw new CliExit(EXIT.OK);
 }
@@ -396,7 +403,52 @@ if (command.includes('#') && !fs.existsSync(command)) {
 }
 
 try {
-  if (command === 'match' || command === 'diagnostic') {
+  if (command === 'plan') {
+    const input = args[1];
+    if (!input) {
+      throw cliFail('plan requiere entrada explícita (archivo/export, texto de marcador o match ID canónico): no se usa el fixture por defecto.', 'INPUT_REQUIRED');
+    }
+    const matchData = resolveMatchData(input, args[2]);
+    const effectivePlayer = resolveEffectivePlayer(matchData, args[2]);
+    const plan = buildPlan(matchData, effectivePlayer);
+
+    emit(jsonOut, plan, () => {
+      printBanner();
+      console.log(`🧭 PLAN PARA LA SIGUIENTE PARTIDA: ${plan.player} | ${plan.estado}`);
+      console.log(`Procedencia: ${plan.provenanceLabel}`);
+      console.log(`------------------------------------------------------------------------`);
+      console.log(`1. LO OBSERVADO (solo métricas presentes):`);
+      if (plan.observado.length === 0) console.log(`   (sin métricas observadas en esta entrada)`);
+      plan.observado.forEach(o => console.log(`   • ${o.metrica}: ${o.valor} [${o.fuente}]`));
+      console.log(`\n2. LO QUE NO PUEDE SABERSE:`);
+      plan.no_se_puede_saber.limites.forEach(l => console.log(`   • ${l}`));
+      if (plan.no_se_puede_saber.faltantes.length > 0) console.log(`   • Faltantes: ${plan.no_se_puede_saber.faltantes.join('; ')}`);
+      console.log(`\n3. ACCIÓN PRIORIZADA (UNA):`);
+      if (plan.accion) {
+        console.log(`   • ${plan.accion.que}`);
+        console.log(`     Métrica: ${plan.accion.metrica} | Umbral: ${plan.accion.umbral} | Procedencia: ${plan.accion.procedencia}`);
+        console.log(`     Motivo: ${plan.accion.motivo}`);
+        console.log(`     Limitación: ${plan.accion.limitacion}`);
+      } else {
+        console.log(`   (sin acción: ninguna métrica observada cruza un umbral documentado)`);
+      }
+      console.log(`\n4. RUTINA ASOCIADA (UNA):`);
+      if (plan.rutina) {
+        console.log(`   • ${plan.rutina.escenario} (${plan.rutina.duracion})`);
+        console.log(`     ${plan.rutina.instruccion}`);
+        console.log(`     Limitación: ${plan.rutina.limitacion}`);
+      } else {
+        console.log(`   (sin rutina: no hay ejercicio asociado a una acción habilitada)`);
+      }
+      console.log(`\n5. QUÉ APORTAR DESPUÉS:`);
+      console.log(`   • ${plan.siguiente_dato.dato}`);
+      console.log(`     Por qué: ${plan.siguiente_dato.porQue}`);
+      console.log(`     Cómo: ${plan.siguiente_dato.como}`);
+      console.log(`========================================================================\n`);
+    });
+    if (plan.estado !== 'ACCION_DISPONIBLE') throw new CliExit(EXIT.INSUFFICIENT);
+
+  } else if (command === 'match' || command === 'diagnostic') {
     const { target, player } = resolveTargetAndPlayer(args);
     const matchData = resolveMatchData(target, player);
     const res = evaluateLearningProfile(matchData, player);

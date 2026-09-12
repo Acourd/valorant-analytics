@@ -1,5 +1,12 @@
 # Changelog — valorant-analytics
 
+## 4.8.0 — Flujo guiado para el jugador (`plan`) y modo avanzado
+
+- **`plan <entrada> "Nombre#TAG"`** (nuevo comando principal): un único camino `aportar datos → entender límites → UNA acción priorizada → UNA rutina → qué aportar después`. Máximo 3 observaciones con métrica presente; acción solo si una métrica observada cruza un umbral documentado (métrica, umbral, procedencia y limitación explícitos); sin evidencia suficiente devuelve **plan de recolección** con límites y dato requerido (exit 2). Sin puntajes decorativos ni causas/fugas.
+- **`--advanced`:** la ayuda por defecto prioriza `plan`, `parse`, `match` y `aim`; `--advanced --help` expone DSSE, Merkle, MPC, Wasm, invariantes y diagnóstico especializado, con la advertencia de que son herramientas de integridad/criptografía y **no** coaching para jugadores.
+- Contrato `--json` y códigos `0/1/2` sin cambios; ningún comando selecciona archivo, jugador o fixture en silencio (`plan` exige entrada explícita).
+- Regresiones: `tests #159`–`#164` + propiedad de plan determinista (164/164 checks). Versión 4.8.0.
+
 ## 4.7.3 — Bloque final de madurez técnica
 
 - **Wasm con cuota REAL:** el módulo del sandbox importa la memoria del host (`env.memory`), por lo que `maximum` es aplicado por el runtime (verificado con sonda de crecimiento); configuración validada (entero 1–64, máximo ≥ inicial) y auditoría que solo declara límites impuestos (`quotaEnforced`, `maxPagesEnforced`, `moduleImportsHostMemory`). Sin afirmaciones de cuota decorativa.
