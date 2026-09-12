@@ -1131,7 +1131,9 @@ function runCli(argv) {
 
 if (require.main === module) {
   const { exitCode } = runCli(process.argv.slice(2));
-  process.exit(exitCode);
+  // exitCode (no process.exit) permite drenar stdout en pipes: con salidas
+  // grandes + JSON, process.exit podía truncar/perder el buffer.
+  process.exitCode = exitCode;
 }
 
 module.exports = {
