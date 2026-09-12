@@ -109,15 +109,33 @@ function parseTextScoreboard(rawText, options = {}) {
     throw new Error('parseTextScoreboard requiere una cadena de texto no vacía.');
   }
 
-  const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const text = String(rawText).replace(/^\uFEFF/, '');
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const players = [];
-  const mapName = options.map || detectMap(rawText) || null;
+  const mapName = options.map || detectMap(text) || null;
+
+  // Candidatos #TAG Unicode-safe (nombres CJK, acentos, etc.).
+  const HANDLE_CANDIDATE = /([^\s#][^#\n]*?)#([A-Za-z0-9]{1,16})/gu;
+  const cleanHandleName = raw => String(raw)
+    .replace(/^[\s\-–—|:.>•·\])}]+/, '')
+    .replace(/[\s\-–—|:<([{]+$/, '')
+    .replace(/^\d+[\s.)\-–—:]+/, '')
+    .trim();
 
   for (const line of lines) {
-    const handleMatch = line.match(/([a-zA-Z0-9_\- ]+#[a-zA-Z0-9]+)/);
-    if (!handleMatch) continue;
-
-    const handle = handleMatch[1].trim();
+    const candidates = [];
+    for (const c of line.matchAll(HANDLE_CANDIDATE)) {
+      const name = cleanHandleName(c[1]);
+      if (!name || !/[^\d\s]/.test(name)) continue;
+      const tail = line.slice(c.index + c[0].length);
+      if (!/\d/.test(tail)) continue; // una fila de marcador lleva estadísticas detrás
+      candidates.push({ match: c, name });
+    }
+    if (candidates.length === 0) continue;
+    // Si una línea contiene varios #TAG (p. ej. cabecera + jugador), la fila
+    // real es la última con estadísticas: nunca se elige un nombre de cabecera.
+    const picked = candidates[candidates.length - 1];
+    const handle = `${picked.name}#${picked.match[2]}`;
 
     let agent = null;
     for (const ag of AGENTS) {
@@ -129,7 +147,7 @@ function parseTextScoreboard(rawText, options = {}) {
       if (line.toLowerCase().includes(rk.toLowerCase())) { rank = rk; break; }
     }
 
-    let remainder = line.replace(handleMatch[0], '');
+    let remainder = line.replace(picked.match[0], '');
     if (rank) {
       remainder = remainder.replace(new RegExp(rank.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), '');
     }

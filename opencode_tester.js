@@ -1,235 +1,180 @@
 #!/usr/bin/env node
+'use strict';
+
 /**
- * opencode_tester.js - Autonomous Audit & Diagnostic Harness for Open Code / DeepSeek
- * 
- * Specifically calibrated for LLM agents (DeepSeek-V3/R1, Claude, Antigravity, Open Code)
- * to run comprehensive static and runtime checks, detect platform frictions,
- * and provide machine-readable actionable directives.
- * 
+ * opencode_tester.js — Autoauditoría SEMÁNTICA de propiedades negativas.
+ *
+ * No puntúa "excelencia": verifica que el motor NO pueda fabricar, auto-verificar
+ * procedencia, analizar sin objetivo explícito, aprobar cola sin datos, reportar
+ * estabilidad sin rondas, perder jugadores Unicode ni ejecutar la CLI al
+ * importarse. Cada propiedad es un fail-closed verificable; si alguna falla,
+ * el harness sale con código != 0.
+ *
  * Usage: node opencode_tester.js [--json] [--verbose]
  */
 
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
 const rootDir = __dirname;
 const scriptsDir = path.join(rootDir, 'scripts');
-const examplesDir = path.join(rootDir, 'examples');
-const sampleFile = path.join(examplesDir, 'sample_match.json');
+const sampleFile = path.join(rootDir, 'examples', 'sample_match.json');
 
-const auditResult = {
+function runNode(args, opts = {}) {
+  const res = spawnSync(process.execPath, args, { cwd: opts.cwd || rootDir, encoding: 'utf8', timeout: opts.timeout || 90000 });
+  return { code: res.status, out: String(res.stdout || '') + String(res.stderr || '') };
+}
+function runProbe(code) {
+  return runNode(['-e', code]);
+}
+
+const properties = [];
+function property(id, description, fn) {
+  const start = Date.now();
+  let result = { pass: false, details: 'sin resultado' };
+  try {
+    const r = fn();
+    if (r === true || r === undefined) result = { pass: true, details: 'ok' };
+    else if (r && typeof r === 'object' && typeof r.pass === 'boolean') result = { pass: r.pass, details: r.details || (r.pass ? 'ok' : 'falló') };
+  } catch (e) {
+    result = { pass: false, details: e.message };
+  }
+  properties.push({ id, description, pass: result.pass, details: result.details, durationMs: Date.now() - start });
+}
+
+// P01 — Contratos de archivo presentes y no vacíos.
+property('P01', 'los módulos contractuales existen y no están vacíos', () => {
+  const required = [
+    'SKILL.md', 'README.md', 'LICENSE', 'standalone_prompt.md', 'package.json',
+    'test_suite.js', 'run_all_tests.js', 'scripts/index.js', 'scripts/cli.js',
+    'scripts/learning_profile.js', 'scripts/data_contract.js', 'scripts/evidence_policy.js',
+    'scripts/invariant_validator.js', 'scripts/session_guardian.js', 'scripts/drift_detector.js',
+    'scripts/universal_ingestor.js', '.github/workflows/ci.yml'
+  ];
+  const missing = required.filter(f => !fs.existsSync(path.join(rootDir, f)) || fs.statSync(path.join(rootDir, f)).size === 0);
+  return { pass: missing.length === 0, details: missing.length ? `faltan: ${missing.join(', ')}` : 'todos presentes' };
+});
+
+// P02 — Sin objetivo explícito no se analiza a un jugador arbitrario.
+property('P02', 'objetivo ausente con roster múltiple => fail-closed con candidatos', () => {
+  const r = runNode([path.join(scriptsDir, 'cli.js'), 'match', sampleFile]);
+  const failedClosed = r.code !== 0 && /TARGET_REQUIRED|Objetivo no especificado/i.test(r.out) && /Candidatos/i.test(r.out);
+  const noFabricated = !/RADAR DE DOMINIO|DIAGNÓSTICO 360°/.test(r.out);
+  return { pass: failedClosed && noFabricated, details: failedClosed ? (noFabricated ? 'fail-closed con candidatos' : 'emitió análisis pese al fallo') : `exit=${r.code}` };
+});
+
+// P03 — La procedencia no puede autodeclararse desde un archivo.
+property('P03', 'metadata de archivo (attestation/provenance/verified) jamás autoriza causas', () => {
+  const r = runProbe("const {sourceProvenance,mayAssertCauses}=require('./scripts/data_contract.js');const p=sourceProvenance({attestation:{x:1},provenance:'verified_source',verified:true});console.log('P='+p,'C='+mayAssertCauses(p));");
+  return { pass: r.code === 0 && /P=normalized_input/.test(r.out) && /C=false/.test(r.out), details: r.out.trim().slice(0, 120) };
+});
+
+// P04 — Sin métricas observadas no hay radar, prescripción ni defaults.
+property('P04', 'sin HS/KAST/economía/clutch observados no se inventan dimensiones ni rutina', () => {
+  const r = runProbe("const {parseTextScoreboard}=require('./scripts/universal_ingestor.js');const {evaluateLearningProfile}=require('./scripts/learning_profile.js');const m=parseTextScoreboard('Focus#NA1 10 8 2 150 120');const p=evaluateLearningProfile(m,'Focus#NA1');const ok=p.mechanical.hsPct===null&&p.mechanical.kast===null&&p.mechanical.clutches===null&&p.prescripcionInmediata===null&&p.radar.disciplinaEconomica===null&&p.radar.composturaClutch===null&&p.radar.duelosDeApertura===null;console.log('NO_DEFAULTS='+ok);");
+  return { pass: r.code === 0 && /NO_DEFAULTS=true/.test(r.out), details: r.out.trim().slice(0, 120) };
+});
+
+// P05 — Guardian sin datos no aprueba cola ni da consejos de salud.
+property('P05', 'guardian sin sesión => INSUFFICIENT_DATA sin prescripciones', () => {
+  const r = runProbe("const {SessionGuardian}=require('./scripts/session_guardian.js');const a=new SessionGuardian().auditSession({},'X#NA1');console.log('V='+a.verdict,'P='+a.prescriptions.length,'S='+a.safeToContinue);");
+  return { pass: r.code === 0 && /V=INSUFFICIENT_DATA/.test(r.out) && /P=0/.test(r.out) && /S=null/.test(r.out), details: r.out.trim().slice(0, 120) };
+});
+
+// P06 — Drift sin rondas no reporta estabilidad.
+property('P06', 'drift sin rondas => NO_DATA con estabilidad nula', () => {
+  const r = runProbe("const {DriftDetector}=require('./scripts/drift_detector.js');const d=new DriftDetector().auditMatchDrift({},'X#NA1');console.log('V='+d.verdict,'S='+d.overallStability,'ND='+d.noData);");
+  return { pass: r.code === 0 && /V=NO_DATA/.test(r.out) && /S=null/.test(r.out) && /ND=true/.test(r.out), details: r.out.trim().slice(0, 120) };
+});
+
+// P07 — Parser Unicode-safe y sin absorber numeración de fila.
+property('P07', 'parser conserva Riot IDs Unicode y descarta numeración de fila', () => {
+  const r = runProbe("const {parseTextScoreboard}=require('./scripts/universal_ingestor.js');const m=parseTextScoreboard('\\uFEFFMatches#NA1 -- 日本語プレイヤー#JP1 10 8 2 150 120\\n12 Nombre#EU1 5 5 1 100 90');const h=m.data.segments.map(s=>s.metadata.platformUserHandle);console.log('H='+JSON.stringify(h));");
+  return {
+    pass: r.code === 0 && /日本語プレイヤー#JP1/.test(r.out) && /"Nombre#EU1"/.test(r.out) && !/12 Nombre/.test(r.out),
+    details: r.out.trim().slice(0, 160)
+  };
+});
+
+// P08 — Importar el paquete no ejecuta la CLI ni imprime.
+property('P08', 'require de la biblioteca/CLI no ejecuta comandos ni imprime banners', () => {
+  const r = runProbe("const m=require('./scripts/index.js');const c=require('./scripts/cli.js');console.log('LIB_OK',typeof m.evaluateLearningProfile,typeof c.runCli);");
+  const clean = r.code === 0 && /LIB_OK function function/.test(r.out) && !/UNIVERSAL SOVEREIGN|USO INTUITIVO/.test(r.out);
+  return { pass: clean, details: clean ? 'import limpio' : `exit=${r.code} salida=${r.out.slice(0, 80)}` };
+});
+
+// P09 — Metadatos de paquete instalable y separación lib/CLI.
+property('P09', 'package.json: bin, exports y files declaran biblioteca y CLI', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
+  const ok = pkg.main === 'scripts/index.js'
+    && pkg.bin && pkg.bin['valorant-analytics'] === 'scripts/cli.js'
+    && pkg.exports && pkg.exports['.'] === './scripts/index.js'
+    && Array.isArray(pkg.files) && pkg.files.includes('scripts/');
+  return { pass: Boolean(ok), details: ok ? 'metadatos instalables' : JSON.stringify({ main: pkg.main, bin: pkg.bin, exports: pkg.exports, files: pkg.files }) };
+});
+
+// P10 — Ninguna ruta ejecutable contacta Tracker; solo el adaptador Riot sellado toca la red.
+property('P10', 'ninguna ruta ejecutable contacta Tracker.gg; la red queda confinada al adaptador Riot', () => {
+  const offenders = [];
+  const netFiles = new Set(['riot_source.js', 'http_fetch.js']); // capa de red autorizada (Riot RSO/VAL-MATCH)
+  for (const f of fs.readdirSync(scriptsDir).filter(f => f.endsWith('.js'))) {
+    const src = fs.readFileSync(path.join(scriptsDir, f), 'utf8');
+    // tracker.gg solo puede aparecer como enlace informativo impreso en cli.js (sin capa de red).
+    if (/https?:\/\/(api\.)?tracker\.gg/i.test(src) && f !== 'cli.js') offenders.push(`${f}:tracker`);
+    if (f === 'cli.js' && /https?:\/\/(api\.)?tracker\.gg/i.test(src) && (/require\(['"](https?|node:https?)['"]\)/.test(src) || /require\(['"]\.\/http_fetch['"]\)/.test(src))) offenders.push(`${f}:tracker+red`);
+    if (/require\(['"]\.\/http_fetch['"]\)/.test(src) && f !== 'riot_source.js') offenders.push(`${f}:http_fetch`);
+    if (/require\(['"](https?|node:https?)['"]\)/.test(src) && !netFiles.has(f)) offenders.push(`${f}:https`);
+  }
+  return { pass: offenders.length === 0, details: offenders.length ? offenders.join(', ') : 'cero rutas ejecutables hacia Tracker; red solo en el adaptador Riot' };
+});
+
+// P11 — CI ejecuta todas las suites.
+property('P11', 'CI ejecuta el runner único que incluye todas las suites modulares', () => {
+  const ci = fs.readFileSync(path.join(rootDir, '.github', 'workflows', 'ci.yml'), 'utf8');
+  const runner = fs.readFileSync(path.join(rootDir, 'run_all_tests.js'), 'utf8');
+  const ok = /run_all_tests\.js/.test(ci) && /tests/.test(runner) && /readdirSync/.test(runner);
+  return { pass: ok, details: ok ? 'CI completa vía run_all_tests' : 'CI no usa el runner único' };
+});
+
+// P12 — Documentación sin referencias contradictorias a Tracker/Cloudflare.
+property('P12', 'SKILL.md no promete bypass de Cloudflare ni API de Tracker', () => {
+  const skill = fs.readFileSync(path.join(rootDir, 'SKILL.md'), 'utf8');
+  const bad = /Cloudflare/i.test(skill) || /Tracker API/i.test(skill);
+  return { pass: !bad, details: bad ? 'referencias contradictorias presentes' : 'documentación coherente' };
+});
+
+// P13 — El harness determinista completo sigue verde.
+property('P13', 'test_suite.js completa (con gate de manifiesto) sale con Exit 0', () => {
+  const r = runNode([path.join(rootDir, 'test_suite.js')]);
+  return { pass: r.code === 0 && /All valorant-analytics deterministic tests passed/.test(r.out), details: `exit=${r.code}` };
+});
+
+const failed = properties.filter(p => !p.pass);
+const report = {
   timestamp: new Date().toISOString(),
-  harness: 'Open Code / DeepSeek Telemetry Auditor (v2.5)',
-  environment: {
-    nodeVersion: process.version,
-    platform: process.platform,
-    cwd: rootDir
-  },
-  scores: {
-    total: 0,
-    max: 100
-  },
-  modulesChecked: [],
-  staticAudits: [],
-  runtimeAudits: [],
-  aiAgentDirectives: []
+  harness: 'auditoría semántica de propiedades negativas',
+  environment: { nodeVersion: process.version, platform: process.platform, cwd: rootDir },
+  summary: { total: properties.length, passed: properties.length - failed.length, failed: failed.length },
+  properties,
+  directives: failed.length === 0
+    ? [{ priority: 'INFO', message: 'Todas las propiedades fail-closed se sostienen; ninguna ruta fabrica ni sobreinterpreta.' }]
+    : failed.map(p => ({ priority: 'ACTION_REQUIRED', message: `${p.id}: ${p.description} => ${p.details}` }))
 };
 
-// 1. Static Contract & Filesystem Checks
-const requiredFiles = [
-  'SKILL.md',
-  'README.md',
-  'LICENSE',
-  'standalone_prompt.md',
-  'test_suite.js',
-  'examples/sample_match.json',
-  'scripts/cli.js',
-  'scripts/learning_profile.js',
-  'scripts/duo_synergy.js',
-  'scripts/duel_matrix.js',
-  'scripts/economy_analyzer.js',
-  'scripts/kovaaks_generator.js',
-  'scripts/coaching_engine.js',
-  'scripts/fetch_match.js',
-  'scripts/fetch_profile.js',
-  'scripts/http_fetch.js',
-  'scripts/weapon_telemetry.js',
-  'scripts/invariant_validator.js',
-  'scripts/dsse_attestation.js',
-  'scripts/merkle_ledger.js',
-  'scripts/preflight_guard.js',
-  'scripts/session_guardian.js',
-  'scripts/drift_detector.js',
-  'scripts/consensus_arbiter.js',
-  'scripts/routine_synthesizer.js',
-  'scripts/sbom_manifest.js'
-];
-
-let staticScore = 0;
-const staticMax = 30;
-
-requiredFiles.forEach(relPath => {
-  const fullPath = path.join(rootDir, relPath);
-  const exists = fs.existsSync(fullPath);
-  const size = exists ? fs.statSync(fullPath).size : 0;
-  auditResult.staticAudits.push({
-    file: relPath,
-    exists,
-    sizeBytes: size,
-    status: exists ? 'PASS' : 'FAIL'
-  });
-  if (exists && size > 100) staticScore += (staticMax / requiredFiles.length);
-});
-
-// 2. Runtime Execution Checks with Strict Contract Assertions (Zero-Placebo)
-const runtimeTests = [
-  {
-    module: 'learning_profile.js',
-    description: '360° Autodiagnosis & ELO Leaks Extraction',
-    cmd: `node ${path.join(scriptsDir, 'learning_profile.js')} "${sampleFile}" "TenZ#0001"`,
-    weight: 10,
-    validate: (out) => out.includes('DIAGNÓSTICO 360°') && out.includes('RADAR DE DOMINIO')
-  },
-  {
-    module: 'duo_synergy.js',
-    description: 'Premade Tactical Synergy & Carry Load Audit',
-    cmd: `node ${path.join(scriptsDir, 'duo_synergy.js')} "${sampleFile}" "TenZ#0001" "Chronicle#0001"`,
-    weight: 10,
-    validate: (out) => (out.includes('AUDITORÍA DE SINERGIA') || out.includes('AUDITORÍA DE DÚO')) && (out.includes('Puntuación de Sinergia') || out.includes('carga'))
-  },
-  {
-    module: 'duel_matrix.js',
-    description: 'Head-to-Head 1v1 Encounter Matrix',
-    cmd: `node ${path.join(scriptsDir, 'duel_matrix.js')} "${sampleFile}" "TenZ#0001"`,
-    weight: 5,
-    validate: (out) => out.includes('1v1 DUEL MATRIX') || out.includes('MATRIZ DE DUELOS')
-  },
-  {
-    module: 'economy_analyzer.js',
-    description: 'Buy-Tier & Loadout Conversion Analysis',
-    cmd: `node ${path.join(scriptsDir, 'economy_analyzer.js')} "${sampleFile}" "TenZ#0001"`,
-    weight: 5,
-    validate: (out) => out.includes('ECONOMY') || out.includes('DESGLOSE DE ECONOMÍA') || out.includes('ECO')
-  },
-  {
-    module: 'kovaaks_generator.js',
-    description: 'Adaptive 15-Minute Aim Routine Synthesis',
-    cmd: `node ${path.join(scriptsDir, 'kovaaks_generator.js')} "${sampleFile}" "TenZ#0001"`,
-    weight: 5,
-    validate: (out) => out.includes('KOVAAKS AIM ROUTINE') || out.includes('RUTINA KOVAAKS') || out.includes('RUTINA OMITIDA')
-  },
-  {
-    module: 'weapon_telemetry.js',
-    description: 'Deep Weapon & Distance Band Telemetry',
-    cmd: `node ${path.join(scriptsDir, 'weapon_telemetry.js')} "${sampleFile}" "TenZ#0001"`,
-    weight: 10,
-    validate: (out) => out.includes('TELEMETRÍA DE ARMAS') && out.includes('SE/TP Ratio')
-  },
-  {
-    module: 'cli.js (weapons)',
-    description: 'Master CLI Distance Conversion Integration',
-    cmd: `node ${path.join(scriptsDir, 'cli.js')} weapons "${sampleFile}" "TenZ#0001"`,
-    weight: 5,
-    validate: (out) => out.includes('DISTANCIA:')
-  },
-  {
-    module: 'cli.js (calibrate)',
-    description: 'Master CLI Zero-Cloud Offline Mode',
-    cmd: `node ${path.join(scriptsDir, 'cli.js')} calibrate "Sovereign#001" "Immortal 3" "Duelist"`,
-    weight: 5,
-    validate: (out) => out.includes('CALIBRACIÓN INSTANTÁNEA ZERO-CLOUD')
-  },
-  {
-    module: 'cli.js (invariants)',
-    description: 'Master CLI Formal State Invariants Verification',
-    cmd: `node ${path.join(scriptsDir, 'cli.js')} invariants "${sampleFile}" "TenZ#0001"`,
-    weight: 5,
-    validate: (out) => out.includes('VERIFICACIÓN FORMAL DE INVARIANTES') && out.includes('TODOS LOS INVARIANTES')
-  },
-  {
-    module: 'test_suite.js',
-    description: 'Deterministic Comprehensive Unit & Integration Suite',
-    cmd: `node ${path.join(rootDir, 'test_suite.js')}`,
-    weight: 10,
-    validate: (out) => /tests passed/.test(out) && out.includes('Exit Code: 0')
-  }
-];
-
-let runtimeScore = 0;
-runtimeTests.forEach(test => {
-  const start = Date.now();
-  let passed = false;
-  let outputSnippet = '';
-  let errorMsg = null;
-
-  try {
-    const out = execSync(test.cmd, { stdio: 'pipe', encoding: 'utf8', timeout: 120000 });
-    passed = test.validate ? test.validate(out) : out.length > 50;
-    outputSnippet = out.slice(0, 150).replace(/\s+/g, ' ');
-    if (passed) runtimeScore += test.weight;
-  } catch (err) {
-    passed = false;
-    errorMsg = err.message;
-  }
-
-  auditResult.runtimeAudits.push({
-    module: test.module,
-    description: test.description,
-    durationMs: Date.now() - start,
-    passed,
-    outputSnippet,
-    error: errorMsg
-  });
-});
-
-// Calculate final score
-auditResult.scores.total = Math.round(staticScore + runtimeScore);
-
-// Generate Directives for DeepSeek / Open Code Agent
-if (auditResult.scores.total === 100) {
-  auditResult.aiAgentDirectives.push({
-    priority: 'INFO',
-    message: 'All 6 modules pass runtime execution with Exit Code 0. The skill contracts are fully intact.'
-  });
-  auditResult.aiAgentDirectives.push({
-    priority: 'ENHANCEMENT',
-    message: 'Ensure unified master CLI (cli.js) is wired so that users can query any player handle without specifying discrete sub-scripts.'
-  });
-  auditResult.aiAgentDirectives.push({
-    priority: 'ZERO_SUB_GUIDANCE',
-    message: 'README must clearly articulate the zero-subscription path (running locally via Node or pasting standalone_prompt.md into free DeepSeek-R1/ChatGPT).'
-  });
-} else {
-  auditResult.aiAgentDirectives.push({
-    priority: 'ACTION_REQUIRED',
-    message: 'One or more modules failed runtime verification. Inspect runtimeAudits array for specific stack traces.'
-  });
-}
-
-// Format Output
-const isJson = process.argv.includes('--json');
-if (isJson) {
-  console.log(JSON.stringify(auditResult, null, 2));
+if (process.argv.includes('--json')) {
+  console.log(JSON.stringify(report, null, 2));
 } else {
   console.log(`\n========================================================================`);
-  console.log(`🤖 OPEN CODE / DEEPSEEK TESTER & AUDIT HARNESS`);
-  console.log(`Puntuación Global: ${auditResult.scores.total} / ${auditResult.scores.max} | Estado: ${auditResult.scores.total >= 95 ? '✅ EXCELENCIA VERIFICADA' : '⚠️ ATENCIÓN REQUERIDA'}`);
+  console.log(`AUDITORÍA SEMÁNTICA (propiedades negativas, sin puntuación promocional)`);
+  console.log(`========================================================================`);
+  for (const p of properties) {
+    console.log(`  ${p.pass ? 'PASS' : 'FAIL'} [${p.id}] ${p.description} (${p.durationMs}ms)`);
+    if (!p.pass || process.argv.includes('--verbose')) console.log(`       ${p.details}`);
+  }
+  console.log(`------------------------------------------------------------------------`);
+  console.log(`RESUMEN: ${report.summary.passed}/${report.summary.total} propiedades PASS | FAIL=${report.summary.failed}`);
   console.log(`========================================================================\n`);
-
-  console.log(`📁 1. AUDITORÍA ESTÁTICA DE ARCHIVOS (${Math.round(staticScore)} / ${staticMax} pts):`);
-  auditResult.staticAudits.forEach(a => {
-    console.log(`  ${a.exists ? '✓' : '✗'} [${a.status}] ${a.file.padEnd(30)} (${a.sizeBytes} bytes)`);
-  });
-
-  console.log(`\n⚡ 2. AUDITORÍA DE EJECUCIÓN EN TIEMPO REAL (${runtimeScore} / 70 pts):`);
-  auditResult.runtimeAudits.forEach(r => {
-    console.log(`  ${r.passed ? '✅' : '❌'} ${r.module.padEnd(25)}: ${r.passed ? 'PASS (Exit 0)' : 'FAIL'} (${r.durationMs}ms)`);
-  });
-
-  console.log(`\n🧠 3. DIRECTIVAS PARA EL AGENTE (DEEPSEEK / OPEN CODE):`);
-  auditResult.aiAgentDirectives.forEach(d => {
-    console.log(`  • [${d.priority}] ${d.message}`);
-  });
-  console.log(`\n========================================================================\n`);
 }
+
+process.exit(failed.length === 0 ? 0 : 1);

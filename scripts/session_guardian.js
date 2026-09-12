@@ -25,7 +25,7 @@ class SessionGuardian {
    */
   calculateTiltIndex(matchRounds, targetPlayer) {
     if (!matchRounds || !Array.isArray(matchRounds) || matchRounds.length === 0) {
-      return { tiltIndex: 0, level: 'STABLE', triggers: [] };
+      return { tiltIndex: null, level: 'INSUFFICIENT_DATA', triggers: [], insufficient: true };
     }
 
     let tiltPoints = 0;
@@ -33,10 +33,12 @@ class SessionGuardian {
     let consecutiveDeathsWithoutKill = 0;
     let maxConsecutiveDeaths = 0;
     let untradedFirstDeaths = 0;
+    let matchedRounds = 0;
 
     matchRounds.forEach((round, idx) => {
       const pStat = (round.playerStats || []).find(p => (p.player || p.puuid) === targetPlayer);
       if (!pStat) return;
+      matchedRounds++;
 
       const kills = pStat.kills ? pStat.kills.length : (pStat.killsCount || 0);
       const died = Boolean(pStat.wasKilled || (pStat.deaths && pStat.deaths > 0));
@@ -69,6 +71,10 @@ class SessionGuardian {
       triggers.push(`${untradedFirstDeaths} First Deaths aisladas sin trade de equipo`);
     }
 
+    if (matchedRounds === 0) {
+      return { tiltIndex: null, level: 'INSUFFICIENT_DATA', triggers: [], insufficient: true };
+    }
+
     const normalizedTilt = Math.min(100, Math.max(0, tiltPoints));
     let level = 'OPTIMAL';
     if (normalizedTilt >= 70) level = 'CRITICAL_TILT';
@@ -79,6 +85,8 @@ class SessionGuardian {
       tiltIndex: normalizedTilt,
       level,
       triggers,
+      insufficient: false,
+      matchedRounds,
       maxConsecutiveDeaths,
       untradedFirstDeaths
     };
@@ -87,12 +95,23 @@ class SessionGuardian {
   /**
    * Calculates fatigue factor [0.0 - 1.0] across continuous playtime and round performance decay
    */
-  calculateFatigueFactor(sessionData) {
-    const totalRounds = sessionData.totalRounds || (sessionData.matchRounds ? sessionData.matchRounds.length : 20);
-    const continuousMinutes = sessionData.continuousMinutes || (totalRounds * 1.8);
+  calculateFatigueFactor(sessionData = {}) {
+    // Fatiga SOLO con tiempo continuo aportado explícitamente: sin él no se
+    // estima por rondas (sería un valor inventado).
+    const minutes = Number(sessionData.continuousMinutes);
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      return {
+        fatigueFactor: null,
+        continuousMinutes: null,
+        isFatigued: null,
+        insufficient: true,
+        recommendation: null,
+        missing: 'continuousMinutes (minutos continuos de sesión aportados explícitamente)'
+      };
+    }
 
     // Baseline: 60 mins is normal (0.2), 120 mins starts degradation (0.5), 180+ mins is severe (0.8+)
-    let fatigue = (continuousMinutes / 200) * 0.6;
+    let fatigue = (minutes / 200) * 0.6;
 
     // Decay penalty: compare performance between first half and second half
     if (sessionData.firstHalfADR && sessionData.secondHalfADR) {
@@ -103,7 +122,7 @@ class SessionGuardian {
     }
 
     const normalized = Math.min(1.0, Math.max(0.0, Number(fatigue.toFixed(2))));
-    let recommendation = 'Apto para competir en el máximo nivel';
+    let recommendation = 'Apto para competir si el resto de indicadores están observados';
     if (normalized >= 0.75) {
       recommendation = 'DETENER COLA: Fatiga neuromuscular severa. Descanso obligatorio de 30 minutos.';
     } else if (normalized >= 0.50) {
@@ -112,8 +131,9 @@ class SessionGuardian {
 
     return {
       fatigueFactor: normalized,
-      continuousMinutes: Math.round(continuousMinutes),
+      continuousMinutes: Math.round(minutes),
       isFatigued: normalized >= this.maxSafeFatigue,
+      insufficient: false,
       recommendation
     };
   }
@@ -147,6 +167,25 @@ class SessionGuardian {
     const tilt = this.calculateTiltIndex(rounds, targetPlayer);
     const fatigue = this.calculateFatigueFactor(sessionData);
 
+    // Sin tilt medible o sin tiempo continuo explícito NO se aprueba la cola ni
+    // se emiten consejos de salud: se declara evidencia insuficiente.
+    const missing = [];
+    if (tilt.insufficient) missing.push('rondas observadas con estadísticas del objetivo');
+    if (fatigue.insufficient) missing.push(fatigue.missing || 'continuousMinutes');
+    if (tilt.insufficient || fatigue.insufficient) {
+      return {
+        player: targetPlayer,
+        evaluatedAt: new Date().toISOString(),
+        tilt,
+        fatigue,
+        insufficient: true,
+        safeToContinue: null,
+        verdict: 'INSUFFICIENT_DATA',
+        missing,
+        prescriptions: []
+      };
+    }
+
     const safeToContinue = tilt.tiltIndex < this.tiltThreshold && !fatigue.isFatigued;
 
     return {
@@ -154,6 +193,7 @@ class SessionGuardian {
       evaluatedAt: new Date().toISOString(),
       tilt,
       fatigue,
+      insufficient: false,
       safeToContinue,
       verdict: safeToContinue ? 'QUEUE_APPROVED' : 'QUEUE_HALT',
       prescriptions: [

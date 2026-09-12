@@ -26,7 +26,7 @@ function generateKovaaksRoutine(matchData, targetHandle) {
 
   // Resolución canónica exacta: objetivo inexistente/ambiguo => fail-closed.
   const { playerMap, target } = parseDuels(matchData, targetHandle);
-  const handle = target || resolveExactHandle(Object.keys(playerMap), targetHandle, { allowFirstIfMissing: true });
+  const handle = target || resolveExactHandle(Object.keys(playerMap), targetHandle);
 
   const summary = segments.find(s => s.type === 'player-summary' &&
     (s.metadata?.platformUserHandle === handle || s.attributes?.platformUserIdentifier === handle));

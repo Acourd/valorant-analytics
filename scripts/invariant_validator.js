@@ -70,6 +70,8 @@ function validateRadar(radar) {
     if (rawVal === undefined) {
       throw new InvariantViolationError('RADAR_KEY_MISSING', `Pilar '${key1}' o '${key2}' ausente en radar`, { radar });
     }
+    // Dimensión sin métrica observada: n/d explícito (null), jamás un default.
+    if (rawVal === null || rawVal === 'n/d' || rawVal === '') continue;
     const score = parseScore(rawVal);
     if (!inRange(score, 0, 100)) {
       throw new InvariantViolationError('RADAR_BOUNDS', `Pilar '${key1}' fuera del rango formal [0, 100]: ${rawVal}`, { key: key1, rawVal, score });

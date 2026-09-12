@@ -32,16 +32,18 @@ class DriftDetector {
    */
   evaluateSideDivergence(rounds, targetPlayer) {
     if (!rounds || !Array.isArray(rounds) || rounds.length === 0) {
-      return { divergenceScore: 0, attackAdvantage: 0, classification: 'NO_DATA' };
+      return { noData: true, divergenceScore: null, classification: 'NO_DATA', attack: null, defense: null };
     }
 
     let atkKills = 0, atkDeaths = 0, atkDamage = 0, atkRounds = 0;
     let defKills = 0, defDeaths = 0, defDamage = 0, defRounds = 0;
+    let matchedRounds = 0;
 
     rounds.forEach((r, idx) => {
       // First 12 rounds: typically side 1 (Attack or Defense). Standard match: 1-12, 13-24
       const isAttack = r.playerSide ? r.playerSide.toLowerCase() === 'attack' : idx < 12;
       const pStat = (r.playerStats || []).find(p => (p.player || p.puuid) === targetPlayer);
+      if (pStat) matchedRounds++;
 
       if (isAttack) {
         atkRounds++;
@@ -60,6 +62,10 @@ class DriftDetector {
       }
     });
 
+    if (matchedRounds === 0) {
+      return { noData: true, divergenceScore: null, classification: 'NO_DATA', attack: null, defense: null };
+    }
+
     const atkADR = atkRounds > 0 ? Number((atkDamage / atkRounds).toFixed(1)) : 0;
     const defADR = defRounds > 0 ? Number((defDamage / defRounds).toFixed(1)) : 0;
     const atkKD = atkDeaths > 0 ? Number((atkKills / atkDeaths).toFixed(2)) : atkKills;
@@ -75,6 +81,7 @@ class DriftDetector {
     }
 
     return {
+      noData: false,
       attack: { rounds: atkRounds, kills: atkKills, deaths: atkDeaths, adr: atkADR, kd: atkKD },
       defense: { rounds: defRounds, kills: defKills, deaths: defDeaths, adr: defADR, kd: defKD },
       divergenceScore: divergencePct,
@@ -87,11 +94,12 @@ class DriftDetector {
    */
   evaluateQuarterDrift(rounds, targetPlayer) {
     if (!rounds || !Array.isArray(rounds) || rounds.length < 4) {
-      return { quarters: [], entropy: 0, driftDetected: false };
+      return { noData: true, quarters: [], killDistributionEntropy: null, maxPossibleEntropy: 2.0, driftDetected: null, diagnosis: 'NO_DATA: menos de 4 rondas observadas; no se emite entropía.' };
     }
 
     const quarterSize = Math.ceil(rounds.length / 4);
     const quarters = [];
+    let matchedRounds = 0;
 
     for (let q = 0; q < 4; q++) {
       const slice = rounds.slice(q * quarterSize, (q + 1) * quarterSize);
@@ -101,6 +109,7 @@ class DriftDetector {
       slice.forEach(r => {
         const pStat = (r.playerStats || []).find(p => (p.player || p.puuid) === targetPlayer);
         if (pStat) {
+          matchedRounds++;
           kills += (pStat.kills ? pStat.kills.length : (pStat.killsCount || 0));
           deaths += (pStat.wasKilled ? 1 : 0);
         }
@@ -116,7 +125,10 @@ class DriftDetector {
     }
 
     const totalKills = quarters.reduce((acc, q) => acc + q.kills, 0);
-    const probs = quarters.map(q => totalKills > 0 ? q.kills / totalKills : 0.25);
+    if (matchedRounds === 0 || totalKills === 0) {
+      return { noData: true, quarters, killDistributionEntropy: null, maxPossibleEntropy: 2.0, driftDetected: null, diagnosis: 'NO_DATA: sin bajas observadas del objetivo; la entropía no es interpretable.' };
+    }
+    const probs = quarters.map(q => q.kills / totalKills);
     const entropy = this.calculateEntropy(probs);
 
     // Max entropy for 4 uniform bins is log2(4) = 2.0
@@ -124,6 +136,7 @@ class DriftDetector {
     const driftDetected = entropy < 1.6 && totalKills >= 8;
 
     return {
+      noData: false,
       quarters,
       killDistributionEntropy: entropy,
       maxPossibleEntropy: 2.0,
@@ -166,8 +179,21 @@ class DriftDetector {
     const side = this.evaluateSideDivergence(rounds, targetPlayer);
     const quarter = this.evaluateQuarterDrift(rounds, targetPlayer);
 
+    if (side.noData || quarter.noData) {
+      return {
+        player: targetPlayer,
+        noData: true,
+        verdict: 'NO_DATA',
+        sideDivergence: side,
+        quarterDrift: quarter,
+        overallStability: null,
+        summary: 'NO_DATA: sin rondas/estadísticas observadas del objetivo; no se emite estabilidad.'
+      };
+    }
+
     return {
       player: targetPlayer,
+      noData: false,
       sideDivergence: side,
       quarterDrift: quarter,
       overallStability: (100 - (side.divergenceScore * 0.5 + (quarter.driftDetected ? 30 : 0))).toFixed(1),

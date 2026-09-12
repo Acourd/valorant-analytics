@@ -34,6 +34,9 @@ function normalizeHandleKey(handle) {
 
 /**
  * Resolución EXACTA de objetivo.
+ * Sin objetivo explícito: solo se auto-selecciona si el roster tiene UN único
+ * jugador (no hay elección posible). Con 2+ jugadores exige el Riot ID exacto
+ * y devuelve la lista de candidatos en el error (elección confirmable).
  * @param {string[]} handles  Riot IDs disponibles en la telemetría.
  * @param {string} requested  Riot ID pedido (Nombre#TAG).
  * @param {{allowFirstIfMissing?:boolean}} [options]
@@ -41,7 +44,7 @@ function normalizeHandleKey(handle) {
  * @throws TARGET_NOT_FOUND | TARGET_AMBIGUOUS | TARGET_REQUIRED | ROSTER_EMPTY
  */
 function resolveExactHandle(handles, requested, options = {}) {
-  const allowFirstIfMissing = options.allowFirstIfMissing !== false;
+  const allowFirstIfMissing = options.allowFirstIfMissing === true;
   const keys = (Array.isArray(handles) ? handles : []).filter(h => typeof h === 'string' && h.trim().length > 0);
   if (keys.length === 0) {
     const err = new Error('Telemetría sin jugadores válidos: no hay objetivo que analizar.');
@@ -50,9 +53,10 @@ function resolveExactHandle(handles, requested, options = {}) {
   }
   const wanted = String(requested === undefined || requested === null ? '' : requested).trim();
   if (wanted.length === 0) {
-    // Auto-resolución SOLO cuando no se pidió un objetivo explícito.
+    // Auto-selección SOLO si no hay ambigüedad (un único jugador).
+    if (keys.length === 1) return keys[0];
     if (allowFirstIfMissing) return keys[0];
-    const err = new Error('Objetivo no especificado: indica el Riot ID exacto (Nombre#TAG).');
+    const err = new Error(`Objetivo no especificado: la partida contiene ${keys.length} jugadores. Indica el Riot ID exacto (Nombre#TAG). Candidatos: ${keys.slice(0, 10).join(', ')}`);
     err.code = 'TARGET_REQUIRED';
     throw err;
   }
@@ -69,11 +73,18 @@ function resolveExactHandle(handles, requested, options = {}) {
   throw err;
 }
 
-/** Procedencia declarada en metadata; por defecto, datos locales normalizados. */
+/**
+ * Procedencia de datos locales/ficheros: SOLO `synthetic_demo` o
+ * `normalized_input`. Los metadatos de un JSON (`attestation`, `provenance`,
+ * `verified`, `wafContainment`...) JAMÁS elevan a `verified_source`.
+ *
+ * `verified_source` es una capacidad interna del adaptador sellado
+ * (`evidence_policy.observeVerifiedMatch`), que exige atestación firmada y
+ * verificada contra el trust store. Ningún archivo puede autodeclararla.
+ */
 function sourceProvenance(meta) {
   const m = meta || {};
-  if (m.synthetic || m.wafContainment) return PROVENANCE.SYNTHETIC;
-  if (m.provenance === PROVENANCE.VERIFIED || m.attestation || m.verified === true) return PROVENANCE.VERIFIED;
+  if (m.synthetic === true || m.wafContainment === true) return PROVENANCE.SYNTHETIC;
   return PROVENANCE.NORMALIZED;
 }
 

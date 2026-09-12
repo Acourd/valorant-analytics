@@ -240,7 +240,7 @@ function handleProfile(handle) {
 
 function buildDuelTable(matrixData, playerHandle) {
   const { playerMap, duelMatrix, target } = matrixData;
-  const effectiveTarget = target || require('./data_contract').resolveExactHandle(Object.keys(playerMap), playerHandle, { allowFirstIfMissing: true });
+  const effectiveTarget = target || require('./data_contract').resolveExactHandle(Object.keys(playerMap), playerHandle);
   if (!effectiveTarget || !playerMap[effectiveTarget]) {
     return { error: `Jugador "${playerHandle || 'desconocido'}" no encontrado en la partida.`, rows: [], target: null };
   }
@@ -254,10 +254,13 @@ function buildDuelTable(matrixData, playerHandle) {
   return { error: null, rows, target: effectiveTarget };
 }
 
-const args = process.argv.slice(2);
-const DEMO_MODE = args.includes('--demo');
-for (let i = args.length - 1; i >= 0; i--) { if (args[i] === '--demo') args.splice(i, 1); }
-let command = args[0];
+let DEMO_MODE = false;
+
+function runCli(argv) {
+  const args = argv.slice();
+  DEMO_MODE = args.includes('--demo');
+  for (let i = args.length - 1; i >= 0; i--) { if (args[i] === '--demo') args.splice(i, 1); }
+  const command = args[0];
 
 if (!command || command === '--help' || command === '-h') {
   printBanner();
@@ -327,7 +330,7 @@ try {
       ];
       radarRows.forEach(([label, key, value]) => {
         const d = evidence.dimensions[key];
-        console.log(`  • ${label}: ${d && d.available ? value : 'n/d (sin métrica+benchmark)'}`);
+        console.log(`  • ${label}: ${d && d.available && value !== null ? `${value} / 100` : 'n/d (sin métrica+benchmark)'}`);
       });
     } else {
       console.log(`📊 Radar omitido: sin dimensiones evaluables (métrica+benchmark).`);
@@ -348,11 +351,11 @@ try {
     } else {
       console.log(`\n🔎 Observaciones/fugas omitidas: sin eventos observados de ronda.`);
     }
-    if (evidence.allowedSections.includes('aim_routine')) {
+    if (evidence.allowedSections.includes('aim_routine') && res.prescripcionInmediata) {
       console.log(`\n💡 REGLA MENTAL: ${res.prescripcionInmediata.reglaMental}`);
       console.log(`🎯 RUTINA KOVAAKS: ${res.prescripcionInmediata.sesionKovaaks}`);
     } else {
-      console.log(`\n🎯 Rutina omitida: falta evidencia mecánica (HS%/zonas de daño).`);
+      console.log(`\n🎯 Rutina omitida: falta evidencia mecánica observada (HS% válido).`);
     }
     console.log(`========================================================================\n`);
 
@@ -646,6 +649,15 @@ try {
     const audit = guardian.auditSession(matchData, effectivePlayer);
 
     printBanner();
+    if (audit.verdict === 'INSUFFICIENT_DATA') {
+      console.log(`🛡️ SESSION GUARDIAN: EVIDENCIA INSUFICIENTE (NO_DATA)`);
+      console.log(`Jugador: ${effectivePlayer}`);
+      console.log(`------------------------------------------------------------------------`);
+      console.log(`  • Sin consejo de cola ni de salud: faltan datos observados.`);
+      console.log(`  • Faltantes: ${(audit.missing || []).join('; ')}`);
+      console.log(`========================================================================\n`);
+      process.exit(2);
+    }
     console.log(`🛡️ SESSION GUARDIAN: FATIGA & TILT COGNITIVO`);
     console.log(`Jugador: ${effectivePlayer} | Veredicto: ${audit.verdict}`);
     console.log(`------------------------------------------------------------------------`);
@@ -664,6 +676,14 @@ try {
     const driftReport = detector.auditMatchDrift(matchData, effectivePlayer);
 
     printBanner();
+    if (driftReport.noData) {
+      console.log(`📊 RADAR DE DERIVA: EVIDENCIA INSUFICIENTE (NO_DATA)`);
+      console.log(`Jugador: ${effectivePlayer}`);
+      console.log(`------------------------------------------------------------------------`);
+      console.log(`  • Sin estabilidad ni entropía: faltan rondas observadas del objetivo.`);
+      console.log(`========================================================================\n`);
+      process.exit(2);
+    }
     console.log(`📊 RADAR DE DERIVA TÁCTICA Y ENTROPÍA MECÁNICA`);
     console.log(`Jugador: ${effectivePlayer} | Estabilidad Global: ${driftReport.overallStability}%`);
     console.log(`------------------------------------------------------------------------`);
@@ -748,26 +768,52 @@ try {
     if (fileInput && (/[\\/]/.test(fileInput) || /\.(json|txt|md|csv)$/i.test(fileInput)) && !fs.existsSync(fileInput)) {
       throw new Error(`parse: archivo no encontrado: "${fileInput}".`);
     }
-    const matchData = resolveMatchData(fileInput || path.join(__dirname, '..', 'examples', 'sample_match.json'), player);
+    const matchData = resolveMatchData(fileInput, player);
     const res = evaluateLearningProfile(matchData, player);
     validateLearningProfile(res);
+    const evidence = deriveMatchEvidence(matchData, player, fileInput);
     printBanner();
     console.log(`📋 INGESTA UNIVERSAL RESILIENTE: ${res.player} (${res.agent} - ${res.rank}) | Mapa: ${res.map}`);
+    printEvidenceLimits(evidence);
     console.log(`------------------------------------------------------------------------`);
-    console.log(`📊 RADAR DE RENDIMIENTO COMPETITIVO:`);
-    console.log(`  • Precisión Mecánica:        ${res.radar.precisionMecanica}`);
-    console.log(`  • Macrogame y Espacio:       ${res.radar.macrogamePosicionamiento}`);
-    console.log(`  • Duelos de Apertura:        ${res.radar.duelosDeApertura}`);
-    console.log(`  • Disciplina Económica:      ${res.radar.disciplinaEconomica}`);
-    console.log(`  • Compostura en Clutch:      ${res.radar.composturaClutch}`);
-    console.log(`\n🚨 TOP FUGAS DE ELO (CAUSAS DE DERROTA):`);
-    (res.eloLeaks || []).forEach((l, i) => {
-      console.log(`  [#${i + 1}] ${l.issue}`);
-      console.log(`       Detalle:  ${l.detail}`);
-      console.log(`       Solución: ${l.solution}`);
-    });
-    console.log(`\n💡 REGLA MENTAL: ${res.prescripcionInmediata.reglaMental}`);
-    console.log(`🎯 RUTINA KOVAAKS: ${res.prescripcionInmediata.sesionKovaaks}`);
+    if (evidence.allowedSections.includes('aggregate_radar')) {
+      console.log(`📊 RADAR DE RENDIMIENTO (DIMENSIONAL: solo dimensiones con métrica+benchmark):`);
+      const radarRows = [
+        ['Precisión Mecánica', 'precision', res.radar.precisionMecanica],
+        ['Macrogame y Espacio', 'macro', res.radar.macrogamePosicionamiento],
+        ['Duelos de Apertura', 'openings', res.radar.duelosDeApertura],
+        ['Disciplina Económica', 'economy', res.radar.disciplinaEconomica],
+        ['Compostura en Clutch', 'clutch', res.radar.composturaClutch]
+      ];
+      radarRows.forEach(([label, key, value]) => {
+        const d = evidence.dimensions[key];
+        console.log(`  • ${label}: ${d && d.available && value !== null ? `${value} / 100` : 'n/d (sin métrica+benchmark)'}`);
+      });
+    } else {
+      console.log(`📊 Radar omitido: sin dimensiones evaluables (métrica+benchmark).`);
+    }
+    if (evidence.allowedSections.includes('round_leaks')) {
+      console.log(`\n🚨 FUGAS ATRIBUIBLES (regla + resultado de ronda + contexto):`);
+      (res.eloLeaks || []).forEach((l, i) => {
+        console.log(`  [#${i + 1}] ${l.issue}`);
+        console.log(`       Detalle:  ${l.detail}`);
+        console.log(`       Solución: ${l.solution}`);
+      });
+    } else if (evidence.allowedSections.includes('round_observations')) {
+      console.log(`\n🔎 OBSERVACIONES POR RONDA (datos normalizados; NO verificados; NO se atribuyen causas):`);
+      (evidence.observedEvents || []).slice(0, 10).forEach(ev => {
+        console.log(`  • R${ev.n} [${ev.event}] ${ev.detail}`);
+      });
+      console.log(`  (Fugas/causas omitidas: falta fuente verificada + regla + resultado + contexto.)`);
+    } else {
+      console.log(`\n🔎 Observaciones/fugas omitidas: sin eventos observados de ronda.`);
+    }
+    if (evidence.allowedSections.includes('aim_routine') && res.prescripcionInmediata) {
+      console.log(`\n💡 REGLA MENTAL: ${res.prescripcionInmediata.reglaMental}`);
+      console.log(`🎯 RUTINA KOVAAKS: ${res.prescripcionInmediata.sesionKovaaks}`);
+    } else {
+      console.log(`\n🎯 Rutina omitida: falta evidencia mecánica observada (HS% válido).`);
+    }
     console.log(`========================================================================\n`);
 
   } else if (command === 'harvest') {
@@ -852,15 +898,15 @@ try {
     console.log(`========================================================================\n`);
 
   } else {
-    // Fallback frictionless: archivo, URL de partida o texto largo → diagnóstico directo
-    if (fs.existsSync(command) || command.includes('tracker.gg') || command.includes('op.gg') || command.length > 20) {
+    // Fallback frictionless: archivo o texto largo → diagnóstico directo
+    if (fs.existsSync(command) || command.length > 20) {
       const matchData = resolveMatchData(command, args[1]);
       const res = evaluateLearningProfile(matchData, args[1]);
       printBanner();
       console.log(`🎯 DIAGNÓSTICO DIRECTO: ${res.player} (${res.agent} - ${res.rank}) | Mapa: ${res.map}`);
       console.log(`------------------------------------------------------------------------`);
-      console.log(`📊 Radar Precisión Mecánica: ${res.radar.precisionMecanica}`);
-      console.log(`💡 Regla Inmediata: ${res.prescripcionInmediata.reglaMental}`);
+      console.log(`📊 Radar Precisión Mecánica: ${res.radar.precisionMecanica === null ? 'n/d (sin métrica observada)' : `${res.radar.precisionMecanica} / 100`}`);
+      console.log(`💡 Regla Inmediata: ${res.prescripcionInmediata ? res.prescripcionInmediata.reglaMental : 'omitida (sin HS% observado)'}`);
       console.log(`========================================================================\n`);
     } else {
       console.error(`Comando desconocido: "${command}". Ejecuta "node cli.js --help" para ver las opciones.`);
@@ -870,4 +916,20 @@ try {
 } catch (err) {
   console.error('\n❌ Error al ejecutar comando:', err.message);
   process.exit(1);
+}
+}
+
+module.exports = {
+  runCli,
+  buildDuelTable,
+  handleProfile,
+  resolveMatchData,
+  resolveTargetAndPlayer,
+  printBanner,
+  printProvenance,
+  getProjectVersion
+};
+
+if (require.main === module) {
+  runCli(process.argv.slice(2));
 }

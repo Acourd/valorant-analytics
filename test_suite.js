@@ -339,11 +339,15 @@ check('cli.js merkle: árbol Merkle de eventos discretos y prueba de inclusión'
     assert.ok(out.includes('VÁLIDA (Exit 0)'));
   });
 
-check('cli.js guardian: monitor de fatiga neuromuscular y tilt cognitivo',
+check('cli.js guardian: sin tiempo continuo explícito declara NO_DATA (sin consejo de cola)',
   () => {
-    const out = cliOk(['guardian', sampleFile, 'TenZ#0001']);
-    assert.ok(out.includes('SESSION GUARDIAN'));
-    assert.ok(out.includes('Apto para competir'));
+    let code = 0;
+    let out = '';
+    try { cliOk(['guardian', sampleFile, 'TenZ#0001']); }
+    catch (e) { code = e.status; out = String(e.stdout || '') + String(e.stderr || ''); }
+    assert.strictEqual(code, 2, 'guardian sin continuousMinutes debe salir 2');
+    assert.ok(/EVIDENCIA INSUFICIENTE|NO_DATA/.test(out), 'debe declarar evidencia insuficiente');
+    assert.ok(!/Apto para competir|QUEUE_APPROVED|DIRECTIVAS DE SALUD COGNITIVA/.test(out), 'no debe aprobar cola ni prescribir salud');
   });
 
 check('cli.js drift: cálculo de deriva táctica y entropía de Shanon',
@@ -638,12 +642,15 @@ check('economy_analyzer: sintetiza tiers a partir de player-round si faltan play
     assert.ok(eco.tiers.some(t => t.tier === 'Full-Buy'));
   });
 
-check('cli.js duels: dispatcher sin jugador resuelve target automáticamente con Exit Code 0',
+check('cli.js duels: objetivo ausente no auto-selecciona (fail-closed con candidatos)',
   () => {
-    const out = execFileSync(process.execPath, [cliPath, 'duels', sampleFile], { encoding: 'utf8' });
-    assert.ok(out.includes('MATRIZ DE DUELOS 1v1 DIRECTOS'), 'Encabezado ausente');
-    assert.ok(!out.includes('undefined'), 'No debe mostrar jugador undefined');
-    assert.ok(out.includes('Duelos: 5'), 'Debe listar los 5 duelos contra rivales');
+    let code = 0;
+    let out = '';
+    try { execFileSync(process.execPath, [cliPath, 'duels', sampleFile], { encoding: 'utf8' }); }
+    catch (e) { code = e.status; out = String(e.stdout || '') + String(e.stderr || ''); }
+    assert.notStrictEqual(code, 0, 'sin jugador debe fallar cerrado');
+    assert.ok(/Objetivo no especificado/.test(out) && /Candidatos/.test(out), 'debe pedir selección explícita y listar candidatos');
+    assert.ok(!/MATRIZ DE DUELOS 1v1 DIRECTOS/.test(out), 'no debe analizar a un jugador arbitrario');
   });
 
 check('cli.js duo: dispatcher sin jugadores resuelve compañeros dinámicamente con Exit Code 0',
@@ -2269,7 +2276,8 @@ check('contrato: objetivo exacto o fail-closed (sin fallback al primer jugador)'
     const { resolveExactHandle } = require(path.join(scriptsDir, 'data_contract.js'));
     assert.throws(() => resolveExactHandle(['A#1', 'B#2'], 'C#3', { allowFirstIfMissing: false }), /no encontrado/i);
     assert.strictEqual(resolveExactHandle(['A#1', 'B#2'], 'b#2'), 'B#2', 'coincidencia exacta insensible a mayúsculas');
-    assert.strictEqual(resolveExactHandle(['A#1', 'B#2'], undefined), 'A#1', 'sin objetivo, primer jugador solo si no se pidió');
+    assert.throws(() => resolveExactHandle(['A#1', 'B#2'], undefined), /Objetivo no especificado/, 'sin objetivo y roster múltiple debe exigir selección');
+    assert.strictEqual(resolveExactHandle(['A#1'], undefined), 'A#1', 'sin ambigüedad (1 jugador) se auto-selecciona');
     assert.throws(() => resolveExactHandle([], 'A#1'), /sin jugadores/i);
     // Repro del auditor: jugador inexistente NO analiza a aspas#0001 y sale != 0.
     let code = 0;
@@ -2286,7 +2294,9 @@ check('procedencia: fuentes locales se etiquetan como normalizadas (no verificad
     const { sourceProvenance, mayAssertCauses } = require(path.join(scriptsDir, 'data_contract.js'));
     assert.strictEqual(sourceProvenance({}), 'normalized_input');
     assert.strictEqual(sourceProvenance({ synthetic: true }), 'synthetic_demo');
-    assert.strictEqual(sourceProvenance({ provenance: 'verified_source' }), 'verified_source');
+    assert.strictEqual(sourceProvenance({ provenance: 'verified_source' }), 'normalized_input', 'autodeclararse verificado no autoriza');
+    assert.strictEqual(sourceProvenance({ attestation: { fake: true } }), 'normalized_input', 'una atestación en metadata no autoriza');
+    assert.strictEqual(sourceProvenance({ verified: true }), 'normalized_input', 'verified:true en metadata no autoriza');
     assert.strictEqual(mayAssertCauses('normalized_input'), false, 'datos locales no afirman causas');
     assert.strictEqual(mayAssertCauses('verified_source'), true);
     const out = cliOk(['match', sampleFile, 'TenZ#0001']);
@@ -2404,6 +2414,118 @@ check('privacidad: ninguna ruta ejecutable contacta Tracker (stubs fail-closed)'
       assert.ok(!/require\(['"]\.\/http_fetch['"]\)/.test(src), `${file} no debe importar la capa de red`);
       assert.ok(!/require\(['"]https?['"]\)/.test(src), `${file} no debe importar https`);
       assert.ok(!/api\.tracker\.gg/.test(src), `${file} sin endpoint de Tracker`);
+    }
+  });
+
+// ---- Regresión del veredicto CORRECTION_REQUIRED (v4.6): procedencia sellada, sin defaults, fail-closed, parser, paquete, CI y docs ----
+
+check('procedencia sellada: metadata con atestación falsa no habilita causas end-to-end',
+  () => {
+    const forged = JSON.parse(JSON.stringify(sample));
+    forged.data.metadata.attestation = { payloadDigest: 'deadbeef', host: 'api.riotgames.com' };
+    forged.data.metadata.provenance = 'verified_source';
+    forged.data.metadata.verified = true;
+    const p = evaluateLearningProfile(forged, 'TenZ#0001');
+    assert.strictEqual(p.provenance, 'normalized_input', 'metadata falsa no eleva procedencia');
+    assert.deepStrictEqual(p.eloLeaks, [], 'no se emiten causas sin fuente verificada real');
+    assert.ok(/normalizad/i.test(p.warning || ''), 'debe advertir procedencia no verificada');
+  });
+
+check('learning_profile sin métricas: radar n/d y rutina nula (sin defaults plausibles)',
+  () => {
+    const observed = parseTextScoreboard('Focus#NA1 10 8 2 150 120');
+    const p = evaluateLearningProfile(observed, 'Focus#NA1');
+    assert.strictEqual(p.mechanical.hsPct, null);
+    assert.strictEqual(p.mechanical.kast, null);
+    assert.strictEqual(p.mechanical.clutches, null);
+    assert.strictEqual(p.radar.duelosDeApertura, null, 'sin FK/FD no hay pilar de apertura');
+    assert.strictEqual(p.radar.disciplinaEconomica, null, 'sin economía observada no hay pilar');
+    assert.strictEqual(p.radar.composturaClutch, null, 'sin clutches no hay pilar');
+    assert.strictEqual(p.prescripcionInmediata, null, 'sin HS% observado no hay prescripción');
+    assert.strictEqual(validateLearningProfile(p), true, 'el perfil n/d sigue cumpliendo invariantes');
+  });
+
+check('guardian: sin datos declara INSUFFICIENT_DATA y con sesión explícita evalúa',
+  () => {
+    const { SessionGuardian } = require(path.join(scriptsDir, 'session_guardian.js'));
+    const g = new SessionGuardian();
+    const empty = g.auditSession({}, 'X#NA1');
+    assert.strictEqual(empty.verdict, 'INSUFFICIENT_DATA');
+    assert.strictEqual(empty.safeToContinue, null);
+    assert.deepStrictEqual(empty.prescriptions, []);
+    const rounds = Array.from({ length: 4 }, () => ({ firstDeathPlayer: 'X#NA1', firstDeathTraded: false, playerStats: [{ player: 'X#NA1', wasKilled: true, killsCount: 0 }] }));
+    const full = g.auditSession({ continuousMinutes: 180, rounds }, 'X#NA1');
+    assert.strictEqual(full.verdict, 'QUEUE_HALT');
+    assert.ok(full.tilt.tiltIndex > 0, 'con datos observados el tilt se calcula');
+  });
+
+check('drift: sin rondas declara NO_DATA (estabilidad nula, entropía nula)',
+  () => {
+    const { DriftDetector } = require(path.join(scriptsDir, 'drift_detector.js'));
+    const r = new DriftDetector().auditMatchDrift({}, 'X#NA1');
+    assert.strictEqual(r.noData, true);
+    assert.strictEqual(r.verdict, 'NO_DATA');
+    assert.strictEqual(r.overallStability, null);
+    assert.strictEqual(r.quarterDrift.killDistributionEntropy, null);
+  });
+
+check('parser: Unicode y BOM sin perder jugadores ni absorber numeración de fila',
+  () => {
+    const raw = '\uFEFFMatches#NA1 -- 日本語プレイヤー#JP1 10 8 2 150 120\n12 Nombre#EU1 5 5 1 100 90';
+    const parsed = parseTextScoreboard(raw);
+    const handles = parsed.data.segments.filter(s => s.type === 'player-summary').map(s => s.metadata.platformUserHandle);
+    assert.ok(handles.includes('日本語プレイヤー#JP1'), 'debe conservar Riot IDs Unicode');
+    assert.ok(handles.includes('Nombre#EU1'), 'debe extraer el nombre real');
+    assert.ok(!handles.some(h => /^\d+\s/.test(h)), 'no debe absorber numeración de fila en el nombre');
+    assert.ok(!handles.includes('Matches#NA1'), 'no debe elegir la cabecera teniendo la fila real');
+  });
+
+check('biblioteca: importar el paquete no ejecuta la CLI y expone el motor',
+  () => {
+    const lib = require(path.join(scriptsDir, 'index.js'));
+    assert.strictEqual(typeof lib.evaluateLearningProfile, 'function');
+    assert.strictEqual(typeof lib.runCli, 'function');
+    assert.strictEqual(typeof lib.SessionGuardian, 'function');
+  });
+
+check('paquete: main/biblioteca, bin de CLI, exports y files instalables',
+  () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+    assert.strictEqual(pkg.main, 'scripts/index.js', 'main debe ser la biblioteca, no la CLI');
+    assert.ok(pkg.bin && pkg.bin['valorant-analytics'] === 'scripts/cli.js', 'bin debe apuntar a la CLI');
+    assert.ok(pkg.exports && pkg.exports['.'] === './scripts/index.js', 'exports . debe resolver a la biblioteca');
+    assert.ok(Array.isArray(pkg.files) && pkg.files.includes('scripts/'), 'files debe incluir scripts/');
+    assert.ok(fs.existsSync(path.join(__dirname, 'scripts', 'index.js')), 'scripts/index.js debe existir');
+  });
+
+check('CI: runner único ejecuta test_suite y TODAS las suites modulares',
+  () => {
+    const runnerPath = path.join(__dirname, 'run_all_tests.js');
+    assert.ok(fs.existsSync(runnerPath), 'run_all_tests.js debe existir');
+    const runner = fs.readFileSync(runnerPath, 'utf8');
+    assert.ok(/test_suite\.js/.test(runner) && /readdirSync/.test(runner) && /tests/.test(runner), 'el runner debe descubrir tests/*.js');
+    const ci = fs.readFileSync(path.join(__dirname, '.github', 'workflows', 'ci.yml'), 'utf8');
+    assert.ok(/run_all_tests\.js/.test(ci), 'CI debe invocar el runner único');
+  });
+
+check('docs: SKILL.md sin promesas de bypass Cloudflare ni API de Tracker',
+  () => {
+    const skill = fs.readFileSync(path.join(__dirname, 'SKILL.md'), 'utf8');
+    assert.ok(!/Cloudflare/i.test(skill), 'no debe prometer bypass de Cloudflare');
+    assert.ok(!/Tracker API/i.test(skill), 'no debe referirse a una API de Tracker');
+  });
+
+check('cli.js parse: sin fugas ni rutina cuando solo hay métricas mínimas',
+  () => {
+    const tmp = path.join(os.tmpdir(), `parse-min-${process.pid}.txt`);
+    fs.writeFileSync(tmp, 'Focus#NA1\t10\t8\t2\t150\t120\n', 'utf8');
+    try {
+      const out = cliOk(['parse', tmp, 'Focus#NA1']);
+      assert.ok(/INGESTA UNIVERSAL/.test(out), 'debe procesar el volcado observado');
+      assert.ok(!/FUGAS ATRIBUIBLES|TOP FUGAS DE ELO/.test(out), 'no debe acusar causas sin fuente verificada');
+      assert.ok(!/RUTINA KOVAAKS:|REGLA MENTAL:/.test(out), 'no debe prescribir rutina sin HS% observado');
+    } finally {
+      fs.unlinkSync(tmp);
     }
   });
 
