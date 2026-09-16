@@ -388,7 +388,8 @@ if (!command || command === '--help' || command === '-h') {
   console.log(`                   1 = entrada, objetivo o comando inválido; 2 = evidencia insuficiente para el resultado principal (plan, guardian, drift).`);
   console.log(`PRESUPUESTOS: tamaño de archivo, longitud de texto, profundidad JSON, jugadores/rondas/eventos/arreglos, tiempo y workers.`);
   console.log(`              Al excederse: INPUT_TOO_LARGE · SCHEMA_LIMIT_EXCEEDED · RESOURCE_BUDGET_EXCEEDED (configurables con VA_BUDGET_*, p. ej. VA_BUDGET_MAX_PLAYERS).`);
-  console.log(`ESQUEMA: schemaVersion 1; ausente = legado limitado; incompatible = SCHEMA_UNSUPPORTED. Campos desconocidos se ignoran y se declaran en el diagnóstico.`);
+  console.log(`ESQUEMA: schemaVersion 1; canónica matchInfo.schemaVersion (Riot) / data.metadata.schemaVersion (normalizado).`);
+  console.log(`         Ausente = legado limitado; incompatible o versión de raíz sin canónica = SCHEMA_UNSUPPORTED. Campos desconocidos se declaran sin elevar procedencia.`);
   console.log(`OBJETIVO: ningún comando selecciona un jugador, archivo o fixture en silencio.`);
   console.log(`========================================================================\n`);
   throw new CliExit(EXIT.OK);

@@ -1,5 +1,11 @@
 # Changelog — valorant-analytics
 
+## 4.10.2 — Contrato inequívoco de `schemaVersion` Riot
+
+- **Corregido (residual):** un payload con `payload.schemaVersion` **solo en la raíz** y sin `matchInfo.schemaVersion` se aceptaba como `supported`. La ubicación canónica es `matchInfo.schemaVersion`: la versión de raíz **solo** se admite si coincide con la canónica, y si la canónica falta se rechaza con `SCHEMA_UNSUPPORTED` (fail-closed). Ausencia total ⇒ `legacy_limited`.
+- Regresión `tests #184` (root=1, matchInfo ausente) + matriz adversarial ampliada; README×3 y ayuda CLI reflejan la regla final.
+- Versión 4.10.2 (184/184 checks).
+
 ## 4.10.1 — Correcciones del veredicto sobre la PR #18
 
 - **Presupuestos no anulables:** `VA_BUDGET_*` (y overrides programáticos) **solo pueden REDUCIR** límites. Valores no finitos, no enteros, ≤0, texto o por encima del máximo seguro compilado fallan cerrado con `RESOURCE_BUDGET_EXCEEDED`; cadena vacía = variable ausente. No existe escape de entorno para ampliar límites.

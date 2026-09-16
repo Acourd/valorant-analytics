@@ -159,6 +159,7 @@ property('presupuestos: intentos de ampliación por entorno fallan cerrado', () 
 property('esquema Riot: matriz canónica de versiones (fail-closed en discrepancias)', () => {
   const matrix = [
     [{ schemaVersion: 99, matchInfo: { matchId: 'm' } }, 'SCHEMA_UNSUPPORTED'],
+    [{ schemaVersion: 1, matchInfo: { matchId: 'm' } }, 'SCHEMA_UNSUPPORTED'],
     [{ matchInfo: { matchId: 'm', schemaVersion: 99 } }, 'SCHEMA_UNSUPPORTED'],
     [{ schemaVersion: 1, matchInfo: { matchId: 'm', schemaVersion: 99 } }, 'SCHEMA_UNSUPPORTED'],
     [{ schemaVersion: 99, matchInfo: { matchId: 'm', schemaVersion: 1 } }, 'SCHEMA_UNSUPPORTED']

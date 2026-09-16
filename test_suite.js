@@ -3635,6 +3635,7 @@ check('esquema Riot: ubicación canónica y discrepancias fail-closed (matriz co
       ['matchInfo=99', { matchInfo: { matchId: 'm', schemaVersion: 99 } }, 'SCHEMA_UNSUPPORTED'],
       ['raíz=1/matchInfo=99', { schemaVersion: 1, matchInfo: { matchId: 'm', schemaVersion: 99 } }, 'SCHEMA_UNSUPPORTED'],
       ['raíz=99/matchInfo=1', { schemaVersion: 99, matchInfo: { matchId: 'm', schemaVersion: 1 } }, 'SCHEMA_UNSUPPORTED'],
+      ['raíz=1 sin canónica', { schemaVersion: 1, matchInfo: { matchId: 'm' } }, 'SCHEMA_UNSUPPORTED'],
       ['ambas=1', { schemaVersion: 1, matchInfo: { matchId: 'm', schemaVersion: 1 } }, null],
       ['ambas ausentes', { matchInfo: { matchId: 'm' } }, null]
     ];
@@ -3691,6 +3692,22 @@ check('tiempo cooperativo: checkpoints periódicos cortan bucles (determinista, 
     assert.ok(/no puede preemptar/i.test(src) && /puntos de control instrumentados/i.test(src), 'alcance temporal documentado en el módulo');
     const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8');
     assert.ok(/cooperativ/i.test(readme), 'README declara el alcance cooperativo del tiempo');
+  });
+
+check('esquema Riot: versión SOLO en la raíz (root=1, matchInfo ausente) => SCHEMA_UNSUPPORTED',
+  () => {
+    const sc = require(path.join(scriptsDir, 'schema_contract.js'));
+    assert.throws(
+      () => sc.classifyRiotSchema({ schemaVersion: 1, matchInfo: { matchId: 'm' } }),
+      e => e.code === 'SCHEMA_UNSUPPORTED'
+    );
+    assert.throws(
+      () => sc.classifyRiotSchema({ schemaVersion: 1, matchInfo: {} }),
+      e => e.code === 'SCHEMA_UNSUPPORTED'
+    );
+    // Con canónica presente y coherente sí se acepta; ausencia total es legado limitado.
+    assert.strictEqual(sc.classifyRiotSchema({ schemaVersion: 1, matchInfo: { matchId: 'm', schemaVersion: 1 } }).status, 'supported');
+    assert.strictEqual(sc.classifyRiotSchema({ matchInfo: { matchId: 'm' } }).status, 'legacy_limited');
   });
 
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben

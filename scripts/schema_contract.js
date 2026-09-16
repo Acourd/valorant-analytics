@@ -121,7 +121,9 @@ function classifyRiotSchema(payload) {
   } else if (isPresent(matchInfo)) {
     canonical = check('matchInfo', matchInfo);
   } else if (isPresent(root)) {
-    canonical = check('raíz', root);
+    // La canónica es matchInfo.schemaVersion: una versión SOLO en la raíz no
+    // puede verificarse contra ella, así que no se admite como soportada.
+    throw schemaError('SCHEMA_UNSUPPORTED', `schemaVersion ${root} presente solo en la raíz sin matchInfo.schemaVersion: no puede coincidir con la ubicación canónica. Se rechaza fail-closed (usa matchInfo.schemaVersion).`, { location: 'raíz sin canónica', schemaVersion: root });
   }
   if (canonical === null) {
     return { schemaVersion: null, status: 'legacy_limited', limited: true, note: 'Sin schemaVersion (canónica: matchInfo.schemaVersion): formato legado limitado; no se inventan campos.' };
