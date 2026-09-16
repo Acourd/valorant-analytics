@@ -45,13 +45,9 @@ function storeDir(env = process.env) {
 }
 
 function ensureDir(dir) {
-  const existing = safeFs.assertDirSafe(dir, { code: 'PLAN_UNSAFE_PATH' });
-  if (existing !== null) return dir;
-  fs.mkdirSync(dir, { recursive: true });
-  try { fs.chmodSync(dir, 0o700); } catch (e) { /* Windows: mejor esfuerzo */ }
-  // Re-verifica el directorio recién creado (symlink/carrera de creación).
-  safeFs.assertDirSafe(dir, { code: 'PLAN_UNSAFE_PATH' });
-  return dir;
+  // Validación componente a componente (padres y abuelos incluidos) y creación
+  // escalonada: jamás `recursive: true` a través de padres no validados.
+  return safeFs.ensurePrivateDir(dir, { code: 'PLAN_UNSAFE_PATH' });
 }
 
 function sanitizeNote(note) {
@@ -120,8 +116,8 @@ function readFileSafe(file) {
 }
 
 function atomicWrite(file, obj) {
-  // El directorio se re-verifica antes de cada escritura (perímetro privado).
-  safeFs.assertDirSafe(path.dirname(file), { code: 'PLAN_UNSAFE_PATH' });
+  // El perímetro se re-verifica (componente a componente) antes de cada escritura.
+  safeFs.ensurePrivateDir(path.dirname(file), { code: 'PLAN_UNSAFE_PATH' });
   const tmp = `${file}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
   let fd = null;
   try {

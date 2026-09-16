@@ -1,5 +1,10 @@
 # Changelog — valorant-analytics
 
+## 4.11.2 — Perímetro completo (sin evasión por symlinks ancestros)
+
+- **Corregido (evasión del perímetro):** la validación solo miraba el directorio final, así que `/tmp/enlace-simbolico/plans` podía crear `plans` dentro del destino real del enlace. Ahora `safe_fs.ensurePrivateDir` recorre **todos los componentes desde la raíz** y rechaza cualquier symlink/junction en cualquier nivel (final, padre o abuelo). La creación es **escalonada** (nunca `recursive: true` a través de padres no validados) y la política de permisos/propietario se aplica solo al directorio final. La misma validación corre antes de listar, leer, actualizar y escribir.
+- Regresión `tests #197` (symlink final/padre/abuelo + ruta privada anidada normal) 197/197 checks. Versión 4.11.2.
+
 ## 4.11.1 — Perímetro local y identidad completa del historial de planes
 
 - **HIGH — perímetro del almacenamiento:** el directorio de planes existente ahora se valida en cada operación (`scripts/safe_fs.js`, extracto de la política ya probada del keystore): rechaza symlink, no-directorio, propietario ajeno (POSIX) y escritura de grupo/otros (0770/0777 no admisibles). Las lecturas abren por **descriptor con `O_NOFOLLOW`** y comparan `dev/ino` contra la inspección previa: sustitución ⇒ `PLAN_UNSAFE_PATH` (fail-closed). En Windows (sin `O_NOFOLLOW`) la detección se apoya en el file-id de NTFS, documentado como best-effort. La escritura re-verifica el directorio y nunca sobrescribe un enlace.

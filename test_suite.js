@@ -4075,6 +4075,55 @@ check('plan store: identidad determinista completa (acción/rutina cambian el id
     });
   });
 
+check('plan store: evasión por symlink en padre/abuelo rechazada; ruta privada anidada funciona',
+  () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'va-nest-'));
+    const prev = process.env.VALORANT_PLANS_DIR;
+    process.env.VALORANT_PLANS_DIR = path.join(base, 'a', 'b', 'plans');
+    try {
+      const created = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json']));
+      assert.strictEqual(created.tracking.ok, true, 'ruta privada anidada se crea escalonada y persiste');
+      assert.ok(fs.existsSync(path.join(base, 'a', 'b', 'plans', `${created.planId}.json`)));
+    } finally {
+      process.env.VALORANT_PLANS_DIR = prev;
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+    if (process.platform === 'win32') return; // symlinks POSIX reales
+    const realParent = fs.mkdtempSync(path.join(os.tmpdir(), 'va-real-parent-'));
+    const realGrand = fs.mkdtempSync(path.join(os.tmpdir(), 'va-real-grand-'));
+    const linkParent = path.join(os.tmpdir(), `va-link-parent-${process.pid}`);
+    const linkGrand = path.join(os.tmpdir(), `va-link-grand-${process.pid}`);
+    let made = true;
+    try {
+      fs.symlinkSync(realParent, linkParent);
+      fs.symlinkSync(realGrand, linkGrand);
+    } catch (e) { made = false; }
+    if (!made) {
+      fs.rmSync(realParent, { recursive: true, force: true });
+      fs.rmSync(realGrand, { recursive: true, force: true });
+      return;
+    }
+    const prevEnv = process.env.VALORANT_PLANS_DIR;
+    try {
+      process.env.VALORANT_PLANS_DIR = path.join(linkParent, 'plans');
+      let out = '';
+      try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json']); } catch (e) { out = String(e.stdout || ''); }
+      assert.strictEqual(JSON.parse(out).tracking.code, 'PLAN_UNSAFE_PATH', 'symlink en el PADRE rechazado');
+      assert.ok(!fs.existsSync(path.join(realParent, 'plans')), 'no se crea nada dentro del enlace padre');
+      process.env.VALORANT_PLANS_DIR = path.join(linkGrand, 'gp', 'plans');
+      out = '';
+      try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json']); } catch (e) { out = String(e.stdout || ''); }
+      assert.strictEqual(JSON.parse(out).tracking.code, 'PLAN_UNSAFE_PATH', 'symlink en el ABUELO rechazado');
+      assert.ok(!fs.existsSync(path.join(realGrand, 'gp')), 'no se crea nada a través del enlace abuelo');
+    } finally {
+      process.env.VALORANT_PLANS_DIR = prevEnv;
+      fs.rmSync(linkParent, { force: true });
+      fs.rmSync(linkGrand, { force: true });
+      fs.rmSync(realParent, { recursive: true, force: true });
+      fs.rmSync(realGrand, { recursive: true, force: true });
+    }
+  });
+
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben
 // reflejar EXACTAMENTE el número de casos registrados y ejecutados. Un
 // manifiesto desincronizado hace fallar la suite (imposible sobre-declarar

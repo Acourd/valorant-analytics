@@ -104,10 +104,70 @@ function assertDirSafe(dirPath, { code = 'UNSAFE_PATH' } = {}) {
   return st;
 }
 
+/**
+ * Crea/valida un directorio privado recorriendo TODOS los componentes de la
+ * ruta desde la raíz (o desde el root de la unidad en Windows):
+ *   - cualquier componente que sea symlink/junction => fail-closed (incluidos
+ *     padres y abuelos: evita la evasión `/ruta/enlace/planes`);
+ *   - cualquier componente que no sea directorio => fail-closed;
+ *   - la creación es ESCALONADA (nunca `recursive: true` a través de padres no
+ *     validados): cada nivel nuevo se crea sin recursión y se re-inspecciona;
+ *   - la política de permisos/propietario se aplica SOLO al directorio final
+ *     (los padres del sistema como /tmp pueden ser legítimamente 1777).
+ * Devuelve la ruta resuelta.
+ */
+function ensurePrivateDir(dirPath, { code = 'UNSAFE_PATH' } = {}) {
+  const path = require('path');
+  const err = (msg) => {
+    const e = new Error(msg);
+    e.code = code;
+    return e;
+  };
+  const resolved = path.resolve(dirPath);
+  const parsed = path.parse(resolved);
+  const parts = resolved.slice(parsed.root.length).split(path.sep).filter(Boolean);
+  if (parts.length === 0) throw err(`Ruta de directorio inválida: ${dirPath}`);
+  let current = parsed.root;
+  for (let i = 0; i < parts.length; i++) {
+    current = path.join(current, parts[i]);
+    const isFinal = i === parts.length - 1;
+    let st = lstatRegularOrAbsent(current);
+    if (st === null) {
+      try {
+        fs.mkdirSync(current);
+      } catch (e) {
+        if (e.code !== 'EEXIST') throw err(`No se pudo crear el directorio (${current}): ${e.message} (fail-closed).`);
+      }
+      st = lstatRegularOrAbsent(current);
+      if (st === null) throw err(`Directorio no creado (${current}): fail-closed.`);
+    }
+    if (st.isSymbolicLink()) {
+      throw err(`Un componente de la ruta es un enlace simbólico (${current}): perímetro violado; jamás se sigue, ni en padres ni en abuelos (fail-closed).`);
+    }
+    if (!st.isDirectory()) {
+      throw err(`Un componente de la ruta no es un directorio (${current}): fail-closed.`);
+    }
+    if (isFinal) {
+      // Primero la política (rechaza 0770/0777 existentes); solo después el
+      // ajuste a 0700 del directorio que ya pasó el perímetro.
+      if (process.platform !== 'win32') {
+        const currentUid = typeof process.getuid === 'function' ? process.getuid() : null;
+        const violation = storageDirPolicyViolation(st.mode & 0o7777, typeof st.uid === 'number' ? st.uid : null, currentUid, true);
+        if (violation) {
+          throw err(`El directorio (${current}, modo ${(st.mode & 0o7777).toString(8)}) ${violation}: perímetro no privado (fail-closed; exige 0700 propiedad del usuario actual).`);
+        }
+      }
+      try { fs.chmodSync(current, 0o700); } catch (e) { /* Windows: mejor esfuerzo */ }
+    }
+  }
+  return resolved;
+}
+
 module.exports = {
   nofollowSupported,
   lstatRegularOrAbsent,
   readFileNoFollow,
   storageDirPolicyViolation,
-  assertDirSafe
+  assertDirSafe,
+  ensurePrivateDir
 };
