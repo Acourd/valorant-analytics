@@ -4122,6 +4122,21 @@ check('plan store: evasión por symlink en padre/abuelo rechazada; ruta privada 
       fs.rmSync(realParent, { recursive: true, force: true });
       fs.rmSync(realGrand, { recursive: true, force: true });
     }
+    // Excepción documentada: symlinks de SISTEMA que cuelgan de la raíz
+    // (macOS: /tmp -> /private/tmp). Deben resolverse, no romper.
+    if (process.platform === 'darwin') {
+      const p = path.join('/tmp', `va-syslink-${process.pid}-${Date.now()}`);
+      const prevEnv2 = process.env.VALORANT_PLANS_DIR;
+      process.env.VALORANT_PLANS_DIR = p;
+      try {
+        let out = '';
+        try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json']); } catch (e) { out = String(e.stdout || ''); }
+        assert.strictEqual(JSON.parse(out).tracking.ok, true, '/tmp (symlink de sistema en macOS) se resuelve');
+      } finally {
+        process.env.VALORANT_PLANS_DIR = prevEnv2;
+        fs.rmSync(p, { recursive: true, force: true });
+      }
+    }
   });
 
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben

@@ -132,6 +132,28 @@ function ensurePrivateDir(dirPath, { code = 'UNSAFE_PATH' } = {}) {
     current = path.join(current, parts[i]);
     const isFinal = i === parts.length - 1;
     let st = lstatRegularOrAbsent(current);
+    if (st !== null && st.isSymbolicLink()) {
+      // Única excepción: symlinks de SISTEMA que cuelgan directamente de la
+      // raíz (p. ej. /var -> /private/var, /tmp -> /private/tmp en macOS).
+      // Cualquier symlink bajo un padre no-raíz (el vector de evasión
+      // `/ruta/enlace/planes`) o en el componente final se rechaza.
+      const parentIsRoot = path.dirname(current) === parsed.root;
+      if (isFinal || !parentIsRoot) {
+        throw err(`Un componente de la ruta es un enlace simbólico (${current}): perímetro violado; jamás se sigue, ni en padres ni en abuelos (fail-closed).`);
+      }
+      let real;
+      try {
+        real = fs.realpathSync(current);
+      } catch (e) {
+        throw err(`No se pudo resolver el symlink de sistema (${current}): ${e.message} (fail-closed).`);
+      }
+      const realStat = lstatRegularOrAbsent(real);
+      if (realStat === null || realStat.isSymbolicLink() || !realStat.isDirectory()) {
+        throw err(`El destino del symlink de sistema (${current} -> ${real}) no es un directorio regular: fail-closed.`);
+      }
+      current = real;
+      st = realStat;
+    }
     if (st === null) {
       try {
         fs.mkdirSync(current);
@@ -140,9 +162,9 @@ function ensurePrivateDir(dirPath, { code = 'UNSAFE_PATH' } = {}) {
       }
       st = lstatRegularOrAbsent(current);
       if (st === null) throw err(`Directorio no creado (${current}): fail-closed.`);
-    }
-    if (st.isSymbolicLink()) {
-      throw err(`Un componente de la ruta es un enlace simbólico (${current}): perímetro violado; jamás se sigue, ni en padres ni en abuelos (fail-closed).`);
+      if (st.isSymbolicLink()) {
+        throw err(`Carrera de creación: (${current}) apareció como enlace simbólico: fail-closed.`);
+      }
     }
     if (!st.isDirectory()) {
       throw err(`Un componente de la ruta no es un directorio (${current}): fail-closed.`);
