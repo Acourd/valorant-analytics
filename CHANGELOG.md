@@ -1,5 +1,13 @@
 # Changelog — valorant-analytics
 
+## 4.10.0 — Robustez interna final (presupuestos, esquemas, estrés)
+
+- **Presupuestos de recursos** (`scripts/resource_budget.js`), configurables con `VA_BUDGET_*`: archivo 5 MiB · texto 200 000 chars · profundidad JSON 64 · jugadores 64 · rondas 200 · eventos 100 000 · elementos/arreglo 20 000 · tiempo 30 s · workers 16. Al excederse: fail-closed con `INPUT_TOO_LARGE`, `SCHEMA_LIMIT_EXCEEDED` o `RESOURCE_BUDGET_EXCEEDED`, sin análisis parcial y con JSON puro bajo `--json`.
+- **Esquemas versionados** (`scripts/schema_contract.js`): `schemaVersion: 1`; ausente ⇒ `legacy_limited` (procesa lo observable y lo declara); incompatible ⇒ `SCHEMA_UNSUPPORTED`; campos desconocidos se ignoran y se declaran en `plan.schema` (`unknownMetadataFields`/`unknownFields`) sin elevar procedencia.
+- **Propiedades adversariales** (`tests/test_property_adversarial.js`, semilla fija): JSON profundo, arreglos gigantes, texto excesivo, truncados, tipos inesperados, prototipos extraños, claves duplicadas, BOM/Unicode, estabilidad de códigos y versiones de esquema.
+- **Concurrencia acotada**: el estrés interno baja a 16 workers (presupuesto), conserva el primer error en logs y exige el invariante completo (16/16 claves, `generation ≥ 16`). Nueva modalidad `tests/stress_dsse.js` (sin reintentos) y **job CI separado** (`stress`, ubuntu/Node 20, `VA_STRESS_ROUNDS=3`); la matriz normal omite `stress_*` salvo `VA_RUN_STRESS=1`.
+- Regresiones `tests #174`–`#180` (180/180 checks) + 7 propiedades adversariales. Versión 4.10.0.
+
 ## 4.9.0 — Confianza, telemetría y producto honesto
 
 - **A1 Demo sellado:** `parseTextScoreboard(..., {demo:true})` y `assembleRawMatchStructure` marcan `synthetic: true` internamente (aunque se llamen directos). Los datos sintéticos no habilitan acción, rutina, medición, causa, fuga, rango ni MMR; `learning_profile` no prescribe, `routine_contract` omite rutinas y `duo` responde `SIMULACION_DEMO`. Ninguna etiqueta llama "observada"/`normalized_input` a una métrica sintética.

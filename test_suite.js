@@ -1501,8 +1501,11 @@ check('identidad: equivalentes Unicode son la misma cuenta; formas no inflan mue
     assert.strictEqual(r.identityUncertain, false, 'equivalentes canónicos no generan incertidumbre');
   });
 
-check('dsse: estrés concurrente (24 workers) conserva TODAS las claves sin errores de lectura',
+check('dsse: estrés concurrente (16 workers) conserva TODAS las claves sin errores de lectura',
   () => {
+    const { assertWorkerBudget } = require(path.join(scriptsDir, 'resource_budget.js'));
+    const WORKERS = 16;
+    assertWorkerBudget(WORKERS);
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsse-stress-'));
     try {
       const ksPath = path.join(tmp, 'ks.json');
@@ -1519,7 +1522,7 @@ const { Worker } = require('worker_threads');
 const dsse = require(${JSON.stringify(path.join(scriptsDir, 'dsse_attestation.js'))});
 (async () => {
   const workers = [];
-  for (let i = 0; i < 24; i++) {
+  for (let i = 0; i < ${WORKERS}; i++) {
     workers.push(new Promise((resolve, reject) => {
       const w = new Worker(${JSON.stringify(workerScript)});
       w.on('error', (e) => reject(new Error('worker ' + i + ': ' + e.message)));
@@ -1528,9 +1531,9 @@ const dsse = require(${JSON.stringify(path.join(scriptsDir, 'dsse_attestation.js
   }
   await Promise.all(workers);
   const ks = dsse.loadOrCreateKeystore(${JSON.stringify(ksPath)});
-  if (ks.keys.length !== 24) { console.error('KEYS=' + ks.keys.length); process.exit(1); }
-  if (ks.generation < 24) { console.error('GEN=' + ks.generation); process.exit(1); }
-  console.log('STRESS_OK 24/24 gen ' + ks.generation);
+  if (ks.keys.length !== ${WORKERS}) { console.error('KEYS=' + ks.keys.length); process.exit(1); }
+  if (ks.generation < ${WORKERS}) { console.error('GEN=' + ks.generation); process.exit(1); }
+  console.log('STRESS_OK ${WORKERS}/${WORKERS} gen ' + ks.generation);
 })();
 `);
       const run = () => {
@@ -1540,12 +1543,16 @@ const dsse = require(${JSON.stringify(path.join(scriptsDir, 'dsse_attestation.js
           return { out: String(e.stdout || ''), err: String(e.stderr || e.message || '') };
         }
       };
-      // Un reintento ante contención transitoria del SO (Windows CI): el
-      // coordinador vuelve a exigir 24/24 claves; si se perdiera una de verdad,
-      // el reintento también fallaría.
+      // Reintento acotado SOLO por contención transitoria de la plataforma: el
+      // primer error queda en logs y la ejecución final exige el invariante
+      // completo (16/16 claves y generation >= 16); si hubo pérdida real, el
+      // reintento también falla.
       let res = run();
-      if (!res.out.includes('STRESS_OK 24/24')) res = run();
-      assert.ok(res.out.includes('STRESS_OK 24/24'), `estrés concurrente perdió claves o leyó contenido ausente${res.err ? ` :: ${res.err.slice(0, 400)}` : ''}`);
+      if (!res.out.includes(`STRESS_OK ${WORKERS}/${WORKERS}`)) {
+        console.error(`DSSE STRESS: primer intento falló (se reintenta una vez): ${(res.err || '').slice(0, 400)}`);
+        res = run();
+      }
+      assert.ok(res.out.includes(`STRESS_OK ${WORKERS}/${WORKERS}`), `estrés concurrente perdió claves o leyó contenido ausente${res.err ? ` :: ${res.err.slice(0, 400)}` : ''}`);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -3375,6 +3382,209 @@ check('documentación: sin promesas de distancia/trade/OCR y con entrada mínima
     const plan = buildPlan(parseTextScoreboard('Focus#NA1\t10\t8\t2\t150\t120'), 'Focus#NA1');
     assert.ok(plan.entrada_minima && plan.entrada_minima.texto_marcador && plan.entrada_minima.eventos_por_ronda && plan.entrada_minima.fuente_verificada, 'plan expone entrada mínima por niveles');
     assert.ok(typeof plan.siguiente_dato.dato === 'string' && plan.siguiente_dato.dato.length > 0, 'siguiente dato accionable');
+  });
+
+// ---- Bloque robustez final (v4.10.0): presupuestos, esquemas versionados, estrés, JSON puro bajo entradas inválidas ----
+
+check('presupuestos: archivo/texto/JSON profundo/conteos/tiempo/workers fallan con códigos estables',
+  () => {
+    const rb = require(path.join(scriptsDir, 'resource_budget.js'));
+    assert.throws(() => rb.checkFileSize(rb.DEFAULTS.maxFileBytes + 1), e => e.code === 'INPUT_TOO_LARGE');
+    assert.throws(() => rb.checkTextLength('x'.repeat(rb.DEFAULTS.maxTextChars + 1)), e => e.code === 'INPUT_TOO_LARGE');
+    const deep = {};
+    let node = deep;
+    for (let i = 0; i < rb.DEFAULTS.maxJsonDepth + 2; i++) { node.next = {}; node = node.next; }
+    assert.throws(() => rb.checkJsonDepth(deep), e => e.code === 'SCHEMA_LIMIT_EXCEEDED');
+    assert.throws(() => rb.checkPlayers(rb.DEFAULTS.maxPlayers + 1), e => e.code === 'SCHEMA_LIMIT_EXCEEDED');
+    assert.throws(() => rb.checkRounds(rb.DEFAULTS.maxRounds + 1), e => e.code === 'SCHEMA_LIMIT_EXCEEDED');
+    assert.throws(() => rb.checkEvents(rb.DEFAULTS.maxEvents + 1), e => e.code === 'SCHEMA_LIMIT_EXCEEDED');
+    assert.throws(() => rb.checkArrayItems('damage', rb.DEFAULTS.maxArrayItems + 1), e => e.code === 'SCHEMA_LIMIT_EXCEEDED');
+    assert.throws(() => rb.assertWorkerBudget(rb.DEFAULTS.maxWorkers + 1), e => e.code === 'RESOURCE_BUDGET_EXCEEDED');
+    const budget = new rb.TimeBudget(1);
+    const t0 = Date.now(); while (Date.now() - t0 < 6) { /* espera activa */ }
+    assert.throws(() => budget.checkpoint('test'), e => e.code === 'RESOURCE_BUDGET_EXCEEDED');
+    // CLI: texto excesivo en archivo .txt => código estable y JSON válido.
+    const tmp = path.join(os.tmpdir(), `too-big-${process.pid}.txt`);
+    fs.writeFileSync(tmp, 'A#1\t1\t2\t3\n' + 'x'.repeat(rb.DEFAULTS.maxTextChars + 10), 'utf8');
+    try {
+      let code = 0;
+      let out = '';
+      try { cliOk(['parse', tmp, '--json']); }
+      catch (e) { code = e.status; out = String(e.stdout || ''); }
+      assert.strictEqual(code, 1, 'texto excesivo => 1');
+      const err = JSON.parse(out);
+      assert.strictEqual(err.ok, false);
+      assert.strictEqual(err.error.code, 'INPUT_TOO_LARGE');
+    } finally {
+      fs.unlinkSync(tmp);
+    }
+  });
+
+check('presupuestos: JSON profundo y arreglos masivos no bloquean ni producen análisis parcial',
+  () => {
+    const rb = require(path.join(scriptsDir, 'resource_budget.js'));
+    const deepFile = path.join(os.tmpdir(), `deep-${process.pid}.json`);
+    let deep = { data: { metadata: { matchId: 'deep' }, segments: [] } };
+    let cursor = deep;
+    for (let i = 0; i < rb.DEFAULTS.maxJsonDepth + 2; i++) { cursor.chain = {}; cursor = cursor.chain; }
+    fs.writeFileSync(deepFile, JSON.stringify(deep), 'utf8');
+    try {
+      let code = 0;
+      let out = '';
+      try { cliOk(['match', deepFile, 'X#1', '--json']); }
+      catch (e) { code = e.status; out = String(e.stdout || ''); }
+      assert.strictEqual(code, 1, 'JSON profundo => 1');
+      assert.strictEqual(JSON.parse(out).error.code, 'SCHEMA_LIMIT_EXCEEDED');
+      assert.ok(!/RADAR|PLAN PARA/.test(out), 'sin análisis parcial');
+    } finally {
+      fs.unlinkSync(deepFile);
+    }
+    const bigFile = path.join(os.tmpdir(), `many-${process.pid}.json`);
+    const segments = [];
+    for (let i = 0; i <= rb.DEFAULTS.maxPlayers; i++) {
+      segments.push({ type: 'player-summary', attributes: { platformUserIdentifier: `P${i}#1` }, metadata: { platformUserHandle: `P${i}#1` }, stats: { kills: { value: 1 }, deaths: { value: 1 } } });
+    }
+    fs.writeFileSync(bigFile, JSON.stringify({ data: { metadata: { matchId: 'many' }, segments } }), 'utf8');
+    try {
+      let code = 0;
+      let out = '';
+      try { cliOk(['plan', bigFile, 'P0#1', '--json']); }
+      catch (e) { code = e.status; out = String(e.stdout || ''); }
+      assert.strictEqual(code, 1, 'demasiados jugadores => 1');
+      assert.strictEqual(JSON.parse(out).error.code, 'SCHEMA_LIMIT_EXCEEDED');
+    } finally {
+      fs.unlinkSync(bigFile);
+    }
+  });
+
+check('esquema: versión ausente = legado limitado; incompatible = SCHEMA_UNSUPPORTED; campos desconocidos declarados',
+  () => {
+    const mk = (meta) => ({
+      data: {
+        metadata: Object.assign({ matchId: 'sch' }, meta),
+        segments: [{
+          type: 'player-summary',
+          attributes: { platformUserIdentifier: 'S#1' },
+          metadata: { platformUserHandle: 'S#1' },
+          stats: { headshotsPercentage: { displayValue: '30%' }, scorePerRound: { value: 220 }, kills: { value: 10 }, deaths: { value: 9 } }
+        }]
+      }
+    });
+    const legacyFile = path.join(os.tmpdir(), `legacy-${process.pid}.json`);
+    fs.writeFileSync(legacyFile, JSON.stringify(mk({ campoRaro: 1 })), 'utf8');
+    try {
+      let out = '';
+      try { out = cliOk(['plan', legacyFile, 'S#1', '--json']); }
+      catch (e) { out = String(e.stdout || ''); }
+      const plan = JSON.parse(out);
+      assert.strictEqual(plan.provenance, 'normalized_input', 'legado no eleva procedencia');
+      assert.strictEqual(plan.schema.schemaStatus, 'legacy_limited');
+      assert.ok(plan.schema.unknownMetadataFields.includes('campoRaro'), 'campos desconocidos declarados');
+      assert.ok(plan.schema.limited === true);
+    } finally {
+      fs.unlinkSync(legacyFile);
+    }
+    const futureFile = path.join(os.tmpdir(), `future-${process.pid}.json`);
+    fs.writeFileSync(futureFile, JSON.stringify(mk({ schemaVersion: 99 })), 'utf8');
+    try {
+      let code = 0;
+      let out = '';
+      try { cliOk(['plan', futureFile, 'S#1', '--json']); }
+      catch (e) { code = e.status; out = String(e.stdout || ''); }
+      assert.strictEqual(code, 1, 'versión futura => 1');
+      assert.strictEqual(JSON.parse(out).error.code, 'SCHEMA_UNSUPPORTED');
+      assert.ok(!/PLAN PARA/.test(out), 'no fabrica plan con esquema incompatible');
+    } finally {
+      fs.unlinkSync(futureFile);
+    }
+  });
+
+check('robustez: Unicode/BOM válidos siguen funcionando end-to-end',
+  () => {
+    const handle = 'Ñandú#JP1';
+    const file = path.join(os.tmpdir(), `unicode-${process.pid}.json`);
+    const payload = '\uFEFF' + JSON.stringify({
+      data: {
+        metadata: { matchId: 'uni' },
+        segments: [{
+          type: 'player-summary',
+          attributes: { platformUserIdentifier: handle },
+          metadata: { platformUserHandle: handle },
+          stats: { headshotsPercentage: { displayValue: '30%' }, scorePerRound: { value: 210 }, kills: { value: 12 }, deaths: { value: 9 } }
+        }]
+      }
+    });
+    fs.writeFileSync(file, payload, 'utf8');
+    try {
+      let out = '';
+      try { out = cliOk(['plan', file, handle, '--json']); }
+      catch (e) { out = String(e.stdout || ''); }
+      const plan = JSON.parse(out);
+      assert.strictEqual(plan.player, handle);
+      assert.ok(plan.observado.some(o => o.metrica === 'HS%'));
+    } finally {
+      fs.unlinkSync(file);
+    }
+  });
+
+check('estrés: modalidades acotadas con invariante completo y sin ocultar primer error',
+  () => {
+    const stressPath = path.join(__dirname, 'tests', 'stress_dsse.js');
+    assert.ok(fs.existsSync(stressPath), 'modalidad de estrés presente');
+    const runner = fs.readFileSync(path.join(__dirname, 'run_all_tests.js'), 'utf8');
+    assert.ok(/stress_/.test(runner) && /VA_RUN_STRESS/.test(runner), 'la matriz normal omite el estrés salvo opt-in');
+    const ci = fs.readFileSync(path.join(__dirname, '.github', 'workflows', 'ci.yml'), 'utf8');
+    assert.ok(/tests\/stress_dsse\.js/.test(ci) && /VA_STRESS_ROUNDS/.test(ci), 'job de estrés separado en CI');
+    const suite = fs.readFileSync(path.join(__dirname, 'test_suite.js'), 'utf8');
+    assert.ok(/primer intento falló/.test(suite), 'el primer error de contención queda en logs');
+    assert.ok(/const WORKERS = 16;/.test(suite) && /i < \$\{WORKERS\}; i\+\+/.test(suite), 'el estrés interno está acotado por presupuesto de workers');
+    const { assertWorkerBudget, getBudgets } = require(path.join(scriptsDir, 'resource_budget.js'));
+    assert.doesNotThrow(() => assertWorkerBudget(getBudgets().maxWorkers));
+  });
+
+check('JSON puro bajo entradas inválidas: un único objeto parseable con código estable',
+  () => {
+    const rb = require(path.join(scriptsDir, 'resource_budget.js'));
+    const cases = [];
+    const bigText = path.join(os.tmpdir(), `jbig-${process.pid}.txt`);
+    fs.writeFileSync(bigText, 'y'.repeat(rb.DEFAULTS.maxTextChars + 5), 'utf8');
+    cases.push(['parse', bigText]);
+    const deepFile = path.join(os.tmpdir(), `jdeep-${process.pid}.json`);
+    let deep = { data: { metadata: {}, segments: [] } };
+    let cursor = deep;
+    for (let i = 0; i < rb.DEFAULTS.maxJsonDepth + 2; i++) { cursor.c = {}; cursor = cursor.c; }
+    fs.writeFileSync(deepFile, JSON.stringify(deep), 'utf8');
+    cases.push(['match', deepFile, 'X#1']);
+    try {
+      for (const args of cases) {
+        let code = 0;
+        let out = '';
+        try { cliOk(args.concat('--json')); }
+        catch (e) { code = e.status; out = String(e.stdout || ''); }
+        assert.strictEqual(code, 1, `${args[0]}: exit 1`);
+        const trimmed = out.trim();
+        assert.ok(trimmed.startsWith('{'), `${args[0]}: stdout empieza con JSON`);
+        const err = JSON.parse(trimmed);
+        assert.strictEqual(err.ok, false);
+        assert.ok(['INPUT_TOO_LARGE', 'SCHEMA_LIMIT_EXCEEDED'].includes(err.error.code), `${args[0]}: código estable`);
+        assert.ok(!/RADAR|PLAN PARA|INGESTA/.test(out), `${args[0]}: sin análisis parcial`);
+      }
+    } finally {
+      fs.unlinkSync(bigText);
+      fs.unlinkSync(deepFile);
+    }
+  });
+
+check('documentación: presupuestos, contrato de esquema y modalidad de estrés declarados',
+  () => {
+    const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8');
+    assert.ok(/Presupuestos de recursos/i.test(readme), 'README declara presupuestos');
+    assert.ok(/VA_BUDGET_/.test(readme), 'README documenta configuración');
+    assert.ok(/schemaVersion/i.test(readme), 'README documenta esquema versionado');
+    assert.ok(/stress_dsse|modalidad de estrés/i.test(readme), 'README documenta modalidad de estrés');
+    const help = cliOk(['--help']);
+    assert.ok(/PRESUPUESTOS/.test(help) && /INPUT_TOO_LARGE/.test(help), 'ayuda CLI declara límites y códigos');
+    assert.ok(/ESQUEMA/.test(help) && /SCHEMA_UNSUPPORTED/.test(help), 'ayuda CLI declara contrato de esquema');
   });
 
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben

@@ -4,10 +4,10 @@
 
 ### Telemetría Competitiva Local · Diagnóstico Descriptivo 360° · Motor de Puntería Adaptativo
 
-[![Versión](https://img.shields.io/badge/versión-4.9.0_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
+[![Versión](https://img.shields.io/badge/versión-4.10.0_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
 [![Runtime](https://img.shields.io/badge/runtime-Node.js_18%2B_Nativo-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Dependencias](https://img.shields.io/badge/dependencias-0_npm_(Core)-38BDF8.svg?style=for-the-badge&logo=codeforces&logoColor=white)](package.json)
-[![Pruebas](https://img.shields.io/badge/tests-173%2F173_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
+[![Pruebas](https://img.shields.io/badge/tests-180%2F180_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
 [![Auditoría](https://img.shields.io/badge/auditoría-15%2F15_propiedades_PASS-8B5CF6.svg?style=for-the-badge&logo=codereview&logoColor=white)](opencode_tester.js)
 [![Licencia](https://img.shields.io/badge/licencia-MIT-6B7280.svg?style=for-the-badge)](LICENSE)
 
@@ -185,6 +185,29 @@ El despachador maestro `cli.js` provee acceso unificado a todas las capacidades 
 
 ---
 
+## 🧱 Presupuestos de recursos y contrato de esquema
+
+Las entradas no confiables se procesan con **límites explícitos** (override con `VA_BUDGET_*`, p. ej. `VA_BUDGET_MAX_PLAYERS=32`). Al excederlos se falla cerrado con un código estable y **sin análisis parcial**:
+
+| Presupuesto | Valor por defecto | Motivo |
+|---|---|---|
+| Tamaño de archivo | 5 MiB | un export normal pesa <1 MiB; margen amplio sin OOM |
+| Longitud de texto | 200 000 caracteres | un marcador pegado enorme ronda decenas de KB |
+| Profundidad JSON | 64 niveles | `JSON.parse` no limita profundidad |
+| Jugadores | 64 | una partida tiene 10-20 |
+| Rondas | 200 | un competitivo largo ronda 40 |
+| Eventos | 100 000 | agregados por ronda de partidas largas |
+| Elementos por arreglo | 20 000 | listas de daño/kills reales |
+| Tiempo de proceso | 30 s | operación intensiva dentro de presupuesto |
+| Workers concurrentes | 16 | estrés interno sin saturar runners |
+
+Códigos: `INPUT_TOO_LARGE` (archivo/texto), `SCHEMA_LIMIT_EXCEEDED` (profundidad, jugadores, rondas, eventos, arreglos), `RESOURCE_BUDGET_EXCEEDED` (tiempo, workers). Con `--json`, la salida es **un único objeto** `{ ok:false, exitCode, error:{ code, message, details } }`.
+
+**Esquema versionado:** `schemaVersion: 1` es el contrato actual. Ausente ⇒ **legado limitado** (se procesa lo observable y se declara); incompatible ⇒ `SCHEMA_UNSUPPORTED`. Los campos desconocidos se ignoran con seguridad y se **declaran en el diagnóstico**, sin elevar la procedencia.
+
+**Modalidad de estrés (fuera de la matriz normal):** `node tests/stress_dsse.js` ejecuta rondas acotadas de registro concurrente en el keystore DSSE con invariante completo en cada ronda y sin reintentos silenciosos (el primer error queda en logs). CI la corre en un job separado (`VA_STRESS_ROUNDS=3`).
+
+
 ## 📥 Entrada mínima útil (qué puedes aportar)
 
 No necesitas telemetría imposible. El flujo `plan` funciona por niveles:
@@ -217,7 +240,7 @@ Si utilizas **Google Gemini (Gems)** o **OpenAI (Custom GPTs)**, el archivo [`st
 - **Sin red por defecto:** el análisis es local. No se cosecha la caché del navegador ni se consulta Tracker.gg. La entrada es un JSON/export, texto o captura que aportas explícitamente.
 - **Zero Dependencias NPM:** Diseñado exclusivamente sobre las librerías estándar de Node.js (`fs`, `path`, `zlib`, `crypto`, `child_process`). Cero descargas externas.
 - **Compatibilidad Multiplataforma:** Probado y garantizado en Windows 11 (PowerShell/CMD), macOS (zsh) y Linux (bash).
-- **Garantía Determinista:** 173 pruebas automatizadas y suites modulares verificadas con Exit Code 0 (`node run_all_tests.js`) y auditoría semántica de propiedades fail-closed, sin puntuación promocional (`node opencode_tester.js`).
+- **Garantía Determinista:** 180 pruebas automatizadas y suites modulares verificadas con Exit Code 0 (`node run_all_tests.js`) y auditoría semántica de propiedades fail-closed, sin puntuación promocional (`node opencode_tester.js`).
 - **Contrato CLI:** salida humana y `--json`; códigos `0`/`1`/`2` documentados (resultado válido / entrada inválida / evidencia insuficiente); ningún comando selecciona un jugador en silencio.
 
 ---

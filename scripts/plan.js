@@ -27,6 +27,8 @@ const { resolveExactHandle, sourceProvenance, provenanceLabel, observedNumber, d
 const { evaluateLearningProfile } = require('./learning_profile');
 const { analyzeWeaponTelemetry } = require('./weapon_telemetry');
 const { buildEvidence, canGenerateRoutine, KOVAAKS_SCENARIOS, THRESHOLDS } = require('./routine_contract');
+const budgets = require('./resource_budget');
+const schemaContract = require('./schema_contract');
 
 const ACCIONES = Object.freeze({
   MICRO_ADJUSTMENT: {
@@ -118,15 +120,24 @@ function buildPlan(matchData, targetHandle) {
     throw new Error('buildPlan requiere un objeto de telemetría válido.');
   }
   const segments = (matchData.data && matchData.data.segments) || [];
+  // Presupuestos/contrato de esquema: fail-closed antes de cualquier análisis.
+  budgets.checkJsonDepth(matchData);
+  const schemaValidation = schemaContract.validateNormalizedMatch(matchData);
+  budgets.checkEvents(segments.length);
   const handles = segments
     .filter(s => s.type === 'player-summary')
     .map(s => s.metadata?.platformUserHandle || s.attributes?.platformUserIdentifier)
     .filter(Boolean);
-  if (handles.length === 0) {
+  budgets.checkPlayers(handles.length);
+  if (!handles.length) {
     const err = new Error('Telemetría sin jugadores válidos: no hay plan que construir.');
     err.code = 'ROSTER_EMPTY';
     throw err;
   }
+  if (Number.isFinite(matchData.data.metadata && matchData.data.metadata.rounds)) {
+    budgets.checkRounds(matchData.data.metadata.rounds);
+  }
+  const timeBudget = new budgets.TimeBudget();
   const handle = resolveExactHandle(handles, targetHandle);
   const profile = evaluateLearningProfile(matchData, handle);
 
@@ -182,11 +193,13 @@ function buildPlan(matchData, targetHandle) {
       ? { dato: `nueva medición de ${accion.metrica} en otra partida`, porQue: 'permite comprobar si el plan movió la métrica observada.', como: 'node cli.js plan <archivo.json> "Nombre#TAG"' }
       : nextDataFor(profile, gate, hasRoundEvents, temporal));
 
+  timeBudget.checkpoint('construcción de plan');
   return {
     command: 'plan',
     player: handle,
     provenance: profile.provenance,
     provenanceLabel: provenanceLabel(profile.provenance),
+    schema: schemaValidation.diagnostics,
     es_simulacion: esSimulacion,
     advertencia: esSimulacion
       ? 'SINTÉTICA --demo: métricas inventadas por el demo; no son observaciones reales ni habilitan recomendaciones.'
@@ -210,5 +223,4 @@ function buildPlan(matchData, targetHandle) {
     siguiente_dato: siguienteDato
   };
 }
-
 module.exports = { buildPlan, THRESHOLDS };
