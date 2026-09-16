@@ -171,6 +171,28 @@ property('esquema Riot: matriz canónica de versiones (fail-closed en discrepanc
   assert.strictEqual(schema.classifyRiotSchema({ matchInfo: { matchId: 'm' } }).status, 'legacy_limited');
 });
 
+property('plan store: id determinista, notas saneadas y demo no persistible', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const planStore = require(path.join(scriptsDir, 'plan_store.js'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'adv-plans-'));
+  const prev = process.env.VALORANT_PLANS_DIR;
+  process.env.VALORANT_PLANS_DIR = dir;
+  try {
+    const input = { player: 'A#1', sourceRef: 'match:m#sha256:' + 'a'.repeat(16), provenance: 'normalized_input', metric: 'hsPct', value: 10, threshold: 25, limitation: 'l', action: null, routine: null, nextData: 'd' };
+    const r1 = planStore.savePlan(input);
+    const r2 = planStore.savePlan(JSON.parse(JSON.stringify(input)));
+    assert.strictEqual(r1.planId, r2.planId, 'id determinista e idempotente');
+    const longNote = planStore.sanitizeNote('x'.repeat(1000) + '\u0000\u0007');
+    assert.ok(longNote.length <= budget.SAFE_MAX.maxNoteChars, 'nota acotada por presupuesto');
+    assert.ok(!/[\u0000-\u001f]/.test(longNote), 'sin caracteres de control');
+    assert.throws(() => planStore.savePlan(Object.assign({}, input, { provenance: 'synthetic_demo' })), e => e.code === 'PLAN_DEMO_NOT_TRACKABLE');
+  } finally {
+    if (prev === undefined) delete process.env.VALORANT_PLANS_DIR; else process.env.VALORANT_PLANS_DIR = prev;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 console.log(`\n================================================================`);
 console.log(`ADVERSARIAL: ${passed} propiedades PASS / ${failed} FAIL (semilla ${SEED})`);
 console.log(`================================================================`);

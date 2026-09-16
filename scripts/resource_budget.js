@@ -32,7 +32,11 @@ const DEFAULTS = Object.freeze({
   // 30 s: operación intensiva sobre un archivo dentro de presupuesto.
   maxProcessingMs: 30000,
   // 16 workers: suficiente estrés interno sin saturar runners pequeños.
-  maxWorkers: 16
+  maxWorkers: 16,
+  // 500 planes locales: historial amplio sin crecimiento sin control.
+  maxPlans: 500,
+  // 200 caracteres de nota: registro breve, sin datos personales extensos.
+  maxNoteChars: 200
 });
 
 function envName(key) {

@@ -1,5 +1,14 @@
 # Changelog — valorant-analytics
 
+## 4.11.0 — Automatización del ciclo de planes para el jugador
+
+- **Historial local versionado** (`scripts/plan_store.js`): `plan <entrada> "<Nombre#TAG>"` persiste un registro con jugador exacto, `sourceRef` (identidad + digest), procedencia, fecha, métrica/valor/umbral/limitación, acción, rutina, siguiente dato y estado `PENDIENTE`; `planId` determinista. Directorio `VALORANT_PLANS_DIR` (por defecto `<cache>/plans`), permisos 0600, escritura atómica, symlinks rechazados, sin credenciales ni terceros; demo `synthetic_demo` no se persiste.
+- **Subcomandos:** `plan list`, `show <id>`, `intent <id> [nota ≤200]`, `close|cancel <id>`, `compare <id> <entrada> ["handle"]`, `export [--pseudonymized]`. Sin selección silenciosa: id requerido, prefijos ambiguos listan candidatos.
+- **Comparación honesta** (`scripts/plan_flow.js`): mismo jugador exacto, métrica observada y procedencia compatible; estados `MEDICION_COMPARABLE` / `DATOS_INSUFICIENTES` / `NO_COMPARABLE` / `SIMULACION_DEMO`; delta descriptivo + limitación explícita, sin “mejoraste”, MMR, talento ni causalidad.
+- **Perfiles de salida:** `--profile player|coach|analyst` (misma evidencia, distinta presentación; analyst emite JSON estructurado).
+- **Presupuestos:** `maxPlans` 500 y `maxNoteChars` 200 (reducibles, política de solo-reducción). Corruptos/oversized/versión futura/symlink fallan cerrado sin destruir registros válidos.
+- Regresiones `tests #185`–`#194` (194/194 checks). Versión 4.11.0.
+
 ## 4.10.2 — Contrato inequívoco de `schemaVersion` Riot
 
 - **Corregido (residual):** un payload con `payload.schemaVersion` **solo en la raíz** y sin `matchInfo.schemaVersion` se aceptaba como `supported`. La ubicación canónica es `matchInfo.schemaVersion`: la versión de raíz **solo** se admite si coincide con la canónica, y si la canónica falta se rechaza con `SCHEMA_UNSUPPORTED` (fail-closed). Ausencia total ⇒ `legacy_limited`.

@@ -3710,6 +3710,263 @@ check('esquema Riot: versión SOLO en la raíz (root=1, matchInfo ausente) => SC
     assert.strictEqual(sc.classifyRiotSchema({ matchInfo: { matchId: 'm' } }).status, 'legacy_limited');
   });
 
+// ---- Bloque automatización del jugador (v4.11.0): historial de planes, comparación honesta, perfiles ----
+
+function withPlansDir(fn) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'va-plans-'));
+  const prev = process.env.VALORANT_PLANS_DIR;
+  process.env.VALORANT_PLANS_DIR = dir;
+  try { return fn(dir); }
+  finally {
+    if (prev === undefined) delete process.env.VALORANT_PLANS_DIR; else process.env.VALORANT_PLANS_DIR = prev;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+check('plan store: crear y recuperar conserva procedencia, límites y referencia',
+  () => {
+    withPlansDir(() => {
+      let out = '';
+      try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json']); }
+      catch (e) { out = String(e.stdout || ''); }
+      const created = JSON.parse(out);
+      assert.ok(created.planId, 'planId asignado');
+      assert.strictEqual(created.provenance, 'normalized_input');
+      assert.strictEqual(created.tracking.ok, true);
+      const shown = JSON.parse(cliOk(['plan', 'show', created.planId, '--json']));
+      assert.strictEqual(shown.plan.planId, created.planId);
+      assert.strictEqual(shown.plan.provenance, 'normalized_input');
+      assert.ok(/^(match:.+#sha256:[0-9a-f]{16}|sha256:[0-9a-f]{16}@.+)$/.test(shown.plan.sourceRef), 'referencia con identidad + digest');
+      assert.strictEqual(shown.plan.status, 'PENDIENTE');
+      assert.ok(shown.plan.metric && shown.plan.value !== null, 'métrica observada registrada');
+      assert.ok(shown.plan.limitation, 'limitación registrada');
+      assert.ok(shown.plan.nextData, 'siguiente dato registrado');
+      // determinista: crear el mismo plan otra vez devuelve el mismo id
+      const again = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json']));
+      assert.strictEqual(again.planId, created.planId, 'planId determinista');
+    });
+  });
+
+check('plan store: sin selección silenciosa de plan (id requerido y prefijo ambiguo)',
+  () => {
+    withPlansDir((dir) => {
+      const created = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json']));
+      for (const sub of [['plan', 'show'], ['plan', 'compare'], ['plan', 'intent']]) {
+        let code = 0;
+        let out = '';
+        try { cliOk(sub.concat('--json')); }
+        catch (e) { code = e.status; out = String(e.stdout || ''); }
+        assert.strictEqual(code, 1, `${sub.join(' ')} sin id => 1`);
+        assert.ok(/PLAN_ID_REQUIRED|INPUT_REQUIRED/.test(out), `${sub.join(' ')} pide id explícito`);
+      }
+      // prefijo ambiguo: dos registros válidos que comparten prefijo
+      const prefix = created.planId.slice(0, 4);
+      const record = JSON.parse(fs.readFileSync(path.join(dir, `${created.planId}.json`), 'utf8'));
+      for (const suffix of ['a', 'b']) {
+        const clone = JSON.parse(JSON.stringify(record));
+        clone.planId = `${prefix}${suffix}${created.planId.slice(6)}`;
+        fs.writeFileSync(path.join(dir, `${prefix}${suffix}.json`), JSON.stringify(clone), 'utf8');
+      }
+      let code = 0;
+      let out = '';
+      try { cliOk(['plan', 'show', prefix, '--json']); }
+      catch (e) { code = e.status; out = String(e.stdout || ''); }
+      assert.strictEqual(code, 1, 'prefijo ambiguo => 1');
+      assert.ok(/PLAN_AMBIGUOUS|ambiguo/i.test(out) && /Candidatos/.test(out), 'lista candidatos');
+    });
+  });
+
+check('plan compare: un jugador distinto o ausente no se compara (NO_COMPARABLE, exit 2)',
+  () => {
+    withPlansDir(() => {
+      const created = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json']));
+      const tmp = path.join(os.tmpdir(), `only-tenz-${process.pid}.txt`);
+      fs.writeFileSync(tmp, 'TenZ#0001\tIso\tGold 2\t21\t14\t5\t245\t162\t26%\n', 'utf8');
+      try {
+        let code = 0;
+        let out = '';
+        try { cliOk(['plan', 'compare', created.planId, tmp, '--json']); }
+        catch (e) { code = e.status; out = String(e.stdout || ''); }
+        assert.strictEqual(code, 2, 'jugador ausente => 2');
+        const cmp = JSON.parse(out);
+        assert.strictEqual(cmp.estado, 'NO_COMPARABLE');
+        assert.ok(/aspas#0001/.test(cmp.faltante), 'explica el jugador faltante');
+        assert.ok(!/mejora|mejoraste|MMR|talento/i.test(cmp.limitacion.replace(/NO demuestra[^.]*\./, '')), 'sin claims positivos');
+      } finally {
+        fs.unlinkSync(tmp);
+      }
+    });
+  });
+
+check('plan compare: métricas ausentes, incompatibles y demo => estados honestos, nunca positivo',
+  () => {
+    withPlansDir(() => {
+      const created = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json']));
+      const tmp = path.join(os.tmpdir(), `plan-min-${process.pid}.txt`);
+      fs.writeFileSync(tmp, 'aspas#0001\t10\t8\t2\t150\t120\n', 'utf8');
+      try {
+        let out = '';
+        let code = 0;
+        try { cliOk(['plan', 'compare', created.planId, tmp, '--json']); }
+        catch (e) { code = e.status; out = String(e.stdout || ''); }
+        assert.strictEqual(code, 2, 'métrica ausente => 2');
+        assert.strictEqual(JSON.parse(out).estado, 'DATOS_INSUFICIENTES');
+      } finally {
+        fs.unlinkSync(tmp);
+      }
+      let codeDemo = 0;
+      let outDemo = '';
+      try {
+        cliOk(['plan', 'compare', created.planId, 'https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04', '--demo', '--json']);
+      } catch (e) { codeDemo = e.status; outDemo = String(e.stdout || ''); }
+      assert.strictEqual(codeDemo, 2, 'demo => 2');
+      assert.strictEqual(JSON.parse(outDemo).estado, 'SIMULACION_DEMO');
+      // Procedencia incompatible: registro verified vs entrada normalized.
+      const store = require(path.join(scriptsDir, 'plan_store.js'));
+      const rec = store.savePlan({
+        player: 'aspas#0001', sourceRef: 'match:x#sha256:aaaaaaaaaaaaaaaa', provenance: 'verified_source',
+        metric: 'hsPct', value: 10, threshold: 25, limitation: 'l', action: null, routine: null, nextData: 'd'
+      });
+      let codeProv = 0;
+      let outProv = '';
+      try { cliOk(['plan', 'compare', rec.planId, sampleFile, '--json']); }
+      catch (e) { codeProv = e.status; outProv = String(e.stdout || ''); }
+      assert.strictEqual(codeProv, 2, 'procedencia incompatible => 2');
+      const cmpProv = JSON.parse(outProv);
+      assert.strictEqual(cmpProv.estado, 'NO_COMPARABLE');
+      assert.ok(/Procedencia incompatible/.test(cmpProv.faltante));
+    });
+  });
+
+check('plan compare: medición válida muestra solo delta descriptivo + limitación',
+  () => {
+    withPlansDir(() => {
+      const created = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json']));
+      const cmp = JSON.parse(cliOk(['plan', 'compare', created.planId, sampleFile, '--json']));
+      assert.strictEqual(cmp.estado, 'MEDICION_COMPARABLE');
+      assert.strictEqual(typeof cmp.delta, 'number');
+      assert.strictEqual(cmp.anterior, cmp.actual);
+      assert.ok(/NO demuestra efecto/.test(cmp.limitacion), 'limitación explícita');
+      const shown = JSON.parse(cliOk(['plan', 'show', created.planId, '--json']));
+      assert.ok(shown.plan.comparisons.length >= 1, 'comparación persistida');
+      assert.ok(!/mejoraste|empeoraste|subiste/i.test(JSON.stringify(cmp)), 'sin lenguaje de mejora');
+    });
+  });
+
+check('plan store: corruptos/oversized/versión futura/symlink fallan cerrado sin destruir válidos',
+  () => {
+    withPlansDir((dir) => {
+      const created = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json']));
+      fs.writeFileSync(path.join(dir, 'corrupt.json'), '{no-json', 'utf8');
+      let code = 0;
+      let out = '';
+      try { cliOk(['plan', 'show', 'corrupt', '--json']); }
+      catch (e) { code = e.status; out = String(e.stdout || ''); }
+      assert.strictEqual(code, 1);
+      assert.ok(/PLAN_CORRUPT/.test(out));
+      const big = JSON.stringify({ schemaVersion: 1, planId: 'big', player: 'X#1', status: 'PENDIENTE', filler: 'x'.repeat(5 * 1024 * 1024) });
+      fs.writeFileSync(path.join(dir, 'big.json'), big, 'utf8');
+      let codeBig = 0;
+      let outBig = '';
+      try { cliOk(['plan', 'show', 'big', '--json']); }
+      catch (e) { codeBig = e.status; outBig = String(e.stdout || ''); }
+      assert.strictEqual(codeBig, 1);
+      assert.ok(/PLAN_RECORD_TOO_LARGE/.test(outBig));
+      fs.writeFileSync(path.join(dir, 'future.json'), JSON.stringify({ schemaVersion: 99, planId: 'future', player: 'X#1', status: 'PENDIENTE' }), 'utf8');
+      let codeF = 0;
+      let outF = '';
+      try { cliOk(['plan', 'show', 'future', '--json']); }
+      catch (e) { codeF = e.status; outF = String(e.stdout || ''); }
+      assert.strictEqual(codeF, 1);
+      assert.ok(/PLAN_SCHEMA_UNSUPPORTED/.test(outF));
+      let symlinkMade = false;
+      try {
+        fs.symlinkSync(path.join(dir, `${created.planId}.json`), path.join(dir, 'link.json'));
+        symlinkMade = true;
+      } catch (e) { /* Windows sin privilegios */ }
+      if (symlinkMade) {
+        let codeL = 0;
+        let outL = '';
+        try { cliOk(['plan', 'show', 'link', '--json']); }
+        catch (e) { codeL = e.status; outL = String(e.stdout || ''); }
+        assert.strictEqual(codeL, 1);
+        assert.ok(/PLAN_UNSAFE_PATH/.test(outL));
+      }
+      // El registro válido sigue intacto tras todos los fallos.
+      const stillThere = JSON.parse(cliOk(['plan', 'show', created.planId, '--json']));
+      assert.strictEqual(stillThere.plan.planId, created.planId);
+      // list no destruye: válidos + corruptos declarados
+      const list = JSON.parse(cliOk(['plan', 'list', '--json']));
+      assert.ok(list.plans.some(p => p.planId === created.planId));
+      assert.ok(list.corrupt.length >= 3, 'corruptos declarados sin borrar');
+    });
+  });
+
+check('plan perfiles: misma evidencia subyacente, sin elevar procedencia',
+  () => {
+    withPlansDir(() => {
+      const jsonOut = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json']));
+      let analystOut = '';
+      try { analystOut = cliOk(['plan', sampleFile, 'aspas#0001', '--profile', 'analyst']); }
+      catch (e) { analystOut = String(e.stdout || ''); }
+      const analyst = JSON.parse(analystOut);
+      for (const key of ['player', 'provenance', 'observado', 'accion', 'rutina', 'siguiente_dato', 'planId']) {
+        assert.deepStrictEqual(analyst[key] !== undefined ? analyst[key] : null, jsonOut[key] !== undefined ? jsonOut[key] : null, `evidencia igual en ${key}`);
+      }
+      assert.strictEqual(analyst.provenance, 'normalized_input');
+      const coach = (() => { try { return cliOk(['plan', sampleFile, 'aspas#0001', '--profile', 'coach']); } catch (e) { return String(e.stdout || ''); } })();
+      assert.ok(/PREGUNTAS SUGERIDAS/.test(coach), 'coach añade preguntas');
+      assert.ok(/normalizad/i.test(coach), 'coach mantiene procedencia visible');
+    });
+  });
+
+check('plan: --json puro en éxito, insuficiencia y error para los subcomandos',
+  () => {
+    withPlansDir(() => {
+      const pure = out => { const t = String(out).trim(); if (!t.startsWith('{')) return false; try { JSON.parse(t); return true; } catch (e) { return false; } };
+      const createdRaw = cliOk(['plan', sampleFile, 'aspas#0001', '--json']);
+      assert.ok(pure(createdRaw), 'create JSON puro');
+      const created = JSON.parse(createdRaw);
+      assert.ok(pure(cliOk(['plan', 'list', '--json'])), 'list JSON puro');
+      assert.ok(pure(cliOk(['plan', 'show', created.planId, '--json'])), 'show JSON puro');
+      assert.ok(pure(cliOk(['plan', 'intent', created.planId, 'nota', '--json'])), 'intent JSON puro');
+      let insufficient = '';
+      try { cliOk(['plan', 'compare', created.planId, 'https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04', '--demo', '--json']); }
+      catch (e) { insufficient = String(e.stdout || ''); }
+      assert.ok(pure(insufficient), 'compare insuficiente JSON puro');
+      let errorOut = '';
+      try { cliOk(['plan', 'show', 'inexistente', '--json']); }
+      catch (e) { errorOut = String(e.stdout || ''); }
+      assert.ok(pure(errorOut), 'error JSON puro');
+      assert.ok(/PLAN_NOT_FOUND/.test(errorOut));
+    });
+  });
+
+check('automatización: ninguna ruta ejecutable nueva usa red, Tracker, caché ni OCR',
+  () => {
+    for (const file of ['plan_store.js', 'plan_flow.js', 'plan.js']) {
+      const src = fs.readFileSync(path.join(scriptsDir, file), 'utf8');
+      assert.ok(!/tracker\.gg/i.test(src), `${file}: sin Tracker`);
+      assert.ok(!/require\(['"](https?|node:https?)['"]\)/.test(src), `${file}: sin red`);
+      assert.ok(!/require\(['"]\.\/http_fetch['"]\)/.test(src), `${file}: sin capa http`);
+      assert.ok(!/OCR|captura de pantalla/i.test(src), `${file}: sin OCR`);
+      assert.ok(!/browser|localStorage|cookie/i.test(src), `${file}: sin caché de navegador`);
+    }
+  });
+
+check('automatización: paquete/README incluyen el flujo y excluyen artefactos de desarrollo',
+  () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+    assert.ok(pkg.files.includes('scripts/'), 'scripts/ se publica');
+    for (const junk of ['tests/', 'test_suite.js', 'opencode_tester.js']) {
+      assert.ok(!pkg.files.includes(junk), `no se publica ${junk}`);
+    }
+    assert.ok(fs.existsSync(path.join(scriptsDir, 'plan_store.js')) && fs.existsSync(path.join(scriptsDir, 'plan_flow.js')), 'módulos del flujo presentes');
+    const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8');
+    assert.ok(/plan list/.test(readme) && /plan compare/.test(readme), 'README documenta subcomandos');
+    assert.ok(/VALORANT_PLANS_DIR|privacidad/i.test(readme), 'README documenta el modelo local');
+  });
+
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben
 // reflejar EXACTAMENTE el número de casos registrados y ejecutados. Un
 // manifiesto desincronizado hace fallar la suite (imposible sobre-declarar

@@ -54,6 +54,8 @@ const { sourceProvenance, provenanceLabel, detectTemporalContext } = require('./
 const { analyzeEconomy } = require('./economy_analyzer');
 const { generateCoachingReport } = require('./coaching_engine');
 const { buildPlan } = require('./plan');
+const planFlow = require('./plan_flow');
+const planStore = require('./plan_store');
 
 // Deriva la evidencia de una partida usando el ADAPTADOR CONFIABLE del módulo
 // de política (mint privado). El CLI no puede fabricar eventos observados ni
@@ -291,18 +293,33 @@ const KNOWN_FLAGS = Object.freeze({
   '--demo': 'demo',
   '--trust-new-key': 'trustNewKey',
   '--advanced': 'advanced',
+  '--pseudonymized': 'pseudonymized',
   '--help': 'help',
   '-h': 'help'
 });
 
+const VALUE_FLAGS = Object.freeze({ '--profile': 'profile' });
+const PROFILES = Object.freeze(['player', 'coach', 'analyst']);
+
 function parseCliArgs(argv) {
-  const flags = { json: false, demo: false, trustNewKey: false, advanced: false, help: false };
+  const flags = { json: false, demo: false, trustNewKey: false, advanced: false, pseudonymized: false, help: false, profile: null };
   const positionals = [];
-  for (const token of argv) {
+  for (let i = 0; i < argv.length; i++) {
+    const token = argv[i];
     if (typeof token !== 'string') throw cliFail('Argumento no textual en argv.', 'BAD_ARGV');
     if (Object.prototype.hasOwnProperty.call(KNOWN_FLAGS, token)) { flags[KNOWN_FLAGS[token]] = true; continue; }
+    if (Object.prototype.hasOwnProperty.call(VALUE_FLAGS, token)) {
+      const value = argv[i + 1];
+      if (value === undefined || String(value).startsWith('--')) {
+        throw cliFail(`El flag ${token} requiere un valor: ${PROFILES.join(' | ')}.`, 'FLAG_VALUE_REQUIRED');
+      }
+      if (!PROFILES.includes(value)) throw cliFail(`Perfil inválido: "${value}". Usa ${PROFILES.join(', ')}.`, 'INVALID_PROFILE');
+      flags[VALUE_FLAGS[token]] = value;
+      i++;
+      continue;
+    }
     if (token.startsWith('--') && token !== '--') {
-      throw cliFail(`Flag desconocido: "${token}". Flags admitidos: --json, --demo, --trust-new-key.`, 'UNKNOWN_FLAG');
+      throw cliFail(`Flag desconocido: "${token}". Flags admitidos: --json, --demo, --trust-new-key, --advanced, --pseudonymized, --profile <player|coach|analyst>.`, 'UNKNOWN_FLAG');
     }
     positionals.push(token);
   }
@@ -324,6 +341,32 @@ function emit(jsonOut, payload, human) {
     return;
   }
   human();
+}
+
+const COACH_QUESTIONS = [
+  '¿La próxima entrada incluye el dato siguiente requerido para poder comparar?',
+  '¿La métrica observada se repite con la misma procedencia (normalized_input)?',
+  '¿Qué falta para pasar a una fuente verificada (Riot RSO, credenciales pendientes)?'
+];
+
+// Presentación por audiencia SIN cambiar la evidencia subyacente:
+//   player  → humano breve · coach → humano + preguntas · analyst → JSON.
+function emitProfile(jsonOut, profile, payload, humanPlayer, humanCoach) {
+  LAST_RESULT = payload;
+  if (jsonOut) {
+    JSON_STDOUT_WRITTEN = true;
+    process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+    return;
+  }
+  if (profile === 'analyst') {
+    process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+    return;
+  }
+  if (profile === 'coach') {
+    humanCoach();
+    return;
+  }
+  humanPlayer();
 }
 
 // Ningún comando selecciona un jugador en silencio: sin objetivo explícito
@@ -371,6 +414,8 @@ if (!command || command === '--help' || command === '-h') {
   console.log(`  node cli.js parse <archivo_o_texto> [jugador]      ➔ Ingesta offline (JSON/texto aportado; sin red)`);
   console.log(`  node cli.js match <partida_o_texto> "<Nombre#TAG>" ➔ Diagnóstico descriptivo 360° (lectura amplia)`);
   console.log(`  node cli.js aim <partida_o_texto> "<Nombre#TAG>"   ➔ Rutina Kovaaks 15 min (solo con evidencia)`);
+  console.log(`  node cli.js plan list|show|intent|close|cancel|compare|export  ➔ Seguimiento local del plan`);
+  console.log(`  --profile <player|coach|analyst>   ➔ Presentación por audiencia (misma evidencia); --pseudonymized en "plan export"`);
   console.log(`  --demo: simulación explícita; NO habilita acción, rutina ni medición (política de honestidad).`);
   console.log(`\nOTROS ANÁLISIS (misma entrada):`);
   console.log(`  duo <partida> "<p1>" "<p2>" · duels <partida> [jugador] · weapons <partida> [jugador]`);
@@ -409,15 +454,140 @@ if (command.includes('#') && !fs.existsSync(command)) {
 
 try {
   if (command === 'plan') {
+    const profile = flags.profile || 'player';
+    const sub = args[1];
+    // El perfil analyst produce JSON estructurado: se silencia la salida humana
+    // (procedencia/avisos) para no contaminar stdout.
+    if (profile === 'analyst' && !jsonOut) JSON_MODE = true;
+
+    if (sub === 'list') {
+      const { plans, corrupt } = planStore.listPlans();
+      corrupt.forEach(c => console.error(`⚠️ Registro ignorado (${c.code}): ${c.planId}`));
+      const payload = {
+        command: 'plan-list', profile,
+        plans: plans.map(p => ({ planId: p.planId, player: p.player, status: p.status, provenance: p.provenance, createdAt: p.createdAt, metric: p.metric, value: p.value, threshold: p.threshold, nextData: p.nextData })),
+        corrupt
+      };
+      emitProfile(jsonOut, profile, payload,
+        () => {
+          printBanner();
+          console.log(`📋 PLANES LOCALES (${plans.length})${corrupt.length ? ` | ${corrupt.length} registro(s) ignorado(s)` : ''}`);
+          if (plans.length === 0) console.log('   (sin planes registrados)');
+          plans.forEach(p => console.log(`   • ${p.planId} | ${p.player} | ${p.status} | ${p.metric || 'sin métrica'}=${p.value === null ? 'n/d' : p.value} | ${p.createdAt}`));
+          console.log(`========================================================================\n`);
+        },
+        () => {
+          printBanner();
+          console.log(`📋 PLANES LOCALES (${plans.length}) — vista coach`);
+          plans.forEach(p => {
+            console.log(`   • ${p.planId} | ${p.player} | ${p.status} | ${p.metric || 'sin métrica'}=${p.value === null ? 'n/d' : p.value}`);
+            if (p.nextData) console.log(`     Siguiente dato: ${p.nextData}`);
+          });
+          console.log(`\nPREGUNTAS SUGERIDAS: ${COACH_QUESTIONS.map(q => `\n   - ${q}`).join('')}`);
+          console.log(`========================================================================\n`);
+        });
+      return;
+    }
+
+    if (sub === 'show') {
+      const id = args[2];
+      if (!id) throw cliFail('plan show requiere un planId explícito (o prefijo inequívoco); ningún plan se selecciona en silencio.', 'PLAN_ID_REQUIRED');
+      const rec = planStore.readPlan(id);
+      const payload = { command: 'plan-show', profile, plan: rec };
+      emitProfile(jsonOut, profile, payload,
+        () => {
+          printBanner();
+          console.log(`🧭 PLAN ${rec.planId} | ${rec.player} | ${rec.status}`);
+          console.log(`Procedencia: ${rec.provenance} | Referencia: ${rec.sourceRef}`);
+          console.log(`Creado: ${rec.createdAt} | Actualizado: ${rec.updatedAt}`);
+          console.log(`Métrica: ${rec.metric || 'n/d'}=${rec.value === null ? 'n/d' : rec.value} | Umbral: ${rec.threshold === null ? 'n/d' : rec.threshold}`);
+          if (rec.limitation) console.log(`Limitación: ${rec.limitation}`);
+          if (rec.action) console.log(`Acción: ${rec.action.que} (${rec.action.metrica} | umbral ${rec.action.umbral})`);
+          if (rec.routine) console.log(`Rutina: ${rec.routine.escenario} (${rec.routine.duracion})`);
+          console.log(`Siguiente dato: ${rec.nextData || 'n/d'}`);
+          if (rec.log.length > 0) rec.log.slice(-5).forEach(l => console.log(`  · [${l.at}] ${l.tipo}${l.nota ? `: ${l.nota}` : ''}`));
+          if (rec.comparisons.length > 0) rec.comparisons.slice(-3).forEach(c => console.log(`  · Comparación [${c.at}] ${c.estado} ${c.metrica || ''} ${c.anterior}→${c.actual} (Δ ${c.delta})`));
+          console.log(`========================================================================\n`);
+        },
+        () => {
+          printBanner();
+          console.log(`🧭 PLAN ${rec.planId} | ${rec.player} | ${rec.status} | Métrica: ${rec.metric || 'n/d'}=${rec.value === null ? 'n/d' : rec.value}`);
+          console.log(`Evidencia: procedencia ${rec.provenance}, referencia ${rec.sourceRef}.`);
+          if (rec.limitation) console.log(`Limitación: ${rec.limitation}`);
+          console.log(`PREGUNTAS SUGERIDAS: ${COACH_QUESTIONS.map(q => `\n   - ${q}`).join('')}`);
+          console.log(`========================================================================\n`);
+        });
+      return;
+    }
+
+    if (sub === 'intent' || sub === 'close' || sub === 'cancel') {
+      const id = args[2];
+      if (!id) throw cliFail(`plan ${sub} requiere un planId explícito.`, 'PLAN_ID_REQUIRED');
+      const note = args.slice(3).join(' ') || null;
+      const rec = sub === 'intent' ? planStore.markIntent(id, note) : planStore.closePlan(id, sub === 'cancel' ? 'CANCELADO' : 'CERRADO', note);
+      const payload = { command: `plan-${sub}`, profile, planId: rec.planId, status: rec.status, log: rec.log.slice(-1) };
+      emit(jsonOut, payload, () => {
+        printBanner();
+        console.log(`🗂️ PLAN ${rec.planId} | ${rec.player} | estado: ${rec.status}`);
+        if (note) console.log(`Nota registrada: ${planStore.sanitizeNote(note)}`);
+        console.log(`========================================================================\n`);
+      });
+      return;
+    }
+
+    if (sub === 'compare') {
+      const id = args[2];
+      const entry = args[3];
+      if (!id || !entry) throw cliFail('plan compare requiere <planId> <nueva_entrada> ["Nombre#TAG"].', 'INPUT_REQUIRED');
+      const rec = planStore.readPlan(id);
+      if (args[4] && args[4].trim().toLowerCase() !== rec.player.trim().toLowerCase()) {
+        throw cliFail(`El plan pertenece a "${rec.player}"; no se compara con "${args[4]}".`, 'INVALID_HANDLE');
+      }
+      const matchData = resolveMatchData(entry, rec.player);
+      const comparison = planFlow.comparePlanWithEntry(id, matchData);
+      const payload = Object.assign({ profile }, comparison);
+      emitProfile(jsonOut, profile, payload,
+        () => {
+          printBanner();
+          console.log(`🔁 COMPARACIÓN DEL PLAN ${comparison.planId} | ${comparison.player} | ${comparison.estado}`);
+          if (comparison.estado === 'MEDICION_COMPARABLE') {
+            console.log(`   ${comparison.metrica}: ${comparison.anterior} → ${comparison.actual} (Δ ${comparison.delta})`);
+          } else if (comparison.faltante) {
+            console.log(`   Dato faltante: ${comparison.faltante}`);
+          }
+          console.log(`   Limitación: ${comparison.limitacion}`);
+          console.log(`========================================================================\n`);
+        },
+        () => {
+          printBanner();
+          console.log(`🔁 COMPARACIÓN ${comparison.estado} | ${comparison.player} | ${comparison.metrica || 'n/d'}: ${comparison.anterior} → ${comparison.actual} (Δ ${comparison.delta})`);
+          if (comparison.faltante) console.log(`Dato faltante: ${comparison.faltante}`);
+          console.log(`Limitación: ${comparison.limitacion}`);
+          console.log(`PREGUNTAS SUGERIDAS: ${COACH_QUESTIONS.map(q => `\n   - ${q}`).join('')}`);
+          console.log(`========================================================================\n`);
+        });
+      if (comparison.estado !== 'MEDICION_COMPARABLE') throw new CliExit(EXIT.INSUFFICIENT);
+      return;
+    }
+
+    if (sub === 'export') {
+      const exported = planStore.exportPlans({ pseudonymized: flags.pseudonymized === true });
+      const payload = Object.assign({ command: 'plan-export', profile }, exported);
+      LAST_RESULT = payload;
+      process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+      return;
+    }
+
     const input = args[1];
     if (!input) {
-      throw cliFail('plan requiere entrada explícita (archivo/export, texto de marcador o match ID canónico): no se usa el fixture por defecto.', 'INPUT_REQUIRED');
+      throw cliFail('plan requiere entrada explícita (archivo/export, texto de marcador o match ID canónico): no se usa el fixture por defecto. Usa "plan list|show|compare" para el seguimiento.', 'INPUT_REQUIRED');
     }
     const matchData = resolveMatchData(input, args[2]);
     const effectivePlayer = resolveEffectivePlayer(matchData, args[2]);
-    const plan = buildPlan(matchData, effectivePlayer);
+    const { plan, tracking } = planFlow.createPlanWithTracking(matchData, effectivePlayer, { originPath: input });
+    const payload = Object.assign({}, plan, { profile, planId: tracking.ok ? tracking.planId : null, tracking });
 
-    emit(jsonOut, plan, () => {
+    const humanPlan = () => {
       printBanner();
       console.log(`🧭 PLAN PARA LA SIGUIENTE PARTIDA: ${plan.player} | ${plan.estado}`);
       console.log(`Procedencia: ${plan.provenanceLabel}`);
@@ -462,9 +632,18 @@ try {
       console.log(`   • Texto/marcador: ${plan.entrada_minima.texto_marcador}`);
       console.log(`   • Eventos por ronda: ${plan.entrada_minima.eventos_por_ronda}`);
       console.log(`   • Fuente verificada: ${plan.entrada_minima.fuente_verificada}`);
+      if (tracking.ok) console.log(`\n💾 Seguimiento local: planId ${tracking.planId} · "plan intent ${tracking.planId}" · "plan compare ${tracking.planId} <nueva_entrada>"`);
+      else if (tracking.code === 'PLAN_DEMO_NOT_TRACKABLE') console.log(`\n💾 Seguimiento: no disponible en demo (los datos sintéticos no se persisten).`);
+      else console.log(`\n💾 Seguimiento no disponible (${tracking.code}): ${tracking.message}`);
       console.log(`========================================================================\n`);
-    });
+    };
+    const humanCoach = () => {
+      humanPlan();
+      console.log(`PREGUNTAS SUGERIDAS (coach): ${COACH_QUESTIONS.map(q => `\n   - ${q}`).join('')}\n`);
+    };
+    emitProfile(jsonOut, profile, payload, humanPlan, humanCoach);
     if (plan.estado !== 'ACCION_DISPONIBLE') throw new CliExit(EXIT.INSUFFICIENT);
+    return;
 
   } else if (command === 'match' || command === 'diagnostic') {
     const { target, player } = resolveTargetAndPlayer(args);

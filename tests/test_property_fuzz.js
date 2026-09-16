@@ -385,7 +385,9 @@ property('cli-args: permutaciones de flags no alteran posicionales ni semántica
       demo: chosen.includes('--demo'),
       trustNewKey: chosen.includes('--trust-new-key'),
       advanced: false,
-      help: false
+      pseudonymized: false,
+      help: false,
+      profile: null
     }, 'flags independientes del orden');
   }
   assert.throws(() => parseCliArgs(['match', '--bogus']), e => e.code === 'UNKNOWN_FLAG');
