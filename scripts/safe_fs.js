@@ -9,8 +9,9 @@
  *     plataforma lo permite) → `fstat` → comparación dev/ino contra la
  *     inspección previa. Sustitución o enlace ⇒ fail-closed.
  *   - Windows no soporta O_NOFOLLOW: la sustitución se detecta con dev/ino del
- *     descriptor (NTFS expone file-id estable); se documenta como best-effort
- *     equivalente.
+ *     descriptor (NTFS expone file-id estable) y, cuando dev/ino no son
+ *     fiables (p. ej. Node 18 en Windows devuelve 0), con tamaño/mtime/
+ *     birthtime; se documenta como best-effort equivalente.
  *   - Política de directorio privado (pura y determinista): rechaza symlink,
  *     no-directorio, propietario ajeno (POSIX) y escritura de grupo/otros.
  *
@@ -56,8 +57,18 @@ function readFileNoFollow(p, what, expectedStat) {
     if (!opened.isFile()) {
       throw new Error(`El ${what} (${p}) no es un archivo regular: fail-closed.`);
     }
-    if (expectedStat && (opened.dev !== expectedStat.dev || opened.ino !== expectedStat.ino)) {
-      throw new Error(`Sustitución detectada en ${what} (${p}) entre la inspección y la apertura: fail-closed (dev/ino cambiaron).`);
+    if (expectedStat) {
+      const devInoUsable = (expectedStat.ino !== undefined && expectedStat.ino !== 0) || (opened.ino !== undefined && opened.ino !== 0);
+      const identityChanged = opened.dev !== expectedStat.dev || opened.ino !== expectedStat.ino;
+      const metaChanged = opened.size !== expectedStat.size ||
+        opened.mtimeMs !== expectedStat.mtimeMs ||
+        (opened.birthtimeMs !== undefined && expectedStat.birthtimeMs !== undefined && opened.birthtimeMs !== expectedStat.birthtimeMs);
+      // Sustitución si cambia la identidad (dev/ino) o, donde dev/ino no son
+      // fiables (p. ej. Windows Node 18 devuelve 0), si cambian tamaño/mtime/
+      // birthtime entre la inspección y la apertura.
+      if (identityChanged || (!devInoUsable && metaChanged)) {
+        throw new Error(`Sustitución detectada en ${what} (${p}) entre la inspección y la apertura: fail-closed (${identityChanged ? 'dev/ino cambiaron' : 'metadatos de identidad cambiaron'}).`);
+      }
     }
     return fs.readFileSync(fd);
   } finally {
