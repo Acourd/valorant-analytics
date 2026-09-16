@@ -1,5 +1,30 @@
 # Changelog — valorant-analytics
 
+## 4.11.3 — Padres intermedios no controlables
+
+- **Corregido (perímetro dependiente de ancestro):** una ruta como `/tmp/padre-compartido-0777/plans` era admisible si `plans` acababa en 0700, pero un ancestro escribible podía renombrar/sustituir el directorio final. Ahora **cada padre intermedio** debe ser directorio, no symlink, no escribible por grupo/otros y no pertenecer a otro usuario (se tolera root como propietario de directorios de sistema). Excepción mínima sin extensión a hijos: solo los **hijos directos de la raíz** (`/tmp`, `/var`, `/private`…) quedan exentos. La cadena completa se **revalida antes de crear el temporal y antes del `rename`**.
+- Regresión `tests #198` (padre/abuelo 0777 y 0770 sin creación ni escritura) 198/198 checks. Versión 4.11.3.
+
+## 4.11.2 — Perímetro completo (sin evasión por symlinks ancestros)
+
+- **Corregido (evasión del perímetro):** la validación solo miraba el directorio final, así que `/tmp/enlace-simbolico/plans` podía crear `plans` dentro del destino real del enlace. Ahora `safe_fs.ensurePrivateDir` recorre **todos los componentes desde la raíz** y rechaza cualquier symlink/junction en cualquier nivel (final, padre o abuelo). La creación es **escalonada** (nunca `recursive: true` a través de padres no validados) y la política de permisos/propietario se aplica solo al directorio final. La misma validación corre antes de listar, leer, actualizar y escribir.
+- Regresión `tests #197` (symlink final/padre/abuelo + ruta privada anidada normal) 197/197 checks. Versión 4.11.2.
+
+## 4.11.1 — Perímetro local y identidad completa del historial de planes
+
+- **HIGH — perímetro del almacenamiento:** el directorio de planes existente ahora se valida en cada operación (`scripts/safe_fs.js`, extracto de la política ya probada del keystore): rechaza symlink, no-directorio, propietario ajeno (POSIX) y escritura de grupo/otros (0770/0777 no admisibles). Las lecturas abren por **descriptor con `O_NOFOLLOW`** y comparan `dev/ino` contra la inspección previa: sustitución ⇒ `PLAN_UNSAFE_PATH` (fail-closed). En Windows (sin `O_NOFOLLOW`) la detección se apoya en el file-id de NTFS, documentado como best-effort. La escritura re-verifica el directorio y nunca sobrescribe un enlace.
+- **HIGH — identidad determinista completa:** `planId` se deriva ahora de **todo** el núcleo semántico persistido (jugador, `sourceRef`, procedencia, métrica, valor, umbral, limitación, acción completa, rutina completa y siguiente dato), excluyendo solo timestamps y bitácora. Un registro existente con núcleo distinto ⇒ `PLAN_CONFLICT` explícito (nunca devolver silenciosamente el anterior); idempotencia solo con núcleo idéntico.
+- Regresiones `tests #195`–`#196` (196/196 checks). Versión 4.11.1.
+
+## 4.11.0 — Automatización del ciclo de planes para el jugador
+
+- **Historial local versionado** (`scripts/plan_store.js`): `plan <entrada> "<Nombre#TAG>"` persiste un registro con jugador exacto, `sourceRef` (identidad + digest), procedencia, fecha, métrica/valor/umbral/limitación, acción, rutina, siguiente dato y estado `PENDIENTE`; `planId` determinista. Directorio `VALORANT_PLANS_DIR` (por defecto `<cache>/plans`), permisos 0600, escritura atómica, symlinks rechazados, sin credenciales ni terceros; demo `synthetic_demo` no se persiste.
+- **Subcomandos:** `plan list`, `show <id>`, `intent <id> [nota ≤200]`, `close|cancel <id>`, `compare <id> <entrada> ["handle"]`, `export [--pseudonymized]`. Sin selección silenciosa: id requerido, prefijos ambiguos listan candidatos.
+- **Comparación honesta** (`scripts/plan_flow.js`): mismo jugador exacto, métrica observada y procedencia compatible; estados `MEDICION_COMPARABLE` / `DATOS_INSUFICIENTES` / `NO_COMPARABLE` / `SIMULACION_DEMO`; delta descriptivo + limitación explícita, sin “mejoraste”, MMR, talento ni causalidad.
+- **Perfiles de salida:** `--profile player|coach|analyst` (misma evidencia, distinta presentación; analyst emite JSON estructurado).
+- **Presupuestos:** `maxPlans` 500 y `maxNoteChars` 200 (reducibles, política de solo-reducción). Corruptos/oversized/versión futura/symlink fallan cerrado sin destruir registros válidos.
+- Regresiones `tests #185`–`#194` (194/194 checks). Versión 4.11.0.
+
 ## 4.10.2 — Contrato inequívoco de `schemaVersion` Riot
 
 - **Corregido (residual):** un payload con `payload.schemaVersion` **solo en la raíz** y sin `matchInfo.schemaVersion` se aceptaba como `supported`. La ubicación canónica es `matchInfo.schemaVersion`: la versión de raíz **solo** se admite si coincide con la canónica, y si la canónica falta se rechaza con `SCHEMA_UNSUPPORTED` (fail-closed). Ausencia total ⇒ `legacy_limited`.

@@ -211,6 +211,15 @@ function buildPlan(matchData, targetHandle) {
       : null,
     estado: esSimulacion ? 'SIMULACION_DEMO' : (accion ? 'ACCION_DISPONIBLE' : 'RECOLECCION_REQUERIDA'),
     observado,
+    // Métricas comparables entre partidas (solo las realmente observadas).
+    comparables: {
+      hsPct: profile.mechanical.hsPct,
+      kast: profile.mechanical.kast,
+      adr: profile.mechanical.adr,
+      acs: profile.mechanical.acs,
+      clutches: profile.mechanical.clutches,
+      kd: profile.mechanical.kd
+    },
     // Guía estable de entrada mínima: qué se obtiene con cada nivel de datos.
     entrada_minima: {
       texto_marcador: 'Funciones y K/D/A, ACS, ADR y HS% si tu marcador los muestra (habilita observación y, con umbral, una acción mecánica).',

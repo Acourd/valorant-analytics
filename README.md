@@ -4,10 +4,10 @@
 
 ### Telemetría Competitiva Local · Diagnóstico Descriptivo 360° · Motor de Puntería Adaptativo
 
-[![Versión](https://img.shields.io/badge/versión-4.10.2_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
+[![Versión](https://img.shields.io/badge/versión-4.11.3_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
 [![Runtime](https://img.shields.io/badge/runtime-Node.js_18%2B_Nativo-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Dependencias](https://img.shields.io/badge/dependencias-0_npm_(Core)-38BDF8.svg?style=for-the-badge&logo=codeforces&logoColor=white)](package.json)
-[![Pruebas](https://img.shields.io/badge/tests-184%2F184_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
+[![Pruebas](https://img.shields.io/badge/tests-198%2F198_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
 [![Auditoría](https://img.shields.io/badge/auditoría-15%2F15_propiedades_PASS-8B5CF6.svg?style=for-the-badge&logo=codereview&logoColor=white)](opencode_tester.js)
 [![Licencia](https://img.shields.io/badge/licencia-MIT-6B7280.svg?style=for-the-badge)](LICENSE)
 
@@ -185,6 +185,27 @@ El despachador maestro `cli.js` provee acceso unificado a todas las capacidades 
 
 ---
 
+## 🗂️ Seguimiento local de planes (privacidad y retención)
+
+El ciclo completo es local: **crear plan → marcar intento → aportar otra partida → comparar → siguiente paso**.
+
+```bash
+node cli.js plan mi_marcador.txt "TenZ#0001"          # crea el plan y lo registra (planId determinista)
+node cli.js plan list                                  # planes activos
+node cli.js plan show <planId>                         # detalle: métrica, umbral, acción, rutina, bitácora
+node cli.js plan intent <planId> "nota breve"          # marca la acción como intentada (≤200 caracteres)
+node cli.js plan compare <planId> otra_partida.txt     # comparación honesta (solo métricas comparables)
+node cli.js plan close <planId> | cancel <planId>      # cierra o cancela
+node cli.js plan export --pseudonymized                # exportación explícita a stdout (jugador pseudonimizado)
+```
+
+**Privacidad y retención:** el historial vive en `VALORANT_PLANS_DIR` (por defecto `<cache>/plans`), un archivo JSON por plan con permisos 0600 en POSIX y escritura atómica. El **perímetro del directorio** se verifica en cada operación **componente a componente** (raíz incluida): se rechazan symlinks en cualquier nivel — también **padres y abuelos**, p. ej. `/ruta/enlace/planes` —, rutas que no son directorio, propietario ajeno (POSIX) y escritura de grupo/otros (0770/0777 no son admisibles). Única excepción documentada: los symlinks **de sistema que cuelgan directamente de la raíz** (p. ej. `/var` o `/tmp` en macOS) se resuelven a su destino canónico; cualquier enlace bajo un padre no-raíz o en el componente final se rechaza. La creación es **escalonada** (nunca `recursive: true` a través de padres no validados). Los **padres intermedios** no pueden ser escribibles por grupo/otros ni pertenecer a otro usuario (se tolera root como propietario de directorios de sistema); el directorio **final** exige además propiedad del usuario actual y se ajusta a 0700. Solo los **hijos directos de la raíz** (`/tmp`, `/var`, `/private`…) quedan exentos de política: son raíces de sistema, no padres controlables. La cadena se revalida antes de crear el temporal y antes del `rename`. La lectura de cada registro abre por descriptor con `O_NOFOLLOW` donde existe y compara `dev/ino` contra la inspección previa (sustitución ⇒ fail-closed); en Windows no hay `O_NOFOLLOW` y la detección de sustitución se apoya en el file-id de NTFS (best-effort documentado). Se guardan solo campos del plan: jugador, referencia+digest de la entrada, procedencia, fecha, métrica/valor/umbral/limitación, acción, rutina, siguiente dato, estado y bitácora breve. **No** se guardan credenciales, tokens ni datos de terceros. Retención local indefinida hasta cierre/cancelación (puedes borrar los archivos manualmente); límite de 500 planes. Los datos `synthetic_demo` **no se persisten** ni se comparan.
+
+**Comparación honesta:** exige mismo jugador exacto, métrica observada y procedencia compatible. Estados: `MEDICION_COMPARABLE`, `DATOS_INSUFICIENTES`, `NO_COMPARABLE`, `SIMULACION_DEMO`; con `--json`, un único objeto. El resultado es un **delta descriptivo** con limitación explícita: una variación entre dos partidas no demuestra efecto de la rutina, mejora, MMR, rango ni talento.
+
+**Perfiles de salida (misma evidencia, distinta presentación):** `--profile player` (breve), `--profile coach` (evidencia, límites y preguntas sugeridas) y `--profile analyst` (JSON estructurado). No cambian la política de evidencia.
+
+
 ## 🧱 Presupuestos de recursos y contrato de esquema
 
 Las entradas no confiables se procesan con **límites explícitos**. `VA_BUDGET_*` (p. ej. `VA_BUDGET_MAX_PLAYERS=32`) **solo puede REDUCIR** un límite: los valores inválidos (texto, NaN, Infinity, no enteros, ≤0) o los intentos de ampliación por encima del máximo seguro compilado **fallan cerrado** con `RESOURCE_BUDGET_EXCEEDED`. No existe escape de entorno para ampliar límites. Al exceder un límite se falla cerrado con un código estable y **sin análisis parcial**:
@@ -240,7 +261,7 @@ Si utilizas **Google Gemini (Gems)** o **OpenAI (Custom GPTs)**, el archivo [`st
 - **Sin red por defecto:** el análisis es local. No se cosecha la caché del navegador ni se consulta Tracker.gg. La entrada es un JSON/export, texto o captura que aportas explícitamente.
 - **Zero Dependencias NPM:** Diseñado exclusivamente sobre las librerías estándar de Node.js (`fs`, `path`, `zlib`, `crypto`, `child_process`). Cero descargas externas.
 - **Compatibilidad Multiplataforma:** Probado y garantizado en Windows 11 (PowerShell/CMD), macOS (zsh) y Linux (bash).
-- **Garantía Determinista:** 184 pruebas automatizadas y suites modulares verificadas con Exit Code 0 (`node run_all_tests.js`) y auditoría semántica de propiedades fail-closed, sin puntuación promocional (`node opencode_tester.js`).
+- **Garantía Determinista:** 198 pruebas automatizadas y suites modulares verificadas con Exit Code 0 (`node run_all_tests.js`) y auditoría semántica de propiedades fail-closed, sin puntuación promocional (`node opencode_tester.js`).
 - **Contrato CLI:** salida humana y `--json`; códigos `0`/`1`/`2` documentados (resultado válido / entrada inválida / evidencia insuficiente); ningún comando selecciona un jugador en silencio.
 
 ---
