@@ -26,6 +26,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const budgets = require('./resource_budget');
+const safeFs = require('./safe_fs');
 const { canonicalStringify } = require('./evidence_policy');
 
 const RECORD_SCHEMA_VERSION = 1;
@@ -44,14 +45,12 @@ function storeDir(env = process.env) {
 }
 
 function ensureDir(dir) {
-  if (fs.existsSync(dir)) {
-    const lst = fs.lstatSync(dir);
-    if (lst.isSymbolicLink()) throw planError('PLAN_UNSAFE_PATH', `El directorio de planes es un enlace simbólico: ${dir}. Se rechaza.`);
-    if (!lst.isDirectory()) throw planError('PLAN_UNSAFE_PATH', `La ruta de planes no es un directorio: ${dir}.`);
-    return dir;
-  }
+  const existing = safeFs.assertDirSafe(dir, { code: 'PLAN_UNSAFE_PATH' });
+  if (existing !== null) return dir;
   fs.mkdirSync(dir, { recursive: true });
   try { fs.chmodSync(dir, 0o700); } catch (e) { /* Windows: mejor esfuerzo */ }
+  // Re-verifica el directorio recién creado (symlink/carrera de creación).
+  safeFs.assertDirSafe(dir, { code: 'PLAN_UNSAFE_PATH' });
   return dir;
 }
 
@@ -62,18 +61,28 @@ function sanitizeNote(note) {
   return clean.length === 0 ? null : clean.slice(0, max);
 }
 
-function planIdFor(record) {
-  const core = {
-    player: record.player,
-    sourceRef: record.sourceRef,
-    provenance: record.provenance,
-    metric: record.metric,
-    value: record.value,
-    threshold: record.threshold,
-    actionArea: record.action ? record.action.area : null,
-    nextDato: record.nextData ? record.nextData : null
+/**
+ * Núcleo semántico COMPLETO de un plan: todo lo persistido salvo timestamps y
+ * bitácora mutable. La identidad (planId) y la comprobación de conflicto se
+ * derivan de aquí.
+ */
+function semanticCore(rec) {
+  return {
+    player: rec.player,
+    sourceRef: rec.sourceRef,
+    provenance: rec.provenance,
+    metric: rec.metric === undefined ? null : rec.metric,
+    value: rec.value === undefined ? null : rec.value,
+    threshold: rec.threshold === undefined ? null : rec.threshold,
+    limitation: rec.limitation === undefined ? null : rec.limitation,
+    action: rec.action || null,
+    routine: rec.routine || null,
+    nextData: rec.nextData || null
   };
-  return crypto.createHash('sha256').update(canonicalStringify(core)).digest('hex').slice(0, 16);
+}
+
+function planIdFor(record) {
+  return crypto.createHash('sha256').update(canonicalStringify(semanticCore(record))).digest('hex').slice(0, 16);
 }
 
 function validateRecordShape(rec, label) {
@@ -89,19 +98,30 @@ function validateRecordShape(rec, label) {
 }
 
 function readFileSafe(file) {
-  const lst = fs.lstatSync(file);
+  const maxBytes = budgets.getBudgets().maxFileBytes;
+  const lst = safeFs.lstatRegularOrAbsent(file);
+  if (lst === null) throw planError('PLAN_NOT_FOUND', `Registro no encontrado: ${file}.`);
   if (lst.isSymbolicLink()) throw planError('PLAN_UNSAFE_PATH', `Registro es un enlace simbólico: ${file}. Se rechaza.`);
   if (!lst.isFile()) throw planError('PLAN_UNSAFE_PATH', `Ruta de registro no es un archivo: ${file}.`);
-  const maxBytes = budgets.getBudgets().maxFileBytes;
   if (lst.size > maxBytes) throw planError('PLAN_RECORD_TOO_LARGE', `Registro de plan demasiado grande: ${lst.size} bytes > ${maxBytes}.`);
-  const text = fs.readFileSync(file, 'utf8');
+  // Lectura por descriptor sin TOCTOU: sustitución entre lstat y open ⇒ fail-closed.
+  let buf;
+  try {
+    buf = safeFs.readFileNoFollow(file, 'registro de plan', lst);
+  } catch (e) {
+    throw planError('PLAN_UNSAFE_PATH', e.message, { file });
+  }
+  if (buf === null) throw planError('PLAN_NOT_FOUND', `Registro no encontrado: ${file}.`);
+  if (buf.length > maxBytes) throw planError('PLAN_RECORD_TOO_LARGE', `Registro de plan demasiado grande: ${buf.length} bytes > ${maxBytes}.`);
   let rec;
-  try { rec = JSON.parse(text); } catch (e) { throw planError('PLAN_CORRUPT', `Registro de plan ilegible: ${file}.`); }
+  try { rec = JSON.parse(buf.toString('utf8')); } catch (e) { throw planError('PLAN_CORRUPT', `Registro de plan ilegible: ${file}.`); }
   validateRecordShape(rec, path.basename(file));
   return rec;
 }
 
 function atomicWrite(file, obj) {
+  // El directorio se re-verifica antes de cada escritura (perímetro privado).
+  safeFs.assertDirSafe(path.dirname(file), { code: 'PLAN_UNSAFE_PATH' });
   const tmp = `${file}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
   let fd = null;
   try {
@@ -115,7 +135,13 @@ function atomicWrite(file, obj) {
   try {
     fs.renameSync(tmp, file);
   } catch (e) {
-    // Windows no reemplaza con rename: se reemplaza de forma controlada.
+    // Windows no reemplaza con rename: se reemplaza de forma controlada, sin
+    // seguir jamás un enlace en el destino.
+    const targetStat = safeFs.lstatRegularOrAbsent(file);
+    if (targetStat && targetStat.isSymbolicLink()) {
+      try { fs.rmSync(tmp, { force: true }); } catch (e2) { /* limpio */ }
+      throw planError('PLAN_UNSAFE_PATH', `El destino del registro es un enlace simbólico (${file}): jamás se sobrescribe (fail-closed).`);
+    }
     try { fs.rmSync(file, { force: true }); } catch (e2) { /* inexistente */ }
     fs.renameSync(tmp, file);
   }
@@ -142,9 +168,13 @@ function savePlan(input) {
 
   if (fs.existsSync(file)) {
     const existing = readFileSafe(file);
-    const sameCore = planIdFor(existing) === planId;
-    if (sameCore) return existing; // idempotente: mismo contenido ⇒ mismo registro
-    throw planError('PLAN_CONFLICT', `Conflicto de planId ${planId}: contenido distinto con el mismo identificador.`);
+    // Idempotencia SOLO si el núcleo semántico completo es idéntico; cualquier
+    // diferencia (p. ej. texto de acción o rutina) es un conflicto explícito.
+    const existingCore = semanticCore(existing);
+    const incomingCore = semanticCore(input);
+    if (canonicalStringify(existingCore) === canonicalStringify(incomingCore)) return existing;
+    const differing = Object.keys(incomingCore).filter(k => canonicalStringify(existingCore[k]) !== canonicalStringify(incomingCore[k]));
+    throw planError('PLAN_CONFLICT', `Conflicto de planId ${planId}: el registro existente difiere en [${differing.join(', ')}]. No se devuelve silenciosamente el anterior; usa un plan nuevo o corrige la entrada.`, { planId, differing });
   }
 
   const now = new Date().toISOString();

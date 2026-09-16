@@ -3967,6 +3967,114 @@ check('automatización: paquete/README incluyen el flujo y excluyen artefactos d
     assert.ok(/VALORANT_PLANS_DIR|privacidad/i.test(readme), 'README documenta el modelo local');
   });
 
+check('plan store: perímetro de directorio y TOCTOU (0777/0770/symlink/sustitución)',
+  () => {
+    const safeFs = require(path.join(scriptsDir, 'safe_fs.js'));
+    assert.strictEqual(safeFs.storageDirPolicyViolation(0o777, 1, 1, true), 'permite escritura al grupo o a otros');
+    assert.strictEqual(safeFs.storageDirPolicyViolation(0o770, 1, 1, true), 'permite escritura al grupo o a otros');
+    assert.strictEqual(safeFs.storageDirPolicyViolation(0o700, 1, 1, true), null);
+    assert.ok(/otro usuario/.test(safeFs.storageDirPolicyViolation(0o700, 2, 1, true)));
+    assert.strictEqual(safeFs.storageDirPolicyViolation(0o777, 2, 1, false), null, 'Windows delega en la ACL');
+    if (process.platform !== 'win32') {
+      for (const mode of [0o777, 0o770]) {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'va-unsafe-'));
+        fs.chmodSync(dir, mode);
+        const prev = process.env.VALORANT_PLANS_DIR;
+        process.env.VALORANT_PLANS_DIR = dir;
+        try {
+          let out = '';
+          try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json']); }
+          catch (e) { out = String(e.stdout || ''); }
+          const created = JSON.parse(out);
+          assert.strictEqual(created.tracking.ok, false, `modo ${mode.toString(8)} debe bloquear la persistencia`);
+          assert.strictEqual(created.tracking.code, 'PLAN_UNSAFE_PATH');
+          assert.doesNotThrow(() => cliOk(['plan', sampleFile, 'aspas#0001']), 'el plan sigue funcionando sin persistir');
+        } finally {
+          process.env.VALORANT_PLANS_DIR = prev;
+          fs.rmSync(dir, { recursive: true, force: true });
+        }
+      }
+      const real = fs.mkdtempSync(path.join(os.tmpdir(), 'va-real-'));
+      const link = `${real}-link`;
+      let linked = false;
+      try { fs.symlinkSync(real, link); linked = true; } catch (e) { /* sin privilegios */ }
+      if (linked) {
+        const prev = process.env.VALORANT_PLANS_DIR;
+        process.env.VALORANT_PLANS_DIR = link;
+        try {
+          let out = '';
+          try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json']); }
+          catch (e) { out = String(e.stdout || ''); }
+          assert.strictEqual(JSON.parse(out).tracking.code, 'PLAN_UNSAFE_PATH', 'directorio symlink rechazado');
+        } finally {
+          process.env.VALORANT_PLANS_DIR = prev;
+          fs.rmSync(link, { force: true });
+          fs.rmSync(real, { recursive: true, force: true });
+        }
+      }
+    }
+    // Sustitución entre lstat y apertura: solo si dev/ino son utilizables.
+    const probe = path.join(os.tmpdir(), `ino-probe-${process.pid}.json`);
+    fs.writeFileSync(probe, '{}');
+    const inoUsable = fs.statSync(probe).ino !== 0;
+    fs.unlinkSync(probe);
+    if (inoUsable) {
+      withPlansDir((dir) => {
+        const created = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json']));
+        const file = path.join(dir, `${created.planId}.json`);
+        const other = path.join(dir, 'other.json');
+        fs.writeFileSync(other, fs.readFileSync(file));
+        const store = require(path.join(scriptsDir, 'plan_store.js'));
+        const origOpen = fs.openSync;
+        fs.openSync = function (p, flags) {
+          if (String(p) === file) {
+            fs.rmSync(file, { force: true });
+            fs.renameSync(other, file);
+          }
+          return origOpen.apply(fs, arguments);
+        };
+        try {
+          assert.throws(() => store.readPlan(created.planId, { dir }), e => e.code === 'PLAN_UNSAFE_PATH', 'sustitución detectada por dev/ino');
+        } finally {
+          fs.openSync = origOpen;
+        }
+      });
+    }
+  });
+
+check('plan store: identidad determinista completa (acción/rutina cambian el id; conflicto explícito)',
+  () => {
+    withPlansDir(() => {
+      const store = require(path.join(scriptsDir, 'plan_store.js'));
+      const base = {
+        player: 'A#1',
+        sourceRef: `match:m#sha256:${'b'.repeat(16)}`,
+        provenance: 'normalized_input',
+        metric: 'hsPct',
+        value: 10,
+        threshold: 25,
+        limitation: 'lim',
+        action: { area: 'MICRO_ADJUSTMENT', que: 'Acción A', metrica: 'hsPct', umbral: 25, limitacion: 'lim' },
+        routine: { escenario: 'Rutina A', duracion: '5 min' },
+        nextData: 'dato A'
+      };
+      const r1 = store.savePlan(base);
+      const r2 = store.savePlan(Object.assign({}, base, { action: Object.assign({}, base.action, { que: 'Acción B' }) }));
+      assert.notStrictEqual(r1.planId, r2.planId, 'acción distinta => id distinto');
+      const r3 = store.savePlan(Object.assign({}, base, { routine: { escenario: 'Rutina B', duracion: '10 min' } }));
+      assert.notStrictEqual(r3.planId, r1.planId, 'rutina distinta => id distinto');
+      const again = store.savePlan(JSON.parse(JSON.stringify(base)));
+      assert.strictEqual(again.planId, r1.planId, 'idéntico => idempotente');
+      assert.strictEqual(again.action.que, 'Acción A', 'no devuelve silenciosamente otro registro');
+      const file = path.join(process.env.VALORANT_PLANS_DIR, `${r1.planId}.json`);
+      const tampered = JSON.parse(fs.readFileSync(file, 'utf8'));
+      tampered.action.que = 'Acción obsoleta';
+      fs.writeFileSync(file, JSON.stringify(tampered), 'utf8');
+      assert.throws(() => store.savePlan(JSON.parse(JSON.stringify(base))), e => e.code === 'PLAN_CONFLICT', 'núcleo distinto => conflicto explícito');
+      assert.strictEqual(JSON.parse(fs.readFileSync(file, 'utf8')).action.que, 'Acción obsoleta', 'el registro previo no se sobrescribe');
+    });
+  });
+
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben
 // reflejar EXACTAMENTE el número de casos registrados y ejecutados. Un
 // manifiesto desincronizado hace fallar la suite (imposible sobre-declarar

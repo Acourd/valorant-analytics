@@ -1,5 +1,11 @@
 # Changelog — valorant-analytics
 
+## 4.11.1 — Perímetro local y identidad completa del historial de planes
+
+- **HIGH — perímetro del almacenamiento:** el directorio de planes existente ahora se valida en cada operación (`scripts/safe_fs.js`, extracto de la política ya probada del keystore): rechaza symlink, no-directorio, propietario ajeno (POSIX) y escritura de grupo/otros (0770/0777 no admisibles). Las lecturas abren por **descriptor con `O_NOFOLLOW`** y comparan `dev/ino` contra la inspección previa: sustitución ⇒ `PLAN_UNSAFE_PATH` (fail-closed). En Windows (sin `O_NOFOLLOW`) la detección se apoya en el file-id de NTFS, documentado como best-effort. La escritura re-verifica el directorio y nunca sobrescribe un enlace.
+- **HIGH — identidad determinista completa:** `planId` se deriva ahora de **todo** el núcleo semántico persistido (jugador, `sourceRef`, procedencia, métrica, valor, umbral, limitación, acción completa, rutina completa y siguiente dato), excluyendo solo timestamps y bitácora. Un registro existente con núcleo distinto ⇒ `PLAN_CONFLICT` explícito (nunca devolver silenciosamente el anterior); idempotencia solo con núcleo idéntico.
+- Regresiones `tests #195`–`#196` (196/196 checks). Versión 4.11.1.
+
 ## 4.11.0 — Automatización del ciclo de planes para el jugador
 
 - **Historial local versionado** (`scripts/plan_store.js`): `plan <entrada> "<Nombre#TAG>"` persiste un registro con jugador exacto, `sourceRef` (identidad + digest), procedencia, fecha, métrica/valor/umbral/limitación, acción, rutina, siguiente dato y estado `PENDIENTE`; `planId` determinista. Directorio `VALORANT_PLANS_DIR` (por defecto `<cache>/plans`), permisos 0600, escritura atómica, symlinks rechazados, sin credenciales ni terceros; demo `synthetic_demo` no se persiste.
