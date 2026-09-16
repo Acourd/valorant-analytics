@@ -90,17 +90,21 @@ function canonicalStringify(value) {
   return `{${keys.map(k => `${JSON.stringify(k)}:${canonicalStringify(value[k])}`).join(',')}}`;
 }
 
-// Referencia de origen trazable: matchId si existe; si no, digest canónico del
-// contenido + nombre del fichero de origen.
+// Referencia de origen trazable para `normalized_input`: identidad declarada
+// (matchId, si existe) + hash canónico del CONTENIDO. Dos contenidos distintos
+// con el mismo matchId jamás comparten referencia; el mismo contenido con
+// distinto orden de claves sí comparte hash (canonicalStringify ordena claves).
 function stableRef(matchData, originPath) {
   const matchId = (matchData && matchData.data && matchData.data.metadata && matchData.data.metadata.matchId) ||
     (matchData && matchData.metadata && matchData.metadata.matchId);
-  if (typeof matchId === 'string' && matchId.trim().length > 0) return `match:${matchId.trim()}`;
   let digest;
   try {
     digest = crypto.createHash('sha256').update(canonicalStringify(matchData === undefined ? null : matchData)).digest('hex').slice(0, 16);
   } catch (e) {
     digest = crypto.createHash('sha256').update(String(matchData)).digest('hex').slice(0, 16);
+  }
+  if (typeof matchId === 'string' && matchId.trim().length > 0) {
+    return `match:${matchId.trim()}#sha256:${digest}`;
   }
   const base = originPath ? path.basename(path.resolve(originPath)) : 'inline';
   return `sha256:${digest}@${base}`;
@@ -301,16 +305,40 @@ function classifyEvidence(input) {
 function observeMatchTelemetry(matchData, playerHandle, options = {}) {
   const segments = (matchData && matchData.data && matchData.data.segments) || (matchData && matchData.segments) || [];
   const summaries = segments.filter(s => s.type === 'player-summary');
+  const candidates = summaries
+    .map(s => s.metadata?.platformUserHandle || s.attributes?.platformUserIdentifier)
+    .filter(Boolean);
+  if (typeof playerHandle !== 'string' || playerHandle.trim() === '') {
+    const err = new Error(`Objetivo no especificado: indica el Riot ID exacto. Candidatos: ${candidates.slice(0, 10).join(', ')}`);
+    err.code = 'TARGET_REQUIRED';
+    throw err;
+  }
+  // SIN fallback al primer jugador: si el objetivo no está, fail-closed.
   const pick = summaries.find(s =>
     s.metadata?.platformUserHandle === playerHandle ||
     s.attributes?.platformUserIdentifier === playerHandle
-  ) || summaries[0];
+  ) || null;
+  if (!pick) {
+    const err = new Error(`Jugador "${playerHandle}" no encontrado en la telemetría. Nunca se devuelven métricas de otra persona. Candidatos: ${candidates.slice(0, 10).join(', ')}`);
+    err.code = 'TARGET_NOT_FOUND';
+    throw err;
+  }
   const st = (pick && pick.stats) || {};
-  const val = k => (st[k] && (st[k].value !== undefined ? st[k].value : st[k].displayValue));
+  const raw = k => (st[k] && (st[k].value !== undefined ? st[k].value : st[k].displayValue));
+  const inDomain = (v, min, max) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= min && n <= max ? n : undefined;
+  };
   const observed = {
-    kd: val('kdRatio'), acs: val('scorePerRound'), hs: val('hsAccuracy'),
-    kast: val('kast'), fk: val('firstKills'), fd: val('firstDeaths'),
-    econRating: val('econRating'), winPct: val('roundsWinPct'), clutches: val('clutches')
+    kd: inDomain(raw('kdRatio'), 0, 100),
+    acs: inDomain(raw('scorePerRound'), 0, 1000),
+    hs: inDomain(raw('hsAccuracy') !== undefined ? raw('hsAccuracy') : raw('headshotsPercentage'), 0, 100),
+    kast: inDomain(raw('kast'), 0, 100),
+    fk: inDomain(raw('firstKills'), 0, 1000),
+    fd: inDomain(raw('firstDeaths'), 0, 1000),
+    econRating: inDomain(raw('econRating'), 0, 100),
+    winPct: inDomain(raw('roundsWinPct'), 0, 100),
+    clutches: inDomain(raw('clutches'), 0, 1000)
   };
   const cell = (obj, k) => (obj && obj[k] && (obj[k].value !== undefined ? obj[k].value : obj[k].displayValue));
   const sourceRef = stableRef(matchData, options.originPath);
@@ -319,21 +347,21 @@ function observeMatchTelemetry(matchData, playerHandle, options = {}) {
     const roundRef = s.attributes && s.attributes.round;
     if (!Number.isInteger(roundRef) || roundRef < 1) return;
     if (s.type === 'player-round-damage') {
-      const dmg = Number(cell(s.stats, 'damage'));
-      if (Number.isFinite(dmg) && dmg > 0) {
+      const dmg = inDomain(cell(s.stats, 'damage'), 0, 100000);
+      if (dmg !== undefined && dmg > 0) {
         rounds.push(mintNormalizedEvent({
           sourceRef, roundRef, event: 'damage',
           detail: `dmg ${dmg} (H${cell(s.stats, 'headshots')}/B${cell(s.stats, 'bodyshots')}/L${cell(s.stats, 'legshots')})`,
-          context: { damage: dmg, headshots: Number(cell(s.stats, 'headshots')) || 0, bodyshots: Number(cell(s.stats, 'bodyshots')) || 0, legshots: Number(cell(s.stats, 'legshots')) || 0 }
+          context: { damage: dmg, headshots: inDomain(cell(s.stats, 'headshots'), 0, 100000) || 0, bodyshots: inDomain(cell(s.stats, 'bodyshots'), 0, 100000) || 0, legshots: inDomain(cell(s.stats, 'legshots'), 0, 100000) || 0 }
         }));
       }
     } else if (s.type === 'player-round') {
-      const kills = Number(cell(s.stats, 'kills'));
-      const deaths = Number(cell(s.stats, 'deaths'));
-      const spent = Number(cell(s.stats, 'spentCredits'));
-      if (Number.isFinite(kills) && Number.isFinite(deaths) && (kills > 0 || deaths > 0)) {
+      const kills = inDomain(cell(s.stats, 'kills'), 0, 100);
+      const deaths = inDomain(cell(s.stats, 'deaths'), 0, 100);
+      const spent = inDomain(cell(s.stats, 'spentCredits'), 0, 100000);
+      if (kills !== undefined && deaths !== undefined && (kills > 0 || deaths > 0)) {
         rounds.push(mintNormalizedEvent({ sourceRef, roundRef, event: 'kill', detail: `${kills}K/${deaths}D`, context: { kills, deaths } }));
-      } else if (Number.isFinite(spent) && spent > 0) {
+      } else if (spent !== undefined && spent > 0) {
         rounds.push(mintNormalizedEvent({ sourceRef, roundRef, event: 'economy', detail: `spent ${spent}`, context: { spentCredits: spent } }));
       }
     }
@@ -414,19 +442,39 @@ function observeVerifiedMatch(matchData, playerPuuid, options = {}) {
   }
   const focus = matches[0];
   const stats = (focus && focus.stats) || {};
-  const num = v => (Number.isFinite(Number(v)) ? Number(v) : null);
-  const kills = num(stats.kills);
-  const deaths = num(stats.deaths);
+  // VAL-MATCH-V1: los campos pueden venir como número O como lista de eventos
+  // (p. ej. `damage: [{ damage, headshots, ... }]`, `kills: [...]`). Se derivan
+  // SOLO de campos presentes; lo ausente queda `undefined` (n/d), sin coerciones
+  // ni rellenos.
+  const num = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const sumField = (value, field) => {
+    if (Array.isArray(value)) {
+      const parts = value.map(e => (e && typeof e === 'object' ? num(e[field]) : null)).filter(n => n !== null);
+      return parts.length > 0 ? parts.reduce((a, b) => a + b, 0) : null;
+    }
+    return num(value);
+  };
+  const countOf = value => {
+    if (Array.isArray(value)) return value.length;
+    const n = num(value);
+    return n !== null && Number.isInteger(n) && n >= 0 ? n : null;
+  };
+  const kills = countOf(stats.kills);
+  const deaths = countOf(stats.deaths);
   const score = num(stats.score);
   const roundsPlayed = num(stats.roundsPlayed);
-  const head = num(stats.headshots);
-  const body = num(stats.bodyshots);
-  const leg = num(stats.legshots);
+  const head = sumField(stats.headshots, 'headshots') !== null ? sumField(stats.headshots, 'headshots') : num(stats.headshots);
+  const body = sumField(stats.bodyshots, 'bodyshots') !== null ? sumField(stats.bodyshots, 'bodyshots') : num(stats.bodyshots);
+  const leg = sumField(stats.legshots, 'legshots') !== null ? sumField(stats.legshots, 'legshots') : num(stats.legshots);
   const shots = (head || 0) + (body || 0) + (leg || 0);
   const observed = {
-    kd: (kills !== null && deaths !== null) ? Number((kills / Math.max(1, deaths)).toFixed(2)) : undefined,
-    acs: (score !== null && roundsPlayed) ? Number((score / roundsPlayed).toFixed(1)) : undefined,
-    hs: shots > 0 ? Number(((head / shots) * 100).toFixed(1)) : undefined,
+    kd: (kills !== null && deaths !== null && kills >= 0 && deaths >= 0 && (kills + deaths) > 0)
+      ? Number((kills / Math.max(1, deaths)).toFixed(2))
+      : undefined,
+    acs: (score !== null && score >= 0 && roundsPlayed !== null && roundsPlayed > 0)
+      ? Number((score / roundsPlayed).toFixed(1))
+      : undefined,
+    hs: (shots > 0 && head !== null) ? Number(((head / shots) * 100).toFixed(1)) : undefined,
     kast: undefined, fk: undefined, fd: undefined, econRating: undefined, winPct: undefined, clutches: undefined
   };
   const roundResults = Array.isArray(matchData && matchData.roundResults) ? matchData.roundResults : [];
@@ -436,9 +484,9 @@ function observeVerifiedMatch(matchData, playerPuuid, options = {}) {
     const ps = psList.find(p => p && p.puuid === (focus && focus.puuid)) || null;
     if (!ps) return;
     const roundRef = num(rr.roundNum) !== null ? num(rr.roundNum) + 1 : idx + 1;
-    const dmg = num(ps.damage);
-    const k = num(ps.kills);
-    const d = num(ps.deaths);
+    const dmg = sumField(ps.damage, 'damage') !== null ? sumField(ps.damage, 'damage') : num(ps.damage);
+    const k = countOf(ps.kills);
+    const d = countOf(ps.deaths);
     const spent = num(ps.economy && ps.economy.spent);
     if (dmg !== null && dmg > 0) {
       rounds.push(mintVerifiedEvent({ sourceRef, roundRef, event: 'damage', detail: `dmg ${dmg}`, context: { damage: dmg } }));

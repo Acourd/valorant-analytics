@@ -41,6 +41,26 @@ function loadRiotGolden() {
     trustedKeys: JSON.parse(fs.readFileSync(RIOT_KEYS_PATH, 'utf8'))
   };
 }
+
+// Firma un payload Riot de test con una clave EFÍMERA (sin secretos en fixtures)
+// y deja el trust store apuntando a esa clave para la verificación sellada.
+function signRiotFixture(payload, matchId) {
+  const rs = require(path.join(scriptsDir, 'riot_source.js'));
+  const kp = generateAttestationKeyPair();
+  const pub = kp.publicKey.export({ type: 'spki', format: 'pem' });
+  const core = {
+    v: 1,
+    matchId,
+    host: 'americas.api.riotgames.com',
+    endpoint: rs.matchEndpoint(matchId),
+    fetchedAt: new Date().toISOString(),
+    payloadDigest: rs.payloadDigest(payload)
+  };
+  const sig = crypto.sign(null, Buffer.from(rs.canonicalStringify(core), 'utf8'), kp.privateKey);
+  const attestation = Object.assign({}, core, { signerKeyId: rs.keyIdOf(pub), signature: sig.toString('base64') });
+  writeRiotTrust([pub]);
+  return attestation;
+}
 writeRiotTrust([]);
 writeRiotKey('');
 process.env.RIOT_ATTESTATION_TRUST = RIOT_TRUST_PATH;
@@ -2034,7 +2054,7 @@ check('honestidad: la política exige evidencia válida (rondas/duelos/zonas/por
     };
     const observed = ep.observeMatchTelemetry(rawMatch, 'A#1', { originPath: 'examples/x.json' });
     assert.strictEqual(observed.rounds.length, 1, 'solo la ronda con daño real es evento');
-    assert.strictEqual(observed.sourceRef, 'match:match-abc-123');
+    assert.ok(/^match:match-abc-123#sha256:[0-9a-f]{16}$/.test(observed.sourceRef), 'identidad declarada + hash canónico del contenido');
     const adapted = ep.classifyEvidence(observed);
     assert.strictEqual(adapted.level, 'normalized', 'datos locales son normalized_input, no complete');
     assert.strictEqual(adapted.provenanceStatus, 'normalized_input');
@@ -2302,10 +2322,10 @@ check('fuente Riot: el trust store exige perímetro (0666, propietario, symlink)
 check('contrato: objetivo exacto o fail-closed (sin fallback al primer jugador)',
   () => {
     const { resolveExactHandle } = require(path.join(scriptsDir, 'data_contract.js'));
-    assert.throws(() => resolveExactHandle(['A#1', 'B#2'], 'C#3', { allowFirstIfMissing: false }), /no encontrado/i);
+    assert.throws(() => resolveExactHandle(['A#1', 'B#2'], 'C#3'), /no encontrado/i);
     assert.strictEqual(resolveExactHandle(['A#1', 'B#2'], 'b#2'), 'B#2', 'coincidencia exacta insensible a mayúsculas');
     assert.throws(() => resolveExactHandle(['A#1', 'B#2'], undefined), /Objetivo no especificado/, 'sin objetivo y roster múltiple debe exigir selección');
-    assert.strictEqual(resolveExactHandle(['A#1'], undefined), 'A#1', 'sin ambigüedad (1 jugador) se auto-selecciona');
+    assert.throws(() => resolveExactHandle(['A#1'], undefined), /Objetivo no especificado/, 'sin fallback ni con un solo jugador');
     assert.throws(() => resolveExactHandle([], 'A#1'), /sin jugadores/i);
     // Repro del auditor: jugador inexistente NO analiza a aspas#0001 y sale != 0.
     let code = 0;
@@ -3166,6 +3186,195 @@ check('plan: FK/FD agregado sin contexto temporal no habilita tradeo/aperturas (
     } finally {
       fs.unlinkSync(tmp);
     }
+  });
+
+// ---- Bloque confianza/telemetría/producto honesto (v4.9.0): demo sellado, objetivo exacto, refs, VAL-MATCH-V1, dominios, economía, promesas, entrada mínima ----
+
+check('demo: texto en modo demo se sella y nunca produce normalized_input, acción ni rutina',
+  () => {
+    const demo = parseTextScoreboard('A#1\tIso\tGold 2\t21\t14\t5\t245\t162\t26%', { demo: true });
+    assert.strictEqual(demo.data.metadata.synthetic, true, 'sello interno synthetic');
+    const { sourceProvenance } = require(path.join(scriptsDir, 'data_contract.js'));
+    assert.strictEqual(sourceProvenance(demo.data.metadata), 'synthetic_demo');
+    const profile = evaluateLearningProfile(demo, 'A#1');
+    assert.strictEqual(profile.provenance, 'synthetic_demo');
+    assert.strictEqual(profile.prescripcionInmediata, null, 'demo no prescribe');
+    assert.deepStrictEqual(profile.eloLeaks, []);
+    const routine = generateKovaaksRoutine(demo, 'A#1');
+    assert.strictEqual(routine.omitted, true, 'demo no habilita rutina');
+    assert.ok(/sinté/i.test(routine.provenanceLabel), 'procedencia visible');
+    const synthetic = assembleRawMatchStructure([], 'Ascent', 24, 'A#1', { demo: true });
+    assert.strictEqual(synthetic.data.metadata.synthetic, true, 'constructor directo también sella');
+  });
+
+check('objetivo exacto: APIs locales y verificadas rechazan ausente, vacío, inexistente y duplicado',
+  () => {
+    const ep = require(path.join(scriptsDir, 'evidence_policy.js'));
+    const { resolveExactHandle } = require(path.join(scriptsDir, 'data_contract.js'));
+    assert.throws(() => resolveExactHandle(['A#1'], undefined), e => e.code === 'TARGET_REQUIRED');
+    assert.throws(() => resolveExactHandle(['A#1'], ''), e => e.code === 'TARGET_REQUIRED');
+    assert.throws(() => resolveExactHandle(['A#1', 'B#2'], 'C#3'), e => e.code === 'TARGET_NOT_FOUND');
+    assert.throws(() => resolveExactHandle(['A#1', 'a#1'], 'A#1'), e => e.code === 'TARGET_AMBIGUOUS');
+    assert.throws(() => ep.observeMatchTelemetry(sample, undefined), e => e.code === 'TARGET_REQUIRED');
+    assert.throws(() => ep.observeMatchTelemetry(sample, 'NoExiste#9999'), e => e.code === 'TARGET_NOT_FOUND');
+    const payload = JSON.parse(fs.readFileSync(path.join(__dirname, 'examples', 'riot_match_rounds_anonymized.json'), 'utf8'));
+    const att = signRiotFixture(payload, payload.matchInfo.matchId);
+    try {
+      assert.throws(() => ep.observeVerifiedMatch(payload, '', { attestation: att, maxAgeMs: RIOT_BIG_MAX_AGE }), e => e.code === 'TARGET_REQUIRED');
+      assert.throws(() => ep.observeVerifiedMatch(payload, 'puuid-fantasma', { attestation: att, maxAgeMs: RIOT_BIG_MAX_AGE }), e => e.code === 'TARGET_NOT_FOUND');
+      const dup = JSON.parse(JSON.stringify(payload));
+      dup.players.push(JSON.parse(JSON.stringify(dup.players[0])));
+      const attDup = signRiotFixture(dup, payload.matchInfo.matchId);
+      assert.throws(() => ep.observeVerifiedMatch(dup, 'anon-puuid-focus', { attestation: attDup, maxAgeMs: RIOT_BIG_MAX_AGE }), e => e.code === 'TARGET_AMBIGUOUS');
+    } finally {
+      writeRiotTrust([]);
+    }
+  });
+
+check('referencias locales: identidad + hash canónico (distinto contenido, mismo matchId => distinta ref)',
+  () => {
+    const ep = require(path.join(scriptsDir, 'evidence_policy.js'));
+    const mk = kills => ({ data: { metadata: { matchId: 'same-id' }, segments: [{ type: 'player-summary', metadata: { platformUserHandle: 'A#1' }, stats: { kills: { value: kills } } }] } });
+    const refA = ep.stableRef(mk(10), 'a.json');
+    const refB = ep.stableRef(mk(99), 'b.json');
+    assert.ok(/^match:same-id#sha256:[0-9a-f]{16}$/.test(refA), 'identidad declarada + hash');
+    assert.notStrictEqual(refA, refB, 'mismo matchId con contenido distinto NO comparte ref');
+    const c1 = ep.stableRef({ data: { segments: [{ a: 1, b: 2 }] } }, 'x.json');
+    const c2 = ep.stableRef({ data: { segments: [{ b: 2, a: 1 }] } }, 'x.json');
+    assert.strictEqual(c1, c2, 'orden de claves no altera el hash canónico');
+    const noId = ep.stableRef({ data: { segments: [{ a: 1 }] } }, 'dir/a.json');
+    assert.ok(/^sha256:[0-9a-f]{16}@a\.json$/.test(noId), 'sin matchId usa digest + origen');
+  });
+
+check('VAL-MATCH-V1: listas de damage/kills derivan solo campos presentes; ausentes => n/d',
+  () => {
+    const rs = require(path.join(scriptsDir, 'riot_source.js'));
+    const ep = require(path.join(scriptsDir, 'evidence_policy.js'));
+    const payload = JSON.parse(fs.readFileSync(path.join(__dirname, 'examples', 'riot_match_rounds_anonymized.json'), 'utf8'));
+    assert.strictEqual(rs.validateMatchId(payload.matchInfo.matchId), payload.matchInfo.matchId);
+    const att = signRiotFixture(payload, payload.matchInfo.matchId);
+    try {
+      const obs = ep.observeVerifiedMatch(payload, 'anon-puuid-focus', { attestation: att, maxAgeMs: RIOT_BIG_MAX_AGE });
+      assert.strictEqual(obs.provenance, 'verified_source');
+      assert.strictEqual(obs.observed.kd, 1.67, '15K/9D');
+      assert.strictEqual(obs.observed.acs, 266.7, '3200/12 rondas');
+      assert.strictEqual(obs.observed.hs, 23.1, '3 head de 13 impactos (listas sumadas)');
+      assert.strictEqual(obs.rounds.length, 3, '2 rondas de daño + 1 de economía; ceros no generan evento');
+      const rival = ep.observeVerifiedMatch(payload, 'anon-puuid-rival', { attestation: att, maxAgeMs: RIOT_BIG_MAX_AGE });
+      assert.strictEqual(rival.observed.hs, undefined, 'sin zonas => n/d, no se inventa');
+      assert.strictEqual(rival.observed.kd, 0.79, '11/14 del resumen');
+      const inv = ep.observeVerifiedMatch(payload, 'anon-puuid-invalid', { attestation: att, maxAgeMs: RIOT_BIG_MAX_AGE });
+      assert.strictEqual(inv.observed.kd, undefined, 'kills -5 no habilita KD');
+      assert.strictEqual(inv.observed.acs, undefined, 'score -100 no habilita ACS');
+      assert.strictEqual(inv.observed.hs, undefined, 'headshots -1 no habilita HS');
+      assert.strictEqual(inv.rounds.length, 0, 'sin rondas válidas no hay eventos');
+    } finally {
+      writeRiotTrust([]);
+    }
+  });
+
+check('dominios estrictos: fuera de rango, negativos, no enteros, NaN/Infinity no habilitan nada',
+  () => {
+    const invalid = {
+      data: {
+        metadata: { matchId: 'inv', provenance: 'normalized_input' },
+        segments: [{
+          type: 'player-summary',
+          attributes: { platformUserIdentifier: 'X#1' },
+          metadata: { platformUserHandle: 'X#1' },
+          stats: {
+            headshotsPercentage: { displayValue: '-5%' },
+            kast: { displayValue: '150%' },
+            scorePerRound: { value: -10 },
+            damagePerRound: { value: Number.NaN },
+            firstKills: { value: -3 },
+            firstDeaths: { value: 2.5 },
+            kills: { value: Number.POSITIVE_INFINITY },
+            deaths: { value: 4 }
+          }
+        }]
+      }
+    };
+    const p = evaluateLearningProfile(invalid, 'X#1');
+    assert.ok(Object.values(p.mechanical).every(v => v === null), 'ninguna métrica inválida se convierte en valor');
+    assert.deepStrictEqual(p.pillarsObserved, { precision: false, macro: false, openings: false, economy: false, clutch: false });
+    assert.strictEqual(p.prescripcionInmediata, null);
+    const { buildPlan } = require(path.join(scriptsDir, 'plan.js'));
+    const plan = buildPlan(JSON.parse(JSON.stringify(invalid)), 'X#1');
+    assert.strictEqual(plan.accion, null);
+    assert.strictEqual(plan.rutina, null);
+    // Zonas inválidas en armas no habilitan telemetría de armas.
+    const { analyzeWeaponTelemetry } = require(path.join(scriptsDir, 'weapon_telemetry.js'));
+    const badWeapon = {
+      data: {
+        metadata: { matchId: 'w' },
+        segments: [
+          { type: 'player-summary', attributes: { platformUserIdentifier: 'X#1' }, metadata: { platformUserHandle: 'X#1' }, stats: {} },
+          { type: 'player-round-damage', attributes: { round: 1, platformUserIdentifier: 'X#1' }, metadata: { platformInfo: { platformUserHandle: 'X#1' } }, stats: { damage: { value: 100 }, headshots: { value: -1 }, bodyshots: { value: 2.5 }, legshots: { value: Number.NaN } } }
+        ]
+      }
+    };
+    const w = analyzeWeaponTelemetry(badWeapon, 'X#1');
+    assert.strictEqual(w.zoneMetrics.observed, false, 'segmento inválido no produce zonas');
+    assert.ok(w.invalidSegments >= 1);
+  });
+
+check('economía: ADR/ACS leen { value } y { displayValue }; inválidos => n/d',
+  () => {
+    const { analyzeEconomy } = require(path.join(scriptsDir, 'economy_analyzer.js'));
+    const seg = (tier, stats) => ({ type: 'player-loadout', attributes: { platformUserIdentifier: 'E#1', loadout: tier }, metadata: { platformUserHandle: 'E#1', name: tier }, stats });
+    const match = {
+      data: {
+        metadata: { matchId: 'eco' },
+        segments: [
+          { type: 'player-summary', attributes: { platformUserIdentifier: 'E#1' }, metadata: { platformUserHandle: 'E#1' }, stats: {} },
+          seg('Full-Buy', { roundsPlayed: { value: 10 }, roundsWon: { value: 6 }, roundsLost: { value: 4 }, damagePerRound: { value: 210 }, scorePerRound: { value: 230 } }),
+          seg('Eco', { roundsPlayed: { value: 5 }, roundsWon: { value: 1 }, roundsLost: { value: 4 }, damagePerRound: { displayValue: '95.5' }, scorePerRound: { displayValue: '120' } }),
+          seg('Semi-Buy', { roundsPlayed: { value: 2 }, roundsWon: { value: 1 }, roundsLost: { value: 1 }, damagePerRound: { value: -50 }, scorePerRound: { value: Number.NaN } })
+        ]
+      }
+    };
+    const eco = analyzeEconomy(match, 'E#1');
+    const byTier = Object.fromEntries(eco.tiers.map(t => [t.tier, t]));
+    assert.strictEqual(byTier['Full-Buy'].adr, '210', '{ value } leído como ADR');
+    assert.strictEqual(byTier['Full-Buy'].acs, '230', '{ value } leído como ACS');
+    assert.strictEqual(byTier['Eco'].adr, '95.5', 'displayValue conservado');
+    assert.strictEqual(byTier['Eco'].acs, '120');
+    assert.strictEqual(byTier['Semi-Buy'].adr, null, 'negativo => n/d');
+    assert.strictEqual(byTier['Semi-Buy'].acs, null, 'NaN => n/d');
+  });
+
+check('documentación: sin promesas de distancia/trade/OCR y con entrada mínima explícita',
+  () => {
+    const files = ['README.md', 'README.es.md', 'README.en.md', 'SKILL.md', 'standalone_prompt.md'];
+    const forbidden = [
+      '3 Bandas de Distancia',
+      '3 Distance Bands',
+      'Ventanas de Re-frag',
+      'Re-frag Windows',
+      'OCR de capturas de pantalla de marcadores',
+      'OCR visual scoreboard parsing',
+      'distance tiers (Close 0-15m',
+      'Mide tiempos de tradeo (<2s)',
+      'Measures trade windows (<2s)'
+    ];
+    for (const file of files) {
+      const text = fs.readFileSync(path.join(__dirname, file), 'utf8');
+      for (const bad of forbidden) {
+        assert.ok(!text.includes(bad), `${file} conserva la promesa: "${bad}"`);
+      }
+    }
+    const es = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8');
+    assert.ok(/Entrada mínima útil/.test(es), 'README declara la entrada mínima');
+    assert.ok(/eventos por ronda/i.test(es) && /Riot RSO/.test(es), 'separa niveles texto/eventos/verificada');
+    const en = fs.readFileSync(path.join(__dirname, 'README.en.md'), 'utf8');
+    assert.ok(/Minimum useful input/.test(en), 'EN README declara minimum input');
+    const skill = fs.readFileSync(path.join(__dirname, 'SKILL.md'), 'utf8');
+    assert.ok(/Entrada mínima/.test(skill), 'SKILL declara entrada mínima');
+    const { buildPlan } = require(path.join(scriptsDir, 'plan.js'));
+    const plan = buildPlan(parseTextScoreboard('Focus#NA1\t10\t8\t2\t150\t120'), 'Focus#NA1');
+    assert.ok(plan.entrada_minima && plan.entrada_minima.texto_marcador && plan.entrada_minima.eventos_por_ronda && plan.entrada_minima.fuente_verificada, 'plan expone entrada mínima por niveles');
+    assert.ok(typeof plan.siguiente_dato.dato === 'string' && plan.siguiente_dato.dato.length > 0, 'siguiente dato accionable');
   });
 
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben

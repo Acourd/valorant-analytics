@@ -33,18 +33,16 @@ function normalizeHandleKey(handle) {
 }
 
 /**
- * Resolución EXACTA de objetivo.
- * Sin objetivo explícito: solo se auto-selecciona si el roster tiene UN único
- * jugador (no hay elección posible). Con 2+ jugadores exige el Riot ID exacto
- * y devuelve la lista de candidatos en el error (elección confirmable).
+ * Resolución EXACTA de objetivo. SIN fallbacks: un objetivo ausente/vacío es
+ * `TARGET_REQUIRED`, un handle inexistente es `TARGET_NOT_FOUND` y un handle
+ * duplicado es `TARGET_AMBIGUOUS`. Ninguna función puede devolver métricas de
+ * otra persona.
  * @param {string[]} handles  Riot IDs disponibles en la telemetría.
  * @param {string} requested  Riot ID pedido (Nombre#TAG).
- * @param {{allowFirstIfMissing?:boolean}} [options]
  * @returns {string} handle exacto
  * @throws TARGET_NOT_FOUND | TARGET_AMBIGUOUS | TARGET_REQUIRED | ROSTER_EMPTY
  */
-function resolveExactHandle(handles, requested, options = {}) {
-  const allowFirstIfMissing = options.allowFirstIfMissing === true;
+function resolveExactHandle(handles, requested) {
   const keys = (Array.isArray(handles) ? handles : []).filter(h => typeof h === 'string' && h.trim().length > 0);
   if (keys.length === 0) {
     const err = new Error('Telemetría sin jugadores válidos: no hay objetivo que analizar.');
@@ -53,10 +51,7 @@ function resolveExactHandle(handles, requested, options = {}) {
   }
   const wanted = String(requested === undefined || requested === null ? '' : requested).trim();
   if (wanted.length === 0) {
-    // Auto-selección SOLO si no hay ambigüedad (un único jugador).
-    if (keys.length === 1) return keys[0];
-    if (allowFirstIfMissing) return keys[0];
-    const err = new Error(`Objetivo no especificado: la partida contiene ${keys.length} jugadores. Indica el Riot ID exacto (Nombre#TAG). Candidatos: ${keys.slice(0, 10).join(', ')}`);
+    const err = new Error(`Objetivo no especificado: indica el Riot ID exacto (Nombre#TAG). Candidatos: ${keys.slice(0, 10).join(', ')}`);
     err.code = 'TARGET_REQUIRED';
     throw err;
   }
@@ -116,6 +111,30 @@ function observedNumber(stats, keys) {
 }
 
 /**
+ * Lee un número OBSERVADO dentro de un DOMINIO estricto. Fuera de rango, no
+ * entero donde se exige, NaN o Infinity => null (n/d). Un dato inválido jamás
+ * habilita análisis.
+ */
+function observedInDomain(stats, keys, domain = {}) {
+  const n = observedNumber(stats, keys);
+  if (n === null) return null;
+  if (domain.integer === true && !Number.isInteger(n)) return null;
+  if (domain.min !== undefined && n < domain.min) return null;
+  if (domain.max !== undefined && n > domain.max) return null;
+  return n;
+}
+
+/** Cuenta observada (entero >= 0) o null. */
+function observedCount(stats, keys) {
+  return observedInDomain(stats, keys, { integer: true, min: 0 });
+}
+
+/** Porcentaje observado (0–100) o null. */
+function observedPercent(stats, keys) {
+  return observedInDomain(stats, keys, { min: 0, max: 100 });
+}
+
+/**
  * Detecta contexto temporal/posicional/trade OBSERVADO en los segmentos.
  * Sin timestamps, posiciones o marcas de trade, queda PROHIBIDO emitir reglas
  * de timing/tradeo/posicionamiento (aperturas incluidas).
@@ -144,5 +163,8 @@ module.exports = {
   provenanceLabel,
   mayAssertCauses,
   observedNumber,
+  observedInDomain,
+  observedCount,
+  observedPercent,
   detectTemporalContext
 };

@@ -1,6 +1,6 @@
 ---
 name: valorant-analytics
-description: Advanced Valorant competitive match telemetry, player performance profiling, heuristic MMR-signal analysis (unverified hypothesis, not internal MMR), tactical duel analysis, round economy breakdown, adaptive 15-minute Kovaaks aim routine generation, 360° autodiagnostic radar, and duo synergy auditing from user-provided JSON, scoreboard text or screenshots (no automated Tracker fetching).
+description: Advanced Valorant competitive match telemetry, player performance profiling, heuristic MMR-signal analysis (unverified hypothesis, not internal MMR), tactical duel analysis, round economy breakdown, adaptive 15-minute Kovaaks aim routine generation, 360° autodiagnostic radar, and duo synergy auditing from user-provided JSON or scoreboard text (no automated Tracker fetching; screenshot OCR not implemented).
 ---
 
 # Valorant Analytics Skill (v2.0)
@@ -15,14 +15,14 @@ description: Advanced Valorant competitive match telemetry, player performance p
 
 Activate this skill whenever the user asks to:
 1. **Generate a 360° autodiagnostic learning profile** to detect personal ELO leaks and receive immediate training prescriptions.
-2. **Audit duo or teammate synergy** (re-frag efficiency, carry load differential, role compatibility).
+2. **Audit duo or teammate synergy** (aggregate kill balance, carry load differential, role compatibility; no timing windows without observed temporal events).
 3. **Analyze a user-provided match JSON/export or pasted scoreboard text.**
 4. **Evaluate a player profile from a JSON/export the user provides.**
 5. **Compare duo/teammate performance, agent suitability, or role impact** (e.g. Iso vs. Clove vs. Reyna vs. Jett).
 6. **Flag possible signs of internal MMR anchoring ("MMR Drag") from aggregate stats as an unverified heuristic** (never as a proven fact), alongside lobby matchmaking disparities.
 7. **Break down round economy performance** (Pistol, Eco, Semi-Buy, Full Buy conversion rates).
 8. **Generate adaptive 15-minute Kovaaks routines & provide visual YouTube/TikTok tutorials** tailored to the specific mechanical failures of the match.
-9. **Deep weapon telemetry & distance-band efficiency** (Close 0-15m, Mid 15-30m, Long 30-50m, Head/Body/Leg distribution, and Spray vs. Tap SE/TP ratio).
+9. **Weapon telemetry from observed zones** (Head/Body/Leg distribution and Spray vs. Tap SE/TP ratio; distance is n/d without positions — never inferred).
 10. **Zero-Cloud Instant Offline Coaching Mode** for private profiles, offline environments, or instantaneous skill benchmarking without external API calls.
 
 ---
@@ -38,10 +38,10 @@ node cli.js plan <partida_o_texto> "Nombre#TAG"
 # 1. 360° Autodiagnostic Radar & ELO Leaks:
 node cli.js match <match_id_or_json> [player_handle]
 
-# 2. Weapon Precision & Distance Band Telemetry:
+# 2. Weapon Precision & Observed-Zone Telemetry:
 node cli.js weapons <match_id_or_json> [player_handle]
 
-# 3. Duo Synergy & Re-fragging Audit:
+# 3. Duo Synergy Audit (aggregates only):
 node cli.js duo <match_id_or_json> <player1> <player2>
 
 # 4. Adaptive 15-Minute Kovaaks Routine:
@@ -81,17 +81,17 @@ node .agents/skills/valorant-analytics/scripts/learning_profile.js <match_id_or_
 * Generates a 5-pillar skill radar (Precision, Macro, Opening Duels, Economy, Clutch).
 * Pinpoints the 3 root-cause **ELO Leaks** of the match and prescribes an immediate 15-minute training rule.
 
-### 2. Weapon & Distance-Band Telemetry Engine
+### 2. Weapon & Observed-Zone Telemetry Engine
 ```powershell
 node .agents/skills/valorant-analytics/scripts/weapon_telemetry.js <match_id_or_json_file> [target_player_handle]
 ```
-* Reconstructs damage zones (Head/Body/Leg %), categorizes engagements into distance tiers (Close 0-15m, Mid 15-30m, Long 30-50m), computes Spray vs. Tap SE/TP efficiency ratio, and outputs biomechanical Kovaaks adjustments.
+* Reconstructs damage zones (Head/Body/Leg %) from observed damage events and computes the Spray vs. Tap SE/TP ratio. Distance requires observed positions: otherwise it is reported as n/d and never inferred.
 
 ### 3. Duo Compatibility & Team Synergy Auditor
 ```powershell
 node .agents/skills/valorant-analytics/scripts/duo_synergy.js <match_id_or_json_file> <player1_handle> <player2_handle>
 ```
-* Audits premade synergies, trade rates, and carry load differentials between two players.
+* Audits premade synergies and carry load differentials from aggregates. It does not measure trade timing without observed temporal context events.
 
 ### 4. Provided Match JSON/Scoreboard Parsing (offline, no network)
 ```powershell
@@ -149,3 +149,4 @@ node .agents/skills/valorant-analytics/scripts/coaching_engine.js <match_id_or_j
 * **Zero-npm Runtime:** Relies purely on Node.js standard libraries and native OS `curl`.
 * **Cross-OS Compatibility:** Windows 10/11 (PowerShell/CMD), macOS (zsh), and Linux (bash).
 * **Multi-User / Any Player:** Works for any Riot ID, player tag, party, match ID, or region.
+> **Entrada mínima:** el flujo `plan` acepta (1) texto/marcador o JSON/export para observaciones y una acción mecánica si cruza umbral, (2) eventos por ronda para zonas y spray/tap, y (3) fuente Riot verificada (pendiente de credenciales) para causas atribuibles. Si la entrada no alcanza, el plan indica el siguiente dato concreto.

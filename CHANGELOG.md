@@ -1,5 +1,17 @@
 # Changelog — valorant-analytics
 
+## 4.9.0 — Confianza, telemetría y producto honesto
+
+- **A1 Demo sellado:** `parseTextScoreboard(..., {demo:true})` y `assembleRawMatchStructure` marcan `synthetic: true` internamente (aunque se llamen directos). Los datos sintéticos no habilitan acción, rutina, medición, causa, fuga, rango ni MMR; `learning_profile` no prescribe, `routine_contract` omite rutinas y `duo` responde `SIMULACION_DEMO`. Ninguna etiqueta llama "observada"/`normalized_input` a una métrica sintética.
+- **A2 Objetivo exacto sin fallbacks:** eliminado `allowFirstIfMissing`; ausente/vacío → `TARGET_REQUIRED`, inexistente → `TARGET_NOT_FOUND`, duplicado → `TARGET_AMBIGUOUS`. `observeMatchTelemetry` tampoco cae al primer jugador.
+- **A3 Referencias locales:** `sourceRef` = identidad declarada + hash canónico del contenido (`match:<id>#sha256:<hash>`); dos contenidos con el mismo `matchId` no comparten ref y el orden de claves no altera el hash.
+- **B4 VAL-MATCH-V1:** el adaptador verificado procesa listas de `damage`/`kills`/`playerStats` sumando solo campos presentes; lo ausente queda `undefined` (n/d). Nuevo fixture anonimizado `examples/riot_match_rounds_anonymized.json` (sin secretos; atestación efímera en test).
+- **B5 Dominios estrictos:** HS/KAST fuera de 0–100, ACS/ADR negativos o fuera de rango, conteos negativos/no enteros, NaN e Infinity se descartan (`null`); un dato inválido no habilita radar, plan, acción, rutina, economía, dúo, consenso ni coaching.
+- **B6 Economía:** ADR/ACS se leen correctamente desde `{ value }` y `{ displayValue }`; valores inválidos → `null` (sin ceros ni fallbacks).
+- **C7 Promesas retiradas/reformuladas:** fuera "3 bandas de distancia", "ventanas de re-frag/tradeo (<2s)", "OCR de capturas" y distancia inferida en README×3, SKILL y prompt; se declara explícitamente que la distancia es n/d sin posiciones y que el OCR no está implementado.
+- **C8 Entrada mínima:** nueva sección en los tres READMEs + SKILL y campo `entrada_minima` en `plan` (texto/marcador; eventos por ronda; fuente verificada). Si la entrada no alcanza, el plan indica el siguiente dato concreto.
+- Regresiones `tests #167`–`#173` + propiedades de dominio (173/173 checks). Versión 4.9.0.
+
 ## 4.8.2 — FK/FD agregado no habilita tradeo/aperturas sin contexto temporal
 
 - **Corregido (HIGH):** `plan` generaba acción/rutina de apertura ("no entrar solo", "confirmar el tradeo") a partir de FK/FD agregado, sin rondas, timestamps, posiciones ni marcas de trade — contradiciendo su propio límite.

@@ -11,7 +11,7 @@ const fs = require('fs');
 const { extractMatchId, fetchMatch } = require('./fetch_match');
 const { parseDuels } = require('./duel_matrix');
 const { analyzeEconomy } = require('./economy_analyzer');
-const { resolveExactHandle, sourceProvenance, provenanceLabel, mayAssertCauses, observedNumber, detectTemporalContext } = require('./data_contract');
+const { resolveExactHandle, sourceProvenance, provenanceLabel, mayAssertCauses, observedNumber, observedInDomain, observedCount, observedPercent, detectTemporalContext } = require('./data_contract');
 const { THRESHOLDS } = require('./routine_contract');
 
 function evaluateLearningProfile(matchData, targetHandle) {
@@ -44,21 +44,26 @@ function evaluateLearningProfile(matchData, targetHandle) {
   }
   const st = p.stats;
 
-  // Métricas OBSERVADAS (null cuando no existen; jamás defaults plausibles).
+  // Métricas OBSERVADAS con DOMINIOS estrictos (null cuando no existen o el
+  // valor es inválido: fuera de rango, no entero, NaN o Infinity). Un dato
+  // inválido jamás habilita radar, rutina ni conclusiones.
+  const killsCount = observedCount(st, ['kills']);
+  const deathsCount = observedCount(st, ['deaths']);
+  const kdDirect = observedInDomain(st, ['kdRatio'], { min: 0, max: 100 });
   const mechanical = {
-    hsPct: observedNumber(st, ['hsAccuracy', 'headshotsPercentage']),
-    kd: observedNumber(st, ['kdRatio']) !== null
-      ? observedNumber(st, ['kdRatio'])
-      : ((observedNumber(st, ['kills']) !== null && observedNumber(st, ['deaths']) !== null)
-        ? Number((observedNumber(st, ['kills']) / Math.max(1, observedNumber(st, ['deaths']))).toFixed(2))
+    hsPct: observedPercent(st, ['hsAccuracy', 'headshotsPercentage']),
+    kd: kdDirect !== null
+      ? kdDirect
+      : ((killsCount !== null && deathsCount !== null && (killsCount + deathsCount) > 0)
+        ? Number((killsCount / Math.max(1, deathsCount)).toFixed(2))
         : null),
-    fk: observedNumber(st, ['firstKills']),
-    fd: observedNumber(st, ['firstDeaths']),
-    acs: observedNumber(st, ['scorePerRound']),
-    adr: observedNumber(st, ['damagePerRound']),
-    kast: observedNumber(st, ['kast']),
-    clutches: observedNumber(st, ['clutches']),
-    multikills3k: observedNumber(st, ['kills3K'])
+    fk: observedCount(st, ['firstKills']),
+    fd: observedCount(st, ['firstDeaths']),
+    acs: observedInDomain(st, ['scorePerRound'], { min: 0, max: 2000 }),
+    adr: observedInDomain(st, ['damagePerRound'], { min: 0, max: 2000 }),
+    kast: observedPercent(st, ['kast']),
+    clutches: observedCount(st, ['clutches']),
+    multikills3k: observedCount(st, ['kills3K'])
   };
   const unknownNames = { hsPct: 'headshot%', kd: 'kd', acs: 'acs', adr: 'adr', kast: 'kast', fk: 'firstKills', fd: 'firstDeaths', clutches: 'clutches' };
   const unknowns = Object.keys(unknownNames).filter(k => mechanical[k] === null).map(k => unknownNames[k]);
@@ -154,12 +159,14 @@ function evaluateLearningProfile(matchData, targetHandle) {
   // timestamps/posición/trade observados.
   const hsThreshold = THRESHOLDS.HS_LOW.value;
   const hsObserved = mechanical.hsPct !== null;
+  const synthetic = provenance === 'synthetic_demo';
   const hsBelow = hsObserved && mechanical.hsPct < hsThreshold;
   const temporalContext = detectTemporalContext(matchData);
   const limitacion = temporalContext.sufficient
     ? `Contexto temporal parcial detectado (${Object.keys(temporalContext).filter(k => temporalContext[k]).join('/')}): este contrato todavía no deriva reglas de tradeo verificadas.`
     : 'Sin timestamps/posición/trade observados: se omite toda regla de timing/tradeo; solo rutina mecánica vinculada a HS% y su umbral.';
-  const prescripcionInmediata = hsObserved ? {
+  // Los datos sintéticos no habilitan ninguna prescripción.
+  const prescripcionInmediata = (hsObserved && !synthetic) ? {
     tipo: hsBelow ? 'correctiva' : 'sin_debilidad',
     estado: hsBelow ? 'debilidad_cubierta' : 'sin_debilidad',
     metrica: `HS% observado (${Number(mechanical.hsPct.toFixed(1))}%)`,

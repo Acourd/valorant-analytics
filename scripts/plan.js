@@ -193,6 +193,12 @@ function buildPlan(matchData, targetHandle) {
       : null,
     estado: esSimulacion ? 'SIMULACION_DEMO' : (accion ? 'ACCION_DISPONIBLE' : 'RECOLECCION_REQUERIDA'),
     observado,
+    // Guía estable de entrada mínima: qué se obtiene con cada nivel de datos.
+    entrada_minima: {
+      texto_marcador: 'Funciones y K/D/A, ACS, ADR y HS% si tu marcador los muestra (habilita observación y, con umbral, una acción mecánica).',
+      eventos_por_ronda: 'Segmentos player-round / player-round-damage (habilita zonas head/body/leg y ratio spray/tap); el tradeo exige además marcas de trade, posición o timestamp.',
+      fuente_verificada: 'Riot RSO con atestación (pendiente de credenciales): única vía que podría habilitar causas/fugas atribuibles.'
+    },
     no_se_puede_saber: { limites, faltantes },
     accion,
     rutina: routine ? Object.assign({}, routine, {

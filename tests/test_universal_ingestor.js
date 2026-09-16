@@ -125,13 +125,13 @@ assert.strictEqual(validateLearningProfile(profile), true);
 assert.strictEqual(validateRadar(profile.radar), true);
 console.log(`   ✓ Radar 360° verificado: Mecánica=${profile.radar.precisionMecanica}, Macro=${profile.radar.macrogamePosicionamiento}, Apertura=${profile.radar.duelosDeApertura}, Economía=${profile.radar.disciplinaEconomica}, Clutch=${profile.radar.composturaClutch}`);
 
-// 6. Rutina Kovaaks
-console.log('6. Generando prescripción Kovaaks adaptativa...');
+// 6. Rutina Kovaaks (los datos sintéticos NO habilitan rutinas)
+console.log('6. Verificando que el demo sintético no habilita rutinas...');
 const kovaaks = generateKovaaksRoutine(parsedMatch, 'Chronicle#0001');
-assert.strictEqual(kovaaks.omitted, false, 'Con HS observado bajo umbral debe generar rutina');
-assert.ok(kovaaks.routine.length >= 1, 'Debe constar de al menos 1 bloque fundamentado');
-assert.ok(/normali/i.test(kovaaks.provenanceLabel), 'Procedencia visible en la rutina');
-console.log('   ✓ Prescripción Kovaaks de 15 minutos generada con éxito.');
+assert.strictEqual(kovaaks.omitted, true, 'el demo sintético nunca habilita rutina');
+assert.ok(/sintética/i.test(kovaaks.omittedReason), 'motivo de procedencia sintética');
+assert.strictEqual(kovaaks.routine.length, 0);
+console.log('   ✓ Procedencia sintética bloquea rutinas (sin falsos entrenamientos).');
 
 // 7. Resiliencia Táctica: fail-closed por defecto, sintético solo con allowSynthetic explícito
 console.log('7. Probando resolveMatchDataResilient ante bloqueo WAF (fail-closed + modo demo)...');

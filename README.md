@@ -4,10 +4,10 @@
 
 ### Telemetría Competitiva Local · Diagnóstico Descriptivo 360° · Motor de Puntería Adaptativo
 
-[![Versión](https://img.shields.io/badge/versión-4.8.2_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
+[![Versión](https://img.shields.io/badge/versión-4.9.0_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
 [![Runtime](https://img.shields.io/badge/runtime-Node.js_18%2B_Nativo-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Dependencias](https://img.shields.io/badge/dependencias-0_npm_(Core)-38BDF8.svg?style=for-the-badge&logo=codeforces&logoColor=white)](package.json)
-[![Pruebas](https://img.shields.io/badge/tests-166%2F166_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
+[![Pruebas](https://img.shields.io/badge/tests-173%2F173_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
 [![Auditoría](https://img.shields.io/badge/auditoría-15%2F15_propiedades_PASS-8B5CF6.svg?style=for-the-badge&logo=codereview&logoColor=white)](opencode_tester.js)
 [![Licencia](https://img.shields.io/badge/licencia-MIT-6B7280.svg?style=for-the-badge)](LICENSE)
 
@@ -29,11 +29,11 @@ La mayoría de rastreadores web públicos solo suman cifras acumuladas al final 
 | Dimensión Analítica | Rastreadores Públicos | Motor Valorant Analytics | Impacto Directo en tu Rango |
 | :--- | :---: | :---: | :--- |
 | **Bajas de Impacto Real** | 🔴 K/D plano sin contexto | 🟢 **ADR útil + Ratio $FK/FD$** | Diferencia bajas clave de apertura de rondas basura en desventajas 1v4 ya perdidas. |
-| **Mecánica de Disparo** | 🔴 % Headshot global | 🟢 **Ratio $SE/TP$ & 3 Bandas de Distancia** | Detecta sobre-spray prolongado a más de 25m y estabiliza el primer impacto (1-tap). |
-| **Sinergia en Pareja** | 🔴 Inexistente | 🟢 **Auditoría de Dúo & Ventanas de Re-frag** | Mide tiempos de tradeo (<2s) y balance de carga para evitar jugar dos 1v1 aislados. |
+| **Mecánica de Disparo** | 🔴 % Headshot global | 🟢 **Ratio $SE/TP$ (zonas observadas)** | Mide sobre-spray con zonas observadas; la distancia es n/d sin posiciones (no se infiere). |
+| **Sinergia en Pareja** | 🔴 Inexistente | 🟢 **Auditoría de Dúo (agregados)** | Describe balance de bajas y carga; NO mide ventanas de tradeo sin eventos con contexto temporal. |
 | **Economía de Rondas** | 🔴 Total gastado global | 🟢 **Conversión por Buy-Tiers (Eco/Semi/Full)** | Identifica si estás regalando rondas clave tras ganar pistolas o en compras completas. |
 | **Salud de Cuenta** | 🔴 Solo rango visual | 🟡 **Señal heurística de MMR & estimación de rango** | Plantea una HIPÓTESIS (no verificada) de posible anclaje y una estimación orientativa de rango. No mide el MMR interno de Riot ni el talento real. |
-| **Entrada de datos** | 🔴 Cosecha de caché / Tracker | 🟢 **JSON, texto o captura aportados por ti** | Sin cosecha de caché ni descarga automática: la entrada la aportas explícitamente; la vía autorizada (Riot RSO) está pendiente de credenciales. |
+| **Entrada de datos** | 🔴 Cosecha de caché / Tracker | 🟢 **JSON/export o texto aportados por ti** | Sin cosecha de caché ni descarga automática: la entrada la aportas explícitamente; la vía autorizada (Riot RSO) está pendiente de credenciales. |
 
 ---
 
@@ -81,11 +81,11 @@ flowchart TD
 Diseñado para adaptarse a cualquier flujo de trabajo sin fricciones:
 
 ### 🔹 Opción 1: Modo Directo sin Terminal (Vía Asistente Web o Gem)
-> **Ideal si buscas un análisis conversacional inmediato subiendo una captura de pantalla.**
+> **Ideal si buscas un análisis conversacional inmediato desde un JSON/export o el texto de tu marcador (OCR de capturas: no implementado).**
 
 1. Abre la especificación lista para usar: 👉 [**`standalone_prompt.md`**](standalone_prompt.md)
 2. Copia todo su contenido y pégalo en tu asistente de IA favorito (**ChatGPT, Claude, Gemini o DeepSeek-R1**), o configúralo como un **Gem de Google Gemini** o **Custom GPT de OpenAI**.
-3. Pega el texto de tu marcador o adjunta una captura para confirmar los campos (la obtención automática desde Tracker no está soportada).
+3. Pega el texto de tu marcador o aporta un JSON/export (OCR de capturas NO implementado; Tracker no soportado).
 
 ### ⚡ Opción 2: Modo Local en Terminal (Despachador Maestro `cli.js`)
 > **Ideal para jugadores competitivos que buscan velocidad (<100ms) y análisis 100% local. No hay descarga automática de Tracker ni cosecha de caché: aportas un JSON/export, el texto de tu marcador o una captura (con confirmación).**
@@ -140,7 +140,7 @@ Ejemplo ilustrativo (fixture local; no es telemetría real ni una salida validad
        Causa:     Búsqueda agresiva de la baja final en lugar de cruzar fuego.
        Ajuste:    Jugar esquinas cerradas y consumir el reloj del defensor.
 
-  [#2] Ráfagas prolongadas a más de 30 metros (Rondas 11 y 18)
+  [#2] Ráfagas prolongadas en rondas observadas (ejemplo ilustrativo; distancia n/d sin posiciones)
        Situación: Duelos largos contra Vandal rival en A Principal.
        Causa:     Ratio de spray elevado (SE/TP > 1.8) con dispersión excesiva.
        Ajuste:    Ráfagas cortas de 2 balas con desplazamiento lateral (counter-strafe).
@@ -166,10 +166,10 @@ El despachador maestro `cli.js` provee acceso unificado a todas las capacidades 
 | :--- | :--- | :--- |
 | **Diagnóstico 360°** | `node cli.js match [partida.json] <jugador>` | Evalúa los 5 pilares de rendimiento y extrae las 3 fugas críticas de ELO. |
 | **Rutina de Puntería** | `node cli.js aim [partida.json] <jugador>` | Genera una playlist adaptativa de 15 minutos en KovaaK's / Aim Lab. |
-| **Telemetría de Armas** | `node cli.js weapons [partida.json] <jugador>` | Mide zonas (Head/Body/Leg), ratio SE/TP y 3 bandas de distancia (0-15m, 15-30m, 30-50m). |
+| **Telemetría de Armas** | `node cli.js weapons [partida.json] <jugador>` | Mide zonas observadas (Head/Body/Leg) y ratio SE/TP; la distancia es n/d: no se infiere sin posiciones. |
 | **Economía & Buy Tiers**| `node cli.js economy [partida.json] <jugador>` | Desglosa winrate, K/D y ADR en rondas Pistol, Eco, Semi-Buy y Full-Buy. |
 | **Coaching Introspectivo**| `node cli.js coaching [partida.json] <jugador>` | Identifica duelos de máxima fricción y prescribe recursos tácticos de YouTube. |
-| **Auditoría de Dúo** | `node cli.js duo [partida.json] [p1] [p2]` | Evalúa ventanas de tradeo, balance de bajas y detecta candidatos a boost. |
+| **Auditoría de Dúo** | `node cli.js duo [partida.json] [p1] [p2]` | Describe balance de bajas y carga (sin ventanas de timing; heurística de boost no validada). |
 | **Matriz de Duelos 1v1** | `node cli.js duels [partida.json] [jugador]` | Desglosa los duelos directos cara a cara contra cada agente rival. |
 | **Simulación Offline** | `node cli.js calibrate [jugador] [rango] [rol]` | SIMULACIÓN con valores ilustrativos (sin datos del jugador ni telemetría real). |
 | **Auditoría de Carrera** | `node cli.js career <perfil.json>` | Desglosa horas competitivas vs casuales y cronología de hitos por rango. |
@@ -185,12 +185,25 @@ El despachador maestro `cli.js` provee acceso unificado a todas las capacidades 
 
 ---
 
+## 📥 Entrada mínima útil (qué puedes aportar)
+
+No necesitas telemetría imposible. El flujo `plan` funciona por niveles:
+
+| Nivel | Qué aportas | Qué habilita |
+|---|---|---|
+| 1. Texto/marcador | Pegas el texto del marcador o un JSON/export con funciones y K/D/A, ACS, ADR y HS% | Observaciones descriptivas y, si una métrica cruza su umbral documentado, **una** acción mecánica con su rutina |
+| 2. Eventos por ronda | Segmentos `player-round` / `player-round-damage` | Zonas head/body/leg y ratio spray/tap observados. El tradeo/aperturas requieren además marcas de trade, posición o timestamp |
+| 3. Fuente verificada | Riot RSO con atestación (credenciales pendientes) | Única vía que podría habilitar causas/fugas atribuibles; hoy no disponible |
+
+Si tu entrada no alcanza, `plan` no falla de forma genérica: indica el **siguiente dato más pequeño y concreto** (p. ej. "HS% del marcador" o "eventos de ronda con marcas de trade").
+
+
 ## ◈ Soporte para Gemini Gems y Custom GPTs
 
 Si utilizas **Google Gemini (Gems)** o **OpenAI (Custom GPTs)**, el archivo [`standalone_prompt.md`](standalone_prompt.md) ha sido completamente optimizado con:
 
 - **Instrucciones de Sistema (System Prompt)** estructuradas con tags XML (`<system_role>`, `<vision_and_input_protocol>`, `<output_specification>`, etc.) con rigor matemático y guardas anti-alucinación.
-- **Protocolo de Ingesta Multi-Formato:** Diseñado específicamente para OCR de capturas de pantalla de marcadores, texto plano y resúmenes manuales.
+- **Protocolo de Ingesta Multi-Formato:** Diseñado para JSON/export aportado por ti, texto plano pegado o archivos existentes; OCR de capturas NO implementado.
 - **Iniciadores de Conversación Listos para Usar:** 4 botones pre-configurados para diagnósticos de partida, sinergia de dúo, rutinas KovaaK's y señal heurística de MMR.
 - **Formato Visual Deterministico:** Salida con barras ASCII de progreso (`[████████░░]`), matrices limpias de datos y bifurcaciones de coaching interactivo.
 
@@ -204,7 +217,7 @@ Si utilizas **Google Gemini (Gems)** o **OpenAI (Custom GPTs)**, el archivo [`st
 - **Sin red por defecto:** el análisis es local. No se cosecha la caché del navegador ni se consulta Tracker.gg. La entrada es un JSON/export, texto o captura que aportas explícitamente.
 - **Zero Dependencias NPM:** Diseñado exclusivamente sobre las librerías estándar de Node.js (`fs`, `path`, `zlib`, `crypto`, `child_process`). Cero descargas externas.
 - **Compatibilidad Multiplataforma:** Probado y garantizado en Windows 11 (PowerShell/CMD), macOS (zsh) y Linux (bash).
-- **Garantía Determinista:** 166 pruebas automatizadas y suites modulares verificadas con Exit Code 0 (`node run_all_tests.js`) y auditoría semántica de propiedades fail-closed, sin puntuación promocional (`node opencode_tester.js`).
+- **Garantía Determinista:** 173 pruebas automatizadas y suites modulares verificadas con Exit Code 0 (`node run_all_tests.js`) y auditoría semántica de propiedades fail-closed, sin puntuación promocional (`node opencode_tester.js`).
 - **Contrato CLI:** salida humana y `--json`; códigos `0`/`1`/`2` documentados (resultado válido / entrada inválida / evidencia insuficiente); ningún comando selecciona un jugador en silencio.
 
 ---

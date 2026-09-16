@@ -46,15 +46,23 @@ function analyzeWeaponTelemetry(matchData, targetHandle) {
   let totalDamage = 0;
   let sprayInstances = 0; // multi-hit body shots (>= 3 body hits in a single exchange)
   let precisionTaps = 0;  // 1-2 hit lethal exchanges with headshots
+  let invalidSegments = 0;
+
+  // Conteos estrictos: enteros >= 0 y finitos; un valor inválido invalida el
+  // segmento entero (jamás se convierte en 0 por coerción).
+  const count = v => (typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v) && v >= 0 ? v : null);
 
   damageSegments.forEach(d => {
     const st = d.stats || {};
-    totalHead += st.headshots?.value || 0;
-    totalBody += st.bodyshots?.value || 0;
-    totalLeg += st.legshots?.value || 0;
-    totalDamage += st.damage?.value || 0;
-    const b = st.bodyshots?.value || 0;
-    const h = st.headshots?.value || 0;
+    const h = count(st.headshots?.value);
+    const b = count(st.bodyshots?.value);
+    const l = count(st.legshots?.value);
+    const dmg = count(st.damage?.value);
+    if (h === null || b === null || l === null || dmg === null) { invalidSegments++; return; }
+    totalHead += h;
+    totalBody += b;
+    totalLeg += l;
+    totalDamage += dmg;
     if (b >= 3) sprayInstances++;
     if (h >= 1 && (h + b) <= 2) precisionTaps++;
   });
@@ -113,6 +121,7 @@ function analyzeWeaponTelemetry(matchData, targetHandle) {
       sprayTapRatio,
       firingDiscipline
     },
+    invalidSegments,
     // Sin posiciones observadas no se infiere distancia (jamás desde loadout).
     distanceBands: null,
     distanceNote: 'n/d: sin posiciones observadas; no se infiere distancia por valor de loadout.',

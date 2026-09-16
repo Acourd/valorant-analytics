@@ -75,15 +75,21 @@ function metricOrNull(metrics, key) {
 function buildEvidence({ profile, weapon, matchProvenance, player, temporalContext } = {}) {
   const mech = (profile && profile.mechanical) || {};
   const zones = (weapon && weapon.zoneMetrics) || {};
+  const zoneValue = (v) => (Number.isFinite(v) && v >= 0 && v <= 100 ? v : null);
+  const headPct = zoneValue(observedNumber(zones, ['headPct']));
+  const bodyPct = zoneValue(observedNumber(zones, ['bodyPct']));
+  const legPct = zoneValue(observedNumber(zones, ['legPct']));
+  const zonesValid = headPct !== null && bodyPct !== null && legPct !== null && Math.abs((headPct + bodyPct + legPct) - 100) <= 1;
+  const sprayRaw = observedNumber((weapon && weapon.metrics) || {}, ['sprayTapRatio']);
   const metrics = {
     hsPct: observedNumber(mech, ['hsPct']),
     fk: observedNumber(mech, ['fk']),
     fd: observedNumber(mech, ['fd']),
     acs: observedNumber(mech, ['acs']),
-    headPct: observedNumber(zones, ['headPct']),
-    bodyPct: observedNumber(zones, ['bodyPct']),
-    legPct: observedNumber(zones, ['legPct']),
-    sprayTapRatio: observedNumber((weapon && weapon.metrics) || {}, ['sprayTapRatio'])
+    headPct: zonesValid ? headPct : null,
+    bodyPct: zonesValid ? bodyPct : null,
+    legPct: zonesValid ? legPct : null,
+    sprayTapRatio: Number.isFinite(sprayRaw) && sprayRaw >= 0 ? sprayRaw : null
   };
   const observed = {};
   for (const k of Object.keys(metrics)) observed[k] = metrics[k] !== null;
@@ -173,6 +179,20 @@ function evaluateWeaknesses(evidence) {
 /** Decisión de rutina: solo si hay ≥1 debilidad fundamentada con ejercicio. */
 function canGenerateRoutine(evidence) {
   const { weaknesses, missingMetrics, requiredData, areasWithoutExercise, areasBlockedByTemporal } = evaluateWeaknesses(evidence);
+  // Los datos sintéticos NUNCA habilitan rutinas ni mediciones.
+  if (evidence.provenance === 'synthetic_demo') {
+    return {
+      canGenerate: false,
+      weaknesses: [],
+      missingMetrics,
+      requiredData: [...new Set([...requiredData, 'datos reales (JSON/export o texto del marcador)'])],
+      areasWithoutExercise,
+      areasBlockedByTemporal,
+      provenance: evidence.provenance,
+      omittedReason: 'Procedencia sintética (demo): el demo no habilita rutinas, mediciones ni recomendaciones.',
+      thresholds: THRESHOLDS
+    };
+  }
   const anyObserved = Object.values(evidence.observed).some(Boolean);
   const omittedReason = weaknesses.length > 0
     ? null
