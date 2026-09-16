@@ -1,5 +1,12 @@
 # Changelog — valorant-analytics
 
+## 4.10.1 — Correcciones del veredicto sobre la PR #18
+
+- **Presupuestos no anulables:** `VA_BUDGET_*` (y overrides programáticos) **solo pueden REDUCIR** límites. Valores no finitos, no enteros, ≤0, texto o por encima del máximo seguro compilado fallan cerrado con `RESOURCE_BUDGET_EXCEEDED`; cadena vacía = variable ausente. No existe escape de entorno para ampliar límites.
+- **`schemaVersion` Riot canónico:** ubicación canónica `matchInfo.schemaVersion`; la raíz `payload.schemaVersion` solo se acepta si coincide. Incompatible en cualquier ubicación o discrepancia ⇒ `SCHEMA_UNSUPPORTED` (fail-closed); ausencia ⇒ `legacy_limited` sin elevar procedencia. Normalizado: `data.metadata.schemaVersion`.
+- **Tiempo cooperativo con alcance preciso:** checkpoints periódicos (`TimeBudget.sample`) en parseo de scoreboard, generación demo, observación de segmentos, adaptador VAL-MATCH-V1 y mapeo del plan; `checkpoint` usa `>=`. Documentado que el runtime JS no puede preemptar código síncrono: no es un corte total garantizado de 30 s.
+- Regresiones `tests #181`–`#183` + 2 propiedades adversariales (183/183 checks). Versión 4.10.1.
+
 ## 4.10.0 — Robustez interna final (presupuestos, esquemas, estrés)
 
 - **Presupuestos de recursos** (`scripts/resource_budget.js`), configurables con `VA_BUDGET_*`: archivo 5 MiB · texto 200 000 chars · profundidad JSON 64 · jugadores 64 · rondas 200 · eventos 100 000 · elementos/arreglo 20 000 · tiempo 30 s · workers 16. Al excederse: fail-closed con `INPUT_TOO_LARGE`, `SCHEMA_LIMIT_EXCEEDED` o `RESOURCE_BUDGET_EXCEEDED`, sin análisis parcial y con JSON puro bajo `--json`.

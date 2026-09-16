@@ -141,6 +141,35 @@ property('compatibilidad de versiones de esquema', () => {
   assert.throws(() => schema.classifySchema({ schemaVersion: 'a' }), e => e.code === 'SCHEMA_UNSUPPORTED');
 });
 
+property('presupuestos: intentos de ampliación por entorno fallan cerrado', () => {
+  const key = 'VA_BUDGET_MAX_FILE_BYTES';
+  const prev = process.env[key];
+  try {
+    for (const bad of ['999999999999', 'Infinity', 'NaN', 'abc', '0', '-5', '1.5']) {
+      process.env[key] = bad;
+      assert.throws(() => budget.getBudgets(), e => e.code === 'RESOURCE_BUDGET_EXCEEDED', `aceptó "${bad}"`);
+    }
+    process.env[key] = String(budget.SAFE_MAX.maxFileBytes - 1);
+    assert.ok(budget.getBudgets().maxFileBytes < budget.SAFE_MAX.maxFileBytes, 'reducción válida permitida');
+  } finally {
+    if (prev === undefined) delete process.env[key]; else process.env[key] = prev;
+  }
+});
+
+property('esquema Riot: matriz canónica de versiones (fail-closed en discrepancias)', () => {
+  const matrix = [
+    [{ schemaVersion: 99, matchInfo: { matchId: 'm' } }, 'SCHEMA_UNSUPPORTED'],
+    [{ matchInfo: { matchId: 'm', schemaVersion: 99 } }, 'SCHEMA_UNSUPPORTED'],
+    [{ schemaVersion: 1, matchInfo: { matchId: 'm', schemaVersion: 99 } }, 'SCHEMA_UNSUPPORTED'],
+    [{ schemaVersion: 99, matchInfo: { matchId: 'm', schemaVersion: 1 } }, 'SCHEMA_UNSUPPORTED']
+  ];
+  for (const [payload, code] of matrix) {
+    assert.throws(() => schema.classifyRiotSchema(payload), e => e.code === code);
+  }
+  assert.strictEqual(schema.classifyRiotSchema({ schemaVersion: 1, matchInfo: { matchId: 'm', schemaVersion: 1 } }).status, 'supported');
+  assert.strictEqual(schema.classifyRiotSchema({ matchInfo: { matchId: 'm' } }).status, 'legacy_limited');
+});
+
 console.log(`\n================================================================`);
 console.log(`ADVERSARIAL: ${passed} propiedades PASS / ${failed} FAIL (semilla ${SEED})`);
 console.log(`================================================================`);

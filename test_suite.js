@@ -3400,9 +3400,8 @@ check('presupuestos: archivo/texto/JSON profundo/conteos/tiempo/workers fallan c
     assert.throws(() => rb.checkEvents(rb.DEFAULTS.maxEvents + 1), e => e.code === 'SCHEMA_LIMIT_EXCEEDED');
     assert.throws(() => rb.checkArrayItems('damage', rb.DEFAULTS.maxArrayItems + 1), e => e.code === 'SCHEMA_LIMIT_EXCEEDED');
     assert.throws(() => rb.assertWorkerBudget(rb.DEFAULTS.maxWorkers + 1), e => e.code === 'RESOURCE_BUDGET_EXCEEDED');
-    const budget = new rb.TimeBudget(1);
-    const t0 = Date.now(); while (Date.now() - t0 < 6) { /* espera activa */ }
-    assert.throws(() => budget.checkpoint('test'), e => e.code === 'RESOURCE_BUDGET_EXCEEDED');
+    // Tiempo cooperativo: presupuesto cero corta de forma determinista (sin sleeps).
+    assert.throws(() => new rb.TimeBudget(0).checkpoint('test'), e => e.code === 'RESOURCE_BUDGET_EXCEEDED');
     // CLI: texto excesivo en archivo .txt => código estable y JSON válido.
     const tmp = path.join(os.tmpdir(), `too-big-${process.pid}.txt`);
     fs.writeFileSync(tmp, 'A#1\t1\t2\t3\n' + 'x'.repeat(rb.DEFAULTS.maxTextChars + 10), 'utf8');
@@ -3585,6 +3584,113 @@ check('documentación: presupuestos, contrato de esquema y modalidad de estrés 
     const help = cliOk(['--help']);
     assert.ok(/PRESUPUESTOS/.test(help) && /INPUT_TOO_LARGE/.test(help), 'ayuda CLI declara límites y códigos');
     assert.ok(/ESQUEMA/.test(help) && /SCHEMA_UNSUPPORTED/.test(help), 'ayuda CLI declara contrato de esquema');
+  });
+
+check('presupuestos: VA_BUDGET_* solo reduce límites; configuración inválida fail-closed',
+  () => {
+    const rb = require(path.join(scriptsDir, 'resource_budget.js'));
+    const prev = process.env.VA_BUDGET_MAX_PLAYERS;
+    try {
+      process.env.VA_BUDGET_MAX_PLAYERS = '8';
+      assert.strictEqual(rb.getBudgets().maxPlayers, 8, 'reducción válida permitida');
+      process.env.VA_BUDGET_MAX_PLAYERS = '64';
+      assert.strictEqual(rb.getBudgets().maxPlayers, 64, 'igual al máximo seguro permitido');
+      for (const bad of ['999999999999', '65', '0', '-1', '1.5', 'abc', 'Infinity', 'NaN']) {
+        process.env.VA_BUDGET_MAX_PLAYERS = bad;
+        assert.throws(() => rb.getBudgets(), e => e.code === 'RESOURCE_BUDGET_EXCEEDED', `config inválida aceptada: "${bad}"`);
+      }
+      // Cadena vacía = variable ausente (documentado): se usa el valor seguro.
+      process.env.VA_BUDGET_MAX_PLAYERS = '';
+      assert.strictEqual(rb.getBudgets().maxPlayers, rb.DEFAULTS.maxPlayers, 'vacío = sin override');
+    } finally {
+      if (prev === undefined) delete process.env.VA_BUDGET_MAX_PLAYERS;
+      else process.env.VA_BUDGET_MAX_PLAYERS = prev;
+    }
+    // Un input sobredimensionado sigue fallando aunque el entorno intente elevar el techo.
+    const bigFile = path.join(os.tmpdir(), `elevate-${process.pid}.txt`);
+    fs.writeFileSync(bigFile, 'w'.repeat(rb.DEFAULTS.maxFileBytes + 1), 'utf8');
+    try {
+      let code = 0;
+      let out = '';
+      try {
+        execFileSync(process.execPath, [cliPath, 'parse', bigFile, '--json'], {
+          encoding: 'utf8',
+          env: Object.assign({}, process.env, { VA_BUDGET_MAX_FILE_BYTES: '999999999999' })
+        });
+      } catch (e) { code = e.status; out = String(e.stdout || ''); }
+      assert.strictEqual(code, 1, 'intento de ampliación => fallo cerrado');
+      const err = JSON.parse(out);
+      assert.strictEqual(err.error.code, 'RESOURCE_BUDGET_EXCEEDED');
+      assert.ok(/solo puede REDUCIR/.test(err.error.message), 'mensaje explícito de política');
+    } finally {
+      fs.unlinkSync(bigFile);
+    }
+  });
+
+check('esquema Riot: ubicación canónica y discrepancias fail-closed (matriz completa)',
+  () => {
+    const sc = require(path.join(scriptsDir, 'schema_contract.js'));
+    const cases = [
+      ['raíz=99', { schemaVersion: 99, matchInfo: { matchId: 'm' } }, 'SCHEMA_UNSUPPORTED'],
+      ['matchInfo=99', { matchInfo: { matchId: 'm', schemaVersion: 99 } }, 'SCHEMA_UNSUPPORTED'],
+      ['raíz=1/matchInfo=99', { schemaVersion: 1, matchInfo: { matchId: 'm', schemaVersion: 99 } }, 'SCHEMA_UNSUPPORTED'],
+      ['raíz=99/matchInfo=1', { schemaVersion: 99, matchInfo: { matchId: 'm', schemaVersion: 1 } }, 'SCHEMA_UNSUPPORTED'],
+      ['ambas=1', { schemaVersion: 1, matchInfo: { matchId: 'm', schemaVersion: 1 } }, null],
+      ['ambas ausentes', { matchInfo: { matchId: 'm' } }, null]
+    ];
+    for (const [label, payload, code] of cases) {
+      if (code) {
+        assert.throws(() => sc.classifyRiotSchema(payload), e => e.code === code, label);
+      } else {
+        const r = sc.classifyRiotSchema(payload);
+        assert.ok(['supported', 'legacy_limited'].includes(r.status), label);
+      }
+    }
+    assert.strictEqual(sc.classifyRiotSchema({ schemaVersion: 1, matchInfo: { matchId: 'm', schemaVersion: 1 } }).status, 'supported');
+    assert.strictEqual(sc.classifyRiotSchema({ matchInfo: { matchId: 'm' } }).status, 'legacy_limited');
+    // Integración verificada: discrepancia rechazada ANTES de derivar métricas.
+    const ep = require(path.join(scriptsDir, 'evidence_policy.js'));
+    const payload = JSON.parse(fs.readFileSync(path.join(__dirname, 'examples', 'riot_match_rounds_anonymized.json'), 'utf8'));
+    const mismatch = JSON.parse(JSON.stringify(payload));
+    mismatch.schemaVersion = 1;
+    mismatch.matchInfo.schemaVersion = 99;
+    const att = signRiotFixture(mismatch, payload.matchInfo.matchId);
+    try {
+      assert.throws(
+        () => ep.observeVerifiedMatch(mismatch, 'anon-puuid-focus', { attestation: att, maxAgeMs: RIOT_BIG_MAX_AGE }),
+        e => e.code === 'SCHEMA_UNSUPPORTED'
+      );
+    } finally {
+      writeRiotTrust([]);
+    }
+  });
+
+check('tiempo cooperativo: checkpoints periódicos cortan bucles (determinista, sin sleeps)',
+  () => {
+    const rb = require(path.join(scriptsDir, 'resource_budget.js'));
+    const originalNow = Date.now;
+    const prevEnv = process.env.VA_BUDGET_MAX_PROCESSING_MS;
+    let fakeNow = originalNow();
+    Date.now = () => (fakeNow += 50); // cada consulta avanza 50 ms simulados
+    process.env.VA_BUDGET_MAX_PROCESSING_MS = '1';
+    try {
+      const lines = [];
+      for (let i = 0; i < 3000; i++) lines.push(`P${i}#1\t1\t2\t3`);
+      assert.throws(
+        () => parseTextScoreboard(lines.join('\n')),
+        e => e.code === 'RESOURCE_BUDGET_EXCEEDED',
+        'el bucle de parseo debe cortar por presupuesto'
+      );
+    } finally {
+      Date.now = originalNow;
+      if (prevEnv === undefined) delete process.env.VA_BUDGET_MAX_PROCESSING_MS;
+      else process.env.VA_BUDGET_MAX_PROCESSING_MS = prevEnv;
+    }
+    // Alcance documentado con precisión (cooperativo, no preemption).
+    const src = fs.readFileSync(path.join(scriptsDir, 'resource_budget.js'), 'utf8');
+    assert.ok(/no puede preemptar/i.test(src) && /puntos de control instrumentados/i.test(src), 'alcance temporal documentado en el módulo');
+    const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8');
+    assert.ok(/cooperativ/i.test(readme), 'README declara el alcance cooperativo del tiempo');
   });
 
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben

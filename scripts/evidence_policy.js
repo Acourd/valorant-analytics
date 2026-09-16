@@ -345,7 +345,10 @@ function observeMatchTelemetry(matchData, playerHandle, options = {}) {
   const cell = (obj, k) => (obj && obj[k] && (obj[k].value !== undefined ? obj[k].value : obj[k].displayValue));
   const sourceRef = stableRef(matchData, options.originPath);
   const rounds = [];
+  const timeBudget = new budgets.TimeBudget();
+  let segIndex = 0;
   segments.forEach(s => {
+    timeBudget.sample(++segIndex, 'observación de segmentos');
     const roundRef = s.attributes && s.attributes.round;
     if (!Number.isInteger(roundRef) || roundRef < 1) return;
     if (s.type === 'player-round-damage') {
@@ -488,7 +491,9 @@ function observeVerifiedMatch(matchData, playerPuuid, options = {}) {
   const roundResults = Array.isArray(matchData && matchData.roundResults) ? matchData.roundResults : [];
   budgets.checkRounds(roundResults.length);
   const rounds = [];
+  const roundBudget = new budgets.TimeBudget();
   roundResults.forEach((rr, idx) => {
+    roundBudget.sample(idx + 1, 'adaptador VAL-MATCH-V1');
     const psList = Array.isArray(rr && rr.playerStats) ? rr.playerStats : [];
     budgets.checkArrayItems('playerStats', psList.length);
     for (const ps of psList) {

@@ -40,18 +40,36 @@ function envName(key) {
   return 'VA_BUDGET_' + key.replace(/([A-Z])/g, '_$1').toUpperCase();
 }
 
-function parseEnvNumber(key) {
-  const raw = process.env[envName(key)];
-  if (raw === undefined || raw === '') return null;
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : null;
+/**
+ * Política de configuración (documentada):
+ *   - `VA_BUDGET_*` y overrides programáticos pueden REDUCIR un límite, nunca
+ *     ampliarlo por encima del máximo seguro compilado (DEFAULTS = SAFE_MAX).
+ *   - Configuración inválida (texto, NaN, Infinity, no entero, <= 0 o por
+ *     encima del máximo seguro) => fail-closed con RESOURCE_BUDGET_EXCEEDED.
+ *   - No existe escape de entorno para ampliar límites: hacerlo exige cambiar
+ *     los máximos compilados (revisión de código).
+ */
+function resolveValue(key, raw, source) {
+  const n = typeof raw === 'number' ? raw : Number(String(raw).trim() === '' ? Number.NaN : raw);
+  if (!Number.isInteger(n) || n <= 0) {
+    throw budgetError('RESOURCE_BUDGET_EXCEEDED', `Configuración inválida para ${key} (${source}): "${raw}". Debe ser un entero > 0.`, { key, raw, source });
+  }
+  if (n > DEFAULTS[key]) {
+    throw budgetError('RESOURCE_BUDGET_EXCEEDED', `Configuración inválida para ${key} (${source}): ${n} supera el máximo seguro ${DEFAULTS[key]}. VA_BUDGET_* solo puede REDUCIR límites.`, { key, value: n, safeMax: DEFAULTS[key], source });
+  }
+  return n;
 }
 
 function getBudgets(overrides = {}) {
   const budgets = {};
   for (const key of Object.keys(DEFAULTS)) {
-    const envValue = parseEnvNumber(key);
-    budgets[key] = overrides[key] !== undefined ? overrides[key] : (envValue !== null ? envValue : DEFAULTS[key]);
+    const rawEnv = process.env[envName(key)];
+    const hasEnv = rawEnv !== undefined && rawEnv !== '';
+    const hasOverride = overrides[key] !== undefined;
+    let value = DEFAULTS[key];
+    if (hasEnv) value = resolveValue(key, rawEnv, envName(key));
+    if (hasOverride) value = resolveValue(key, overrides[key], 'override');
+    budgets[key] = value;
   }
   return budgets;
 }
@@ -115,17 +133,25 @@ function checkRounds(n, budgets = getBudgets()) { return checkCount('rondas', n,
 function checkEvents(n, budgets = getBudgets()) { return checkCount('eventos', n, budgets.maxEvents); }
 function checkArrayItems(kind, n, budgets = getBudgets()) { return checkCount(`elementos de ${kind}`, n, budgets.maxArrayItems); }
 
-// Presupuesto de tiempo cooperativo: se consulta en puntos de control.
+// Presupuesto de tiempo COOPERATIVO: el runtime JS no puede preemptar código
+// síncrono, así que el corte se aplica en puntos de control instrumentados
+// (fases concretas y `sample()` dentro de bucles). No es un corte total
+// garantizado de 30 s para cualquier entrada.
 class TimeBudget {
-  constructor(ms = getBudgets().maxProcessingMs) {
+  constructor(ms = getBudgets().maxProcessingMs, sampleEvery = 1024) {
     this.maxMs = ms;
+    this.sampleEvery = sampleEvery;
     this.start = Date.now();
   }
   elapsed() { return Date.now() - this.start; }
   checkpoint(step = 'proceso') {
-    if (this.elapsed() > this.maxMs) {
-      throw budgetError('RESOURCE_BUDGET_EXCEEDED', `Tiempo máximo excedido en ${step}: ${this.elapsed()}ms > ${this.maxMs}ms (RESOURCE_BUDGET_EXCEEDED).`, { step, elapsedMs: this.elapsed(), maxMs: this.maxMs });
+    if (this.elapsed() >= this.maxMs) {
+      throw budgetError('RESOURCE_BUDGET_EXCEEDED', `Tiempo máximo excedido en ${step}: ${this.elapsed()}ms >= ${this.maxMs}ms (RESOURCE_BUDGET_EXCEEDED).`, { step, elapsedMs: this.elapsed(), maxMs: this.maxMs });
     }
+  }
+  // Punto de control periódico: se consulta cada `sampleEvery` iteraciones.
+  sample(counter, step = 'bucle') {
+    if (counter % this.sampleEvery === 0) this.checkpoint(step);
   }
 }
 
@@ -141,6 +167,7 @@ function assertWorkerBudget(n, budgets = getBudgets()) {
 
 module.exports = {
   DEFAULTS,
+  SAFE_MAX: DEFAULTS,
   getBudgets,
   budgetError,
   checkFileSize,

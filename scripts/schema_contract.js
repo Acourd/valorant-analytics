@@ -4,7 +4,11 @@
 /**
  * schema_contract.js — Contrato de esquema VERSIONADO para entradas locales y Riot.
  *
- * - `schemaVersion` explícito para formatos normalizados (v1 = contrato actual).
+ * Ubicaciones CANÓNICAS de `schemaVersion`:
+ *   - Normalizado: `data.metadata.schemaVersion`
+ *   - Riot:        `matchInfo.schemaVersion` (la raíz `payload.schemaVersion` solo
+ *                  se acepta si coincide; discrepancia => SCHEMA_UNSUPPORTED)
+ *
  * - Validación de ESTRUCTURA antes de procesar (fail-closed con código estable).
  * - Versión ausente => formato LEGADO LIMITADO (se procesa lo observable y se
  *   declara la limitación); versión futura/incompatible => `SCHEMA_UNSUPPORTED`.
@@ -90,6 +94,41 @@ function validateNormalizedMatch(matchData) {
 
 const KNOWN_RIOT_KEYS = new Set(['matchInfo', 'players', 'roundResults', 'kills', '_fixture', 'schemaVersion']);
 
+/**
+ * Ubicación CANÓNICA de `schemaVersion` para payloads Riot: `matchInfo.schemaVersion`.
+ * La raíz (`payload.schemaVersion`) solo se acepta si es coherente con la canónica;
+ * cualquier ubicación incompatible o discrepante => SCHEMA_UNSUPPORTED (fail-closed).
+ */
+function classifyRiotSchema(payload) {
+  const isPresent = v => v !== undefined && v !== null;
+  const root = payload ? payload.schemaVersion : undefined;
+  const matchInfo = payload && payload.matchInfo && typeof payload.matchInfo === 'object' ? payload.matchInfo.schemaVersion : undefined;
+  const check = (label, value) => {
+    const n = Number(value);
+    if (!Number.isInteger(n) || n < 1 || n > MAX_SUPPORTED) {
+      throw schemaError('SCHEMA_UNSUPPORTED', `schemaVersion incompatible en ${label}: ${value}. Soportadas: 1 (o ausente = legado limitado).`, { location: label, schemaVersion: value, maxSupported: MAX_SUPPORTED });
+    }
+    return n;
+  };
+  let canonical = null;
+  if (isPresent(root) && isPresent(matchInfo)) {
+    const r = check('raíz', root);
+    const m = check('matchInfo', matchInfo);
+    if (r !== m) {
+      throw schemaError('SCHEMA_UNSUPPORTED', `schemaVersion discrepante: raíz=${r} vs matchInfo=${m}. Se rechaza fail-closed.`, { root: r, matchInfo: m });
+    }
+    canonical = m;
+  } else if (isPresent(matchInfo)) {
+    canonical = check('matchInfo', matchInfo);
+  } else if (isPresent(root)) {
+    canonical = check('raíz', root);
+  }
+  if (canonical === null) {
+    return { schemaVersion: null, status: 'legacy_limited', limited: true, note: 'Sin schemaVersion (canónica: matchInfo.schemaVersion): formato legado limitado; no se inventan campos.' };
+  }
+  return { schemaVersion: canonical, status: 'supported', limited: false, note: `schemaVersion ${canonical} soportada (canónica: matchInfo.schemaVersion).` };
+}
+
 function validateRiotPayload(payload) {
   if (!payload || typeof payload !== 'object') {
     throw schemaError('SCHEMA_INVALID', 'Payload Riot ausente o no es un objeto.', {});
@@ -101,7 +140,7 @@ function validateRiotPayload(payload) {
   if (!Array.isArray(payload.players)) {
     throw schemaError('SCHEMA_INVALID', 'Payload Riot sin players[] válido.', {});
   }
-  const schema = classifySchema(matchInfo);
+  const schema = classifyRiotSchema(payload);
   const unknownFields = Object.keys(payload).filter(k => !KNOWN_RIOT_KEYS.has(k)).slice(0, 32);
   budgets.checkPlayers(payload.players.length);
   if (Array.isArray(payload.roundResults)) budgets.checkRounds(payload.roundResults.length);
@@ -132,6 +171,7 @@ module.exports = {
   SCHEMA_VERSIONS,
   MAX_SUPPORTED,
   classifySchema,
+  classifyRiotSchema,
   validateNormalizedMatch,
   validateRiotPayload,
   PLAN_MINIMUM_FIELDS

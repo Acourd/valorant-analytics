@@ -4,10 +4,10 @@
 
 ### Local Competitive Telemetry · 360° Descriptive Diagnostics · Adaptive Aim Engine
 
-[![Version](https://img.shields.io/badge/version-4.10.0_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
+[![Version](https://img.shields.io/badge/version-4.10.1_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
 [![Runtime](https://img.shields.io/badge/runtime-Node.js_18%2B_Native-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-0_npm_(Core)-38BDF8.svg?style=for-the-badge&logo=codeforces&logoColor=white)](package.json)
-[![Tests](https://img.shields.io/badge/tests-180%2F180_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
+[![Tests](https://img.shields.io/badge/tests-183%2F183_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
 [![Audit](https://img.shields.io/badge/audit-15%2F15_properties_PASS-8B5CF6.svg?style=for-the-badge&logo=codereview&logoColor=white)](opencode_tester.js)
 [![License](https://img.shields.io/badge/license-MIT-6B7280.svg?style=for-the-badge)](LICENSE)
 
@@ -187,7 +187,7 @@ The master dispatcher `cli.js` provides unified access to all platform engines:
 
 ## 🧱 Resource budgets and schema contract
 
-Untrusted inputs are processed with **explicit limits** (override via `VA_BUDGET_*`, e.g. `VA_BUDGET_MAX_PLAYERS=32`). Exceeding them fails closed with a stable code and **no partial analysis**:
+Untrusted inputs are processed with **explicit limits**. `VA_BUDGET_*` (e.g. `VA_BUDGET_MAX_PLAYERS=32`) **can only REDUCE** a limit: invalid values (text, NaN, Infinity, non-integers, ≤0) or attempts to raise it above the compiled safe maximum **fail closed** with `RESOURCE_BUDGET_EXCEEDED`. There is no environment escape hatch to raise limits. Exceeding a limit fails closed with a stable code and **no partial analysis**:
 
 | Budget | Default | Rationale |
 |---|---|---|
@@ -198,12 +198,12 @@ Untrusted inputs are processed with **explicit limits** (override via `VA_BUDGET
 | Rounds | 200 | a long competitive match is ~40 |
 | Events | 100,000 | per-round aggregates of long matches |
 | Items per array | 20,000 | real damage/kill lists |
-| Processing time | 30 s | intensive operation within budget |
+| Processing time | 30 s | **cooperative cut** at instrumented phases and loops (`sample()`); the JS runtime cannot preempt synchronous code, so it is not a guaranteed hard cutoff |
 | Concurrent workers | 16 | internal stress without saturating runners |
 
 Codes: `INPUT_TOO_LARGE` (file/text), `SCHEMA_LIMIT_EXCEEDED` (depth, players, rounds, events, arrays), `RESOURCE_BUDGET_EXCEEDED` (time, workers). With `--json`, stdout is **one object**: `{ ok:false, exitCode, error:{ code, message, details } }`.
 
-**Versioned schema:** `schemaVersion: 1` is the current contract. Absent ⇒ **legacy limited** (observable data is processed and the limitation declared); incompatible ⇒ `SCHEMA_UNSUPPORTED`. Unknown fields are ignored safely and **declared in diagnostics**, never elevating provenance.
+**Versioned schema:** `schemaVersion: 1` is the current contract. Canonical locations: `data.metadata.schemaVersion` (normalized) and `matchInfo.schemaVersion` (Riot); in Riot the root `payload.schemaVersion` is accepted only if it matches the canonical one. Absent ⇒ **legacy limited** (observable data is processed and the limitation declared); incompatible in any admitted location or **mismatch** ⇒ `SCHEMA_UNSUPPORTED`. Unknown fields are ignored safely and **declared in diagnostics**, never elevating provenance.
 
 **Stress modality (outside the normal matrix):** `node tests/stress_dsse.js` runs bounded rounds of concurrent DSSE keystore registrations with the full invariant each round and no silent retries (the first error is logged). CI runs it in a separate job (`VA_STRESS_ROUNDS=3`).
 
@@ -240,7 +240,7 @@ If you use **Google Gemini (Gems)** or **OpenAI (Custom GPTs)**, [`standalone_pr
 - **No network by default:** analysis is local. No browser cache harvesting and no Tracker.gg queries. Input is a JSON/export, text or screenshot you explicitly provide.
 - **Zero NPM Dependencies:** Built strictly on native Node.js core libraries (`fs`, `path`, `zlib`, `crypto`, `child_process`). Zero external downloads.
 - **Cross-Platform Compatibility:** Tested and verified on Windows 11 (PowerShell/CMD), macOS (zsh), and Linux (bash).
-- **Deterministic Reliability:** 180 automated tests plus modular suites passing with Exit Code 0 (`node run_all_tests.js`) and a semantic fail-closed property audit, with no promotional score (`node opencode_tester.js`).
+- **Deterministic Reliability:** 183 automated tests plus modular suites passing with Exit Code 0 (`node run_all_tests.js`) and a semantic fail-closed property audit, with no promotional score (`node opencode_tester.js`).
 - **CLI Contract:** human and `--json` output; documented exit codes `0`/`1`/`2` (valid result / invalid input / insufficient evidence); no command silently picks a player.
 
 ---

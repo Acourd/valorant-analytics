@@ -116,6 +116,8 @@ function parseTextScoreboard(rawText, options = {}) {
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const players = [];
   const mapName = options.map || detectMap(text) || null;
+  const timeBudget = new budgets.TimeBudget();
+  let lineNo = 0;
 
   // Candidatos #TAG Unicode-safe (nombres CJK, acentos, etc.).
   const HANDLE_CANDIDATE = /([^\s#][^#\n]*?)#([A-Za-z0-9]{1,16})/gu;
@@ -126,6 +128,7 @@ function parseTextScoreboard(rawText, options = {}) {
     .trim();
 
   for (const line of lines) {
+    timeBudget.sample(++lineNo, 'parse de scoreboard');
     const candidates = [];
     for (const c of line.matchAll(HANDLE_CANDIDATE)) {
       const name = cleanHandleName(c[1]);
@@ -330,8 +333,10 @@ function assembleRawMatchStructure(extractedPlayers, mapName, roundsPlayed = 24,
 
   const blueRoster = finalRoster.slice(0, 5);
   const redRoster = finalRoster.slice(5, 10);
+  const demoBudget = new budgets.TimeBudget();
 
   for (let r = 1; r <= roundsPlayed; r++) {
+    demoBudget.sample(r, 'generación demo de rondas');
     const isBlueWin = r <= 13;
     let loadoutVal = 4200;
     if (r === 1 || r === 13) loadoutVal = 800;

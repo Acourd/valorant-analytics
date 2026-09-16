@@ -122,12 +122,18 @@ function buildPlan(matchData, targetHandle) {
   const segments = (matchData.data && matchData.data.segments) || [];
   // Presupuestos/contrato de esquema: fail-closed antes de cualquier análisis.
   budgets.checkJsonDepth(matchData);
+  const timeBudget = new budgets.TimeBudget();
   const schemaValidation = schemaContract.validateNormalizedMatch(matchData);
   budgets.checkEvents(segments.length);
-  const handles = segments
-    .filter(s => s.type === 'player-summary')
-    .map(s => s.metadata?.platformUserHandle || s.attributes?.platformUserIdentifier)
-    .filter(Boolean);
+  const handles = [];
+  for (let i = 0; i < segments.length; i++) {
+    timeBudget.sample(i + 1, 'mapeo de segmentos del plan');
+    const s = segments[i];
+    if (s && s.type === 'player-summary') {
+      const h = s.metadata?.platformUserHandle || s.attributes?.platformUserIdentifier;
+      if (h) handles.push(h);
+    }
+  }
   budgets.checkPlayers(handles.length);
   if (!handles.length) {
     const err = new Error('Telemetría sin jugadores válidos: no hay plan que construir.');
@@ -137,7 +143,6 @@ function buildPlan(matchData, targetHandle) {
   if (Number.isFinite(matchData.data.metadata && matchData.data.metadata.rounds)) {
     budgets.checkRounds(matchData.data.metadata.rounds);
   }
-  const timeBudget = new budgets.TimeBudget();
   const handle = resolveExactHandle(handles, targetHandle);
   const profile = evaluateLearningProfile(matchData, handle);
 
