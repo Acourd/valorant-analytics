@@ -38,8 +38,8 @@ function auditDuoSynergy(matchData, handle1, handle2) {
   });
 
   const { resolveExactHandle } = require('./data_contract');
-  const p1Key = resolveExactHandle(Object.keys(playerMap), handle1, { allowFirstIfMissing: false });
-  const p2Key = resolveExactHandle(Object.keys(playerMap), handle2, { allowFirstIfMissing: false });
+  const p1Key = resolveExactHandle(Object.keys(playerMap), handle1);
+  const p2Key = resolveExactHandle(Object.keys(playerMap), handle2);
 
   if (!p1Key || !p2Key) {
     throw new Error(`Could not find both players in match data. Found: ${p1Key || 'None'} and ${p2Key || 'None'}`);
@@ -87,6 +87,27 @@ function auditDuoSynergy(matchData, handle1, handle2) {
     'Datos locales normalizados (NO verificados): describen agregados del marcador, no causalidad ni mejora.',
     'Sin timestamps de ronda no se afirman tiempos de tradeo, refrags ni posicionamiento.'
   ];
+
+  // Los datos sintéticos no habilitan mediciones ni consejos de sinergia.
+  if (provenance === 'synthetic_demo') {
+    return {
+      map: meta.mapName || null,
+      matchId: meta.matchId || null,
+      provenance,
+      provenanceLabel: provenanceLabel(provenance),
+      p1: playerView(p1, p1Acs, p1Kd, p1Hs),
+      p2: playerView(p2, p2Acs, p2Kd, p2Hs),
+      synergy: {
+        score: null,
+        verdict: 'SIMULACION_DEMO',
+        acsDifferential: null,
+        tacticalAdvice: null,
+        carryAnalysis: null,
+        missing: ['datos reales (JSON/export o texto del marcador)'],
+        limitations: [...limitations, 'Modo demo: métricas inventadas; no hay sinergia que evaluar.']
+      }
+    };
+  }
 
   if (!observedAcs || !teamsObserved) {
     const missing = [];

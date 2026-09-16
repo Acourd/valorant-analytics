@@ -41,7 +41,19 @@ function analyzeEconomy(matchData, targetHandle) {
     const winPct = st.roundsWinPct?.displayValue !== undefined
       ? st.roundsWinPct.displayValue
       : (Number.isFinite(rounds) && rounds > 0 && Number.isFinite(won) ? `${Math.round((won / rounds) * 100)}%` : null);
-    const num = (section, key) => (st[key]?.value !== undefined ? String(st[key].value) : null);
+    const metricText = (key, domain = {}) => {
+      const cell = st[key];
+      if (!cell) return null;
+      const rawValue = cell.value !== undefined
+        ? cell.value
+        : (cell.displayValue !== undefined ? String(cell.displayValue).replace('%', '').trim() : null);
+      if (rawValue === null) return null;
+      const n = Number(rawValue);
+      if (!Number.isFinite(n)) return null;
+      if (domain.min !== undefined && n < domain.min) return null;
+      if (domain.max !== undefined && n > domain.max) return null;
+      return cell.displayValue !== undefined ? String(cell.displayValue) : String(n);
+    };
     return {
       tier: l.metadata?.name || l.attributes?.loadout || null,
       rounds,
@@ -51,10 +63,11 @@ function analyzeEconomy(matchData, targetHandle) {
       kda: (st.kills?.value !== undefined && st.deaths?.value !== undefined && st.assists?.value !== undefined)
         ? `${st.kills.value}/${st.deaths.value}/${st.assists.value}`
         : null,
-      kd: st.kDRatio?.displayValue !== undefined ? st.kDRatio.displayValue : null,
-      adr: st.damagePerRound?.displayValue !== undefined ? st.damagePerRound.displayValue : num('damagePerRound', 'value'),
-      acs: st.scorePerRound?.displayValue !== undefined ? st.scorePerRound.displayValue : num('scorePerRound', 'value'),
-      hsPct: st.headshotsPercentage?.displayValue !== undefined ? st.headshotsPercentage.displayValue : null
+      kd: metricText('kDRatio', { min: 0 }),
+      // ADR/ACS: acepta { value } y { displayValue }, con dominio estricto.
+      adr: metricText('damagePerRound', { min: 0, max: 2000 }),
+      acs: metricText('scorePerRound', { min: 0, max: 2000 }),
+      hsPct: metricText('headshotsPercentage', { min: 0, max: 100 })
     };
   });
 

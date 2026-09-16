@@ -31,7 +31,7 @@ function parseDuels(matchData, targetHandle) {
   // Objetivo EXACTO si se pidió; ausente/ambiguo => fail-closed.
   let target = null;
   if (targetHandle) {
-    target = require('./data_contract').resolveExactHandle(Object.keys(playerMap), targetHandle, { allowFirstIfMissing: false });
+    target = require('./data_contract').resolveExactHandle(Object.keys(playerMap), targetHandle);
   }
 
   // Find round kills from player-round-kills segments

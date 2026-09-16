@@ -451,7 +451,11 @@ function assembleRawMatchStructure(extractedPlayers, mapName, roundsPlayed = 24,
         rounds: roundsPlayed,
         timestamp: new Date().toISOString(),
         resilientEngine: 'v1.2',
-        ingestionType: 'Universal Resilient Telemetry'
+        ingestionType: 'Synthetic demo (NOT a real match)',
+        // Sello interno: cualquier constructor sintético queda marcado aquí,
+        // aunque se llame directamente (no solo vía resolveMatchDataResilient).
+        synthetic: true,
+        provenance: 'synthetic_demo'
       },
       segments
     }

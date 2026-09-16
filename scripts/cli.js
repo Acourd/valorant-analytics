@@ -450,6 +450,10 @@ try {
       console.log(`   • ${plan.siguiente_dato.dato}`);
       console.log(`     Por qué: ${plan.siguiente_dato.porQue}`);
       console.log(`     Cómo: ${plan.siguiente_dato.como}`);
+      console.log(`\n📥 ENTRADA MÍNIMA (qué se obtiene con cada nivel de datos):`);
+      console.log(`   • Texto/marcador: ${plan.entrada_minima.texto_marcador}`);
+      console.log(`   • Eventos por ronda: ${plan.entrada_minima.eventos_por_ronda}`);
+      console.log(`   • Fuente verificada: ${plan.entrada_minima.fuente_verificada}`);
       console.log(`========================================================================\n`);
     });
     if (plan.estado !== 'ACCION_DISPONIBLE') throw new CliExit(EXIT.INSUFFICIENT);

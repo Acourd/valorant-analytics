@@ -115,6 +115,8 @@ function observedMatch(handle, stats) {
 
 console.log(`PROPERTY/FUZZ — semilla=${SEED} iteraciones=${ITERATIONS}\n`);
 
+const statKeys = ['kills', 'deaths', 'kdRatio', 'scorePerRound', 'damagePerRound', 'kast', 'headshotsPercentage', 'firstKills', 'firstDeaths', 'clutches'];
+
 // ---------------------------------------------------------------------------
 // 1. Parser de scoreboard
 // ---------------------------------------------------------------------------
@@ -205,11 +207,10 @@ property('target: exacto o fail-closed; el orden del roster no cambia la elecci�
     const variant = requested.toUpperCase();
     assert.strictEqual(resolveExactHandle(roster, variant), requested, 'case-insensitive');
     assert.throws(() => resolveExactHandle(roster, 'NoExiste#9999'), e => e.code === 'TARGET_NOT_FOUND');
-    if (size > 1) {
-      assert.throws(() => resolveExactHandle(roster, undefined), e => e.code === 'TARGET_REQUIRED');
-    } else {
-      assert.strictEqual(resolveExactHandle(roster, undefined), requested, 'roster de 1: auto-selección permitida');
-    }
+    // SIN fallbacks: un objetivo ausente/vacío es TARGET_REQUIRED incluso con
+    // un único jugador en el roster.
+    assert.throws(() => resolveExactHandle(roster, undefined), e => e.code === 'TARGET_REQUIRED');
+    assert.throws(() => resolveExactHandle(roster, ''), e => e.code === 'TARGET_REQUIRED');
   }
 });
 
@@ -269,11 +270,17 @@ property('provenance: payload mutado/parcial sigue siendo normalized y sin fugas
 // ---------------------------------------------------------------------------
 property('contratos: dimensiones solo si su métrica está observada; sin prescripción sin HS', () => {
   const rng = new Rng(SEED + 7);
-  const statKeys = ['kills', 'deaths', 'kdRatio', 'scorePerRound', 'damagePerRound', 'kast', 'headshotsPercentage', 'firstKills', 'firstDeaths', 'clutches'];
   for (let it = 0; it < ITERATIONS; it++) {
     const stats = {};
-    for (const k of statKeys) if (rng.bool(0.5)) stats[k] = { value: 10 + rng.int(150) };
-    if (rng.bool(0.5)) stats.headshotsPercentage = { displayValue: `${rng.int(60)}%` };
+    for (const k of statKeys) {
+      if (!rng.bool(0.5)) continue;
+      if (k === 'kdRatio') stats[k] = { value: Number((0.2 + rng.int(30) / 10).toFixed(2)) };
+      else if (k === 'scorePerRound') stats[k] = { value: 100 + rng.int(400) };
+      else if (k === 'damagePerRound') stats[k] = { value: 60 + rng.int(240) };
+      else if (k === 'headshotsPercentage') stats[k] = { displayValue: `${rng.int(60)}%` };
+      else if (k === 'kast') stats[k] = { displayValue: `${40 + rng.int(60)}%` };
+      else stats[k] = { value: rng.int(30) };
+    }
     const profile = evaluateLearningProfile(observedMatch('Focus#NA1', stats), 'Focus#NA1');
     const has = k => stats[k] !== undefined;
     const hsObs = has('headshotsPercentage');
@@ -398,11 +405,17 @@ property('cli-args: un flag jamás se interpreta como ruta o jugador', () => {
 
 property('plan: la acción solo cita métricas observadas y es determinista', () => {
   const rng = new Rng(SEED + 10);
-  const statKeys = ['kills', 'deaths', 'kdRatio', 'scorePerRound', 'damagePerRound', 'kast', 'headshotsPercentage', 'firstKills', 'firstDeaths', 'clutches'];
   for (let it = 0; it < ITERATIONS; it++) {
     const stats = {};
-    for (const k of statKeys) if (rng.bool(0.5)) stats[k] = { value: 5 + rng.int(120) };
-    if (rng.bool(0.5)) stats.headshotsPercentage = { displayValue: `${rng.int(60)}%` };
+    for (const k of statKeys) {
+      if (!rng.bool(0.5)) continue;
+      if (k === 'kdRatio') stats[k] = { value: Number((0.2 + rng.int(30) / 10).toFixed(2)) };
+      else if (k === 'scorePerRound') stats[k] = { value: 100 + rng.int(400) };
+      else if (k === 'damagePerRound') stats[k] = { value: 60 + rng.int(240) };
+      else if (k === 'headshotsPercentage') stats[k] = { displayValue: `${rng.int(60)}%` };
+      else if (k === 'kast') stats[k] = { displayValue: `${40 + rng.int(60)}%` };
+      else stats[k] = { value: rng.int(30) };
+    }
     const match = observedMatch('Focus#NA1', stats);
     const plan = buildPlan(match, 'Focus#NA1');
     assert.ok(plan.observado.length <= 3, 'máximo 3 observaciones');
@@ -439,6 +452,32 @@ property('plan demo: nunca habilita acción ni etiqueta observada', () => {
   assert.strictEqual(plan.rutina, null, 'sin rutina en demo');
   assert.ok(plan.es_simulacion === true && plan.advertencia, 'advertencia de simulación');
   assert.ok(plan.observado.every(o => o.tipo === 'sintetica' && !/normalized_input/.test(o.fuente)), 'etiquetas sintéticas, jamás normalized_input');
+});
+
+property('dominios: valores inválidos nunca habilitan dimensiones ni acción', () => {
+  const rng = new Rng(SEED + 11);
+  const invalidPct = [-5, 150, Number.NaN, Number.POSITIVE_INFINITY];
+  const invalidCount = [-5, 2.5, Number.NaN, Number.POSITIVE_INFINITY, -0.1];
+  const invalidRating = [-5, 2001, Number.NaN, Number.POSITIVE_INFINITY];
+  for (let it = 0; it < ITERATIONS; it++) {
+    const stats = {
+      headshotsPercentage: { value: rng.pick(invalidPct) },
+      kast: { value: rng.pick(invalidPct) },
+      scorePerRound: { value: rng.pick(invalidRating) },
+      damagePerRound: { value: rng.pick(invalidRating) },
+      firstKills: { value: rng.pick(invalidCount) },
+      firstDeaths: { value: rng.pick(invalidCount) },
+      kills: { value: rng.pick(invalidCount) },
+      deaths: { value: rng.pick(invalidCount) }
+    };
+    const profile = evaluateLearningProfile(observedMatch('Focus#NA1', stats), 'Focus#NA1');
+    assert.ok(Object.values(profile.mechanical).every(v => v === null), 'valores inválidos => null');
+    assert.ok(Object.values(profile.pillarsObserved).every(v => v === false), 'sin dimensiones habilitadas');
+    assert.strictEqual(profile.prescripcionInmediata, null, 'sin prescripción');
+    const plan = buildPlan(JSON.parse(JSON.stringify(observedMatch('Focus#NA1', stats))), 'Focus#NA1');
+    assert.strictEqual(plan.accion, null, 'sin acción');
+    assert.strictEqual(plan.rutina, null, 'sin rutina');
+  }
 });
 
 console.log(`\n================================================================`);

@@ -4,10 +4,10 @@
 
 ### Local Competitive Telemetry · 360° Descriptive Diagnostics · Adaptive Aim Engine
 
-[![Version](https://img.shields.io/badge/version-4.8.2_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
+[![Version](https://img.shields.io/badge/version-4.9.0_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
 [![Runtime](https://img.shields.io/badge/runtime-Node.js_18%2B_Native-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-0_npm_(Core)-38BDF8.svg?style=for-the-badge&logo=codeforces&logoColor=white)](package.json)
-[![Tests](https://img.shields.io/badge/tests-166%2F166_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
+[![Tests](https://img.shields.io/badge/tests-173%2F173_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
 [![Audit](https://img.shields.io/badge/audit-15%2F15_properties_PASS-8B5CF6.svg?style=for-the-badge&logo=codereview&logoColor=white)](opencode_tester.js)
 [![License](https://img.shields.io/badge/license-MIT-6B7280.svg?style=for-the-badge)](LICENSE)
 
@@ -29,11 +29,11 @@ Most public web trackers only sum cumulative end-of-match stats: total kills, de
 | Analytical Dimension | Public Trackers | Valorant Analytics Engine | Direct Impact on your Rank |
 | :--- | :---: | :---: | :--- |
 | **Real Impact Kills** | 🔴 Flat K/D without context | 🟢 **Effective ADR + $FK/FD$ Ratio** | Separates opening frags from meaningless exit kills in already lost 1v4 rounds. |
-| **Gunfight Mechanics** | 🔴 Global headshot % | 🟢 **$SE/TP$ Ratio & 3 Distance Bands** | Detects over-spraying at >25m and stabilizes initial bullet placement (1-tap). |
-| **Duo Synergy** | 🔴 Non-existent | 🟢 **Duo Audit & Re-frag Windows** | Measures trade windows (<2s) and carry load distribution to stop playing isolated 1v1s. |
+| **Gunfight Mechanics** | 🔴 Global headshot % | 🟢 **$SE/TP$ Ratio (observed zones)** | Measures over-spray from observed zones; distance is n/d without positions (never inferred). |
+| **Duo Synergy** | 🔴 Non-existent | 🟢 **Duo Audit (aggregates)** | Describes kill/carry balance; it does NOT measure trade windows without temporal-context events. |
 | **Round Economy** | 🔴 Total money spent | 🟢 **Conversion across Buy Tiers (Eco/Semi/Full)** | Identifies whether you are throwing post-pistol conversions or full-buy rounds. |
 | **Account Health** | 🔴 Visual rank only | 🟡 **Heuristic MMR signal & rank estimate** | Raises an UNVERIFIED hypothesis of possible anchoring plus an indicative rank estimate. It does not measure Riot's internal MMR or real talent. |
-| **Data Input** | 🔴 Cache harvesting / Tracker | 🟢 **JSON, text or screenshot you provide** | No cache harvesting, no automatic downloads: you provide the input explicitly; the authorized route (Riot RSO) is pending credentials. |
+| **Data Input** | 🔴 Cache harvesting / Tracker | 🟢 **JSON/export or text you provide** | No cache harvesting, no automatic downloads: you provide the input explicitly; the authorized route (Riot RSO) is pending credentials. |
 
 ---
 
@@ -81,11 +81,11 @@ flowchart TD
 Engineered to fit any workflow with zero friction:
 
 ### 🔹 Option 1: Direct Mode without Terminal (Via Web AI or Gem)
-> **Ideal if you want an immediate conversational analysis by uploading a screenshot.**
+> **Ideal if you want an immediate conversational analysis from a JSON/export or pasted scoreboard text (screenshot OCR: not implemented).**
 
 1. Open the ready-to-use specification: 👉 [**`standalone_prompt.md`**](standalone_prompt.md)
 2. Copy its entire content and paste it into your preferred AI assistant (**ChatGPT, Claude, Gemini, or DeepSeek-R1**), or configure it as a **Google Gemini Gem** or **OpenAI Custom GPT**.
-3. Paste your scoreboard text or attach a screenshot to confirm the fields (automatic Tracker fetching is not supported).
+3. Paste your scoreboard text or provide a JSON/export (screenshot OCR is NOT implemented; Tracker is not supported).
 
 ### ⚡ Option 2: Local Terminal Mode (Master Dispatcher `cli.js`)
 > **Ideal for competitive players seeking speed (<100ms) and fully local analysis. There is no automatic Tracker download or cache harvesting: you provide a JSON/export, scoreboard text or a confirmed screenshot.**
@@ -140,7 +140,7 @@ Illustrative example (local fixture; not real telemetry and not an empirically v
        Causa:     Búsqueda agresiva de la baja final en lugar de cruzar fuego.
        Ajuste:    Jugar esquinas cerradas y consumir el reloj del defensor.
 
-  [#2] Ráfagas prolongadas a más de 30 metros (Rondas 11 y 18)
+  [#2] Prolonged sprays in observed rounds (illustrative example; distance is n/d without positions)
        Situación: Duelos largos contra Vandal rival en A Principal.
        Causa:     Ratio de spray elevado (SE/TP > 1.8) con dispersión excesiva.
        Ajuste:    Ráfagas cortas de 2 balas con desplazamiento lateral (counter-strafe).
@@ -166,10 +166,10 @@ The master dispatcher `cli.js` provides unified access to all platform engines:
 | :--- | :--- | :--- |
 | **360° Diagnostics** | `node cli.js match [match.json] <player>` | Evaluates 5 skill pillars and extracts the top 3 critical ELO leaks. |
 | **Aim Routine** | `node cli.js aim [match.json] <player>` | Synthesizes an adaptive 15-minute playlist in KovaaK's / Aim Lab. |
-| **Weapon Telemetry** | `node cli.js weapons [match.json] <player>` | Calculates hit zones (Head/Body/Leg), SE/TP ratio, and 3 distance bands (0-15m, 15-30m, 30-50m). |
+| **Weapon Telemetry** | `node cli.js weapons [match.json] <player>` | Calculates observed hit zones (Head/Body/Leg) and SE/TP ratio; distance is n/d: never inferred without positions. |
 | **Economy & Buy Tiers**| `node cli.js economy [match.json] <player>` | Breaks down win rate, K/D, and ADR across Pistol, Eco, Semi-Buy, and Full-Buy rounds. |
 | **Introspective Coaching**| `node cli.js coaching [match.json] <player>` | Pinpoints high-friction duels and pairs errors with curated tactical YouTube drills. |
-| **Duo Synergy Audit** | `node cli.js duo [match.json] [p1] [p2]` | Evaluates trade windows, carry load balance, and detects boost candidates. |
+| **Duo Synergy Audit** | `node cli.js duo [match.json] [p1] [p2]` | Describes kill/carry balance (no timing windows; boost heuristic is unvalidated). |
 | **1v1 Duel Matrix** | `node cli.js duels [match.json] [player]` | Analyzes direct head-to-head encounters against every opponent agent. |
 | **Offline Simulation** | `node cli.js calibrate [player] [rank] [role]` | SIMULATION with illustrative values (no player data, no real telemetry). |
 | **Career Audit** | `node cli.js career <profile.json>` | Breaks down competitive vs casual hours and generates rank milestones chronology. |
@@ -185,12 +185,25 @@ The master dispatcher `cli.js` provides unified access to all platform engines:
 
 ---
 
+## 📥 Minimum useful input (what you can provide)
+
+You don't need impossible telemetry. The `plan` flow works by levels:
+
+| Level | What you provide | What it enables |
+|---|---|---|
+| 1. Text/scoreboard | Pasted scoreboard text or a JSON/export with K/D/A, ACS, ADR and HS% | Descriptive observations and, if a metric crosses its documented threshold, **one** mechanical action with its routine |
+| 2. Round events | `player-round` / `player-round-damage` segments | Observed head/body/leg zones and spray/tap ratio. Openings/trade reads additionally require trade, position or timestamp marks |
+| 3. Verified source | Riot RSO with attestation (credentials pending) | The only path that could enable attributable causes/leaks; not available yet |
+
+If your input is not enough, `plan` doesn't fail generically: it states the **smallest concrete next datum** (e.g. "HS% from the scoreboard" or "round events with trade marks").
+
+
 ## ◈ Gemini Gems & Custom GPTs Support
 
 If you use **Google Gemini (Gems)** or **OpenAI (Custom GPTs)**, [`standalone_prompt.md`](standalone_prompt.md) is fully optimized with:
 
 - **System Instructions** structured with clean XML tags (`<system_role>`, `<vision_and_input_protocol>`, `<output_specification>`, etc.) ensuring mathematical rigor and anti-hallucination guardrails.
-- **Multi-Format Ingestion Protocol:** Built specifically for OCR visual scoreboard parsing, plain-text paste, and single-line summaries.
+- **Multi-Format Ingestion Protocol:** Built for JSON/export you provide, pasted plain text, or existing files; screenshot OCR is NOT implemented.
 - **Ready-to-Use Conversation Starters:** 4 pre-configured buttons for match diagnostics, duo synergy, KovaaK's aim routines, and the heuristic MMR signal.
 - **Deterministic Visual Output:** Clean ASCII progress bars (`[████████░░]`), clean tables, and interactive follow-up coaching decision forks.
 
@@ -204,7 +217,7 @@ If you use **Google Gemini (Gems)** or **OpenAI (Custom GPTs)**, [`standalone_pr
 - **No network by default:** analysis is local. No browser cache harvesting and no Tracker.gg queries. Input is a JSON/export, text or screenshot you explicitly provide.
 - **Zero NPM Dependencies:** Built strictly on native Node.js core libraries (`fs`, `path`, `zlib`, `crypto`, `child_process`). Zero external downloads.
 - **Cross-Platform Compatibility:** Tested and verified on Windows 11 (PowerShell/CMD), macOS (zsh), and Linux (bash).
-- **Deterministic Reliability:** 166 automated tests plus modular suites passing with Exit Code 0 (`node run_all_tests.js`) and a semantic fail-closed property audit, with no promotional score (`node opencode_tester.js`).
+- **Deterministic Reliability:** 173 automated tests plus modular suites passing with Exit Code 0 (`node run_all_tests.js`) and a semantic fail-closed property audit, with no promotional score (`node opencode_tester.js`).
 - **CLI Contract:** human and `--json` output; documented exit codes `0`/`1`/`2` (valid result / invalid input / insufficient evidence); no command silently picks a player.
 
 ---
