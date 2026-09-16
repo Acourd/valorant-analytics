@@ -4139,6 +4139,49 @@ check('plan store: evasión por symlink en padre/abuelo rechazada; ruta privada 
     }
   });
 
+check('plan store: padres intermedios escribibles (0777/0770) rechazados; no se crea ni escribe nada',
+  () => {
+    if (process.platform === 'win32') return; // política POSIX de propietario/permisos
+    const { intermediateDirPolicyViolation } = require(path.join(scriptsDir, 'safe_fs.js'));
+    assert.ok(/escritura de grupo/.test(intermediateDirPolicyViolation(0o777, 1, 1)), '0777 padre rechazado');
+    assert.ok(/escritura de grupo/.test(intermediateDirPolicyViolation(0o770, 1, 1)), '0770 padre rechazado');
+    assert.strictEqual(intermediateDirPolicyViolation(0o700, 1, 1), null, '0700 propio admitido');
+    assert.strictEqual(intermediateDirPolicyViolation(0o755, 1, 1), null, '0755 sin escritura compartida admitido');
+    assert.strictEqual(intermediateDirPolicyViolation(0o700, 0, 1), null, 'root como propietario de sistema admitido');
+    assert.ok(/otro usuario/.test(intermediateDirPolicyViolation(0o700, 2, 1)), 'otro usuario rechazado');
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'va-parentperm-'));
+    const prev = process.env.VALORANT_PLANS_DIR;
+    try {
+      for (const mode of [0o777, 0o770]) {
+        const parent = path.join(base, `padre-${mode.toString(8)}`);
+        fs.mkdirSync(parent);
+        fs.chmodSync(parent, mode);
+        process.env.VALORANT_PLANS_DIR = path.join(parent, 'plans');
+        let out = '';
+        try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json']); } catch (e) { out = String(e.stdout || ''); }
+        const created = JSON.parse(out);
+        assert.strictEqual(created.tracking.ok, false, `padre ${mode.toString(8)}: persistencia bloqueada`);
+        assert.strictEqual(created.tracking.code, 'PLAN_UNSAFE_PATH');
+        assert.ok(!fs.existsSync(path.join(parent, 'plans')), `padre ${mode.toString(8)}: no se crea plans`);
+      }
+      // Abuelo 0777 con padre legítimo: también bloquea y no crea nada.
+      const grand = path.join(base, 'abuelo-0777');
+      fs.mkdirSync(grand);
+      fs.chmodSync(grand, 0o777);
+      const child = path.join(grand, 'privado');
+      fs.mkdirSync(child);
+      fs.chmodSync(child, 0o700);
+      process.env.VALORANT_PLANS_DIR = path.join(child, 'plans');
+      let out = '';
+      try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json']); } catch (e) { out = String(e.stdout || ''); }
+      assert.strictEqual(JSON.parse(out).tracking.code, 'PLAN_UNSAFE_PATH', 'abuelo 0777 rechazado');
+      assert.ok(!fs.existsSync(path.join(child, 'plans')), 'no se crea plans bajo abuelo controlable');
+    } finally {
+      process.env.VALORANT_PLANS_DIR = prev;
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben
 // reflejar EXACTAMENTE el número de casos registrados y ejecutados. Un
 // manifiesto desincronizado hace fallar la suite (imposible sobre-declarar

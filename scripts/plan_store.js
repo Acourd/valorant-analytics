@@ -128,11 +128,16 @@ function atomicWrite(file, obj) {
     if (fd !== null) { try { fs.closeSync(fd); } catch (e) { /* cerrado */ } }
   }
   try { fs.chmodSync(tmp, 0o600); } catch (e) { /* Windows */ }
+  // Revalidación de la cadena completa antes del rename (un ancestro
+  // controlable podría haber aparecido/renombrado el directorio entre la
+  // verificación inicial y este punto).
+  safeFs.ensurePrivateDir(path.dirname(file), { code: 'PLAN_UNSAFE_PATH' });
   try {
     fs.renameSync(tmp, file);
   } catch (e) {
     // Windows no reemplaza con rename: se reemplaza de forma controlada, sin
-    // seguir jamás un enlace en el destino.
+    // seguir jamás un enlace en el destino, y revalidando antes.
+    safeFs.ensurePrivateDir(path.dirname(file), { code: 'PLAN_UNSAFE_PATH' });
     const targetStat = safeFs.lstatRegularOrAbsent(file);
     if (targetStat && targetStat.isSymbolicLink()) {
       try { fs.rmSync(tmp, { force: true }); } catch (e2) { /* limpio */ }

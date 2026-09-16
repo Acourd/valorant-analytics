@@ -1,5 +1,10 @@
 # Changelog — valorant-analytics
 
+## 4.11.3 — Padres intermedios no controlables
+
+- **Corregido (perímetro dependiente de ancestro):** una ruta como `/tmp/padre-compartido-0777/plans` era admisible si `plans` acababa en 0700, pero un ancestro escribible podía renombrar/sustituir el directorio final. Ahora **cada padre intermedio** debe ser directorio, no symlink, no escribible por grupo/otros y no pertenecer a otro usuario (se tolera root como propietario de directorios de sistema). Excepción mínima sin extensión a hijos: solo los **hijos directos de la raíz** (`/tmp`, `/var`, `/private`…) quedan exentos. La cadena completa se **revalida antes de crear el temporal y antes del `rename`**.
+- Regresión `tests #198` (padre/abuelo 0777 y 0770 sin creación ni escritura) 198/198 checks. Versión 4.11.3.
+
 ## 4.11.2 — Perímetro completo (sin evasión por symlinks ancestros)
 
 - **Corregido (evasión del perímetro):** la validación solo miraba el directorio final, así que `/tmp/enlace-simbolico/plans` podía crear `plans` dentro del destino real del enlace. Ahora `safe_fs.ensurePrivateDir` recorre **todos los componentes desde la raíz** y rechaza cualquier symlink/junction en cualquier nivel (final, padre o abuelo). La creación es **escalonada** (nunca `recursive: true` a través de padres no validados) y la política de permisos/propietario se aplica solo al directorio final. La misma validación corre antes de listar, leer, actualizar y escribir.

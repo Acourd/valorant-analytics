@@ -116,15 +116,31 @@ function assertDirSafe(dirPath, { code = 'UNSAFE_PATH' } = {}) {
 }
 
 /**
+ * Política de PADRE INTERMEDIO (no raíz, no directorio final): no puede ser
+ * escribible por grupo/otros ni pertenecer a otro usuario distinto del actual
+ * (se tolera root como propietario de directorios de sistema, p. ej.
+ * /var/folders en macOS). Los hijos directos de la raíz quedan exentos de
+ * política (p. ej. /tmp, /var): son raíces de sistema, no padres controlables.
+ */
+function intermediateDirPolicyViolation(mode, uid, currentUid) {
+  if ((mode & 0o022) !== 0) return 'permite escritura de grupo o de otros';
+  if (typeof uid === 'number' && typeof currentUid === 'number' && uid !== currentUid && uid !== 0) {
+    return `pertenece a otro usuario (uid ${uid} ≠ ${currentUid})`;
+  }
+  return null;
+}
+
+/**
  * Crea/valida un directorio privado recorriendo TODOS los componentes de la
  * ruta desde la raíz (o desde el root de la unidad en Windows):
- *   - cualquier componente que sea symlink/junction => fail-closed (incluidos
- *     padres y abuelos: evita la evasión `/ruta/enlace/planes`);
+ *   - cualquier componente que sea symlink/junction => fail-closed, salvo la
+ *     excepción mínima de symlinks de sistema hijos directos de la raíz;
  *   - cualquier componente que no sea directorio => fail-closed;
  *   - la creación es ESCALONADA (nunca `recursive: true` a través de padres no
  *     validados): cada nivel nuevo se crea sin recursión y se re-inspecciona;
- *   - la política de permisos/propietario se aplica SOLO al directorio final
- *     (los padres del sistema como /tmp pueden ser legítimamente 1777).
+ *   - PADRES INTERMEDIOS: no escribibles por grupo/otros y no de otro usuario;
+ *   - el directorio FINAL exige además propiedad del usuario actual y se ajusta
+ *     a 0700.
  * Devuelve la ruta resuelta.
  */
 function ensurePrivateDir(dirPath, { code = 'UNSAFE_PATH' } = {}) {
@@ -191,6 +207,14 @@ function ensurePrivateDir(dirPath, { code = 'UNSAFE_PATH' } = {}) {
         }
       }
       try { fs.chmodSync(current, 0o700); } catch (e) { /* Windows: mejor esfuerzo */ }
+    } else if (i > 0 && process.platform !== 'win32') {
+      // Padre/abuelo intermedio: un ancestro controlable invalidaría el
+      // perímetro final aunque `plans` acabe en 0700.
+      const currentUid = typeof process.getuid === 'function' ? process.getuid() : null;
+      const violation = intermediateDirPolicyViolation(st.mode & 0o7777, typeof st.uid === 'number' ? st.uid : null, currentUid);
+      if (violation) {
+        throw err(`El directorio padre (${current}, modo ${(st.mode & 0o7777).toString(8)}) ${violation}: un ancestro controlable invalidaría el perímetro (fail-closed).`);
+      }
     }
   }
   return resolved;
@@ -201,6 +225,7 @@ module.exports = {
   lstatRegularOrAbsent,
   readFileNoFollow,
   storageDirPolicyViolation,
+  intermediateDirPolicyViolation,
   assertDirSafe,
   ensurePrivateDir
 };
