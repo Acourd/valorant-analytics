@@ -26,6 +26,7 @@ const steps = [{ label: 'check_syntax.js', args: ['check_syntax.js'], env: {} },
 if (fs.existsSync(modularDir)) {
   fs.readdirSync(modularDir)
     .filter(f => f.endsWith('.js'))
+    .filter(f => !f.startsWith('stress_') || process.env.VA_RUN_STRESS === '1')
     .sort()
     .forEach(f => {
       const rel = path.join('tests', f);

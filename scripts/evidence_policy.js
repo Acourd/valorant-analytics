@@ -4,6 +4,8 @@
 const crypto = require('crypto');
 const path = require('path');
 const riotSource = require('./riot_source');
+const budgets = require('./resource_budget');
+const schemaContract = require('./schema_contract');
 
 /**
  * evidence_policy.js - Política de evidencia COMPARTIDA por el motor, el CLI y
@@ -343,7 +345,10 @@ function observeMatchTelemetry(matchData, playerHandle, options = {}) {
   const cell = (obj, k) => (obj && obj[k] && (obj[k].value !== undefined ? obj[k].value : obj[k].displayValue));
   const sourceRef = stableRef(matchData, options.originPath);
   const rounds = [];
+  const timeBudget = new budgets.TimeBudget();
+  let segIndex = 0;
   segments.forEach(s => {
+    timeBudget.sample(++segIndex, 'observación de segmentos');
     const roundRef = s.attributes && s.attributes.round;
     if (!Number.isInteger(roundRef) || roundRef < 1) return;
     if (s.type === 'player-round-damage') {
@@ -420,7 +425,13 @@ function observeVerifiedMatch(matchData, playerPuuid, options = {}) {
   }
   const matchId = String(options.attestation.matchId).trim().toLowerCase();
   const sourceRef = `match:${matchId}`;
+  // Presupuestos y contrato de esquema ANTES de derivar métricas: nada de
+  // análisis parcial si la entrada excede límites o es de versión incompatible.
+  budgets.checkJsonDepth(matchData);
+  const schemaValidation = schemaContract.validateRiotPayload(matchData);
   const players = Array.isArray(matchData && matchData.players) ? matchData.players : [];
+  budgets.checkPlayers(players.length);
+  budgets.checkArrayItems('roundResults', Array.isArray(matchData && matchData.roundResults) ? matchData.roundResults.length : 0);
   // Objetivo EXACTO también en la vía verificada: jamás se analiza a otro
   // jugador cuando el puuid pedido no aparece (o aparece duplicado).
   if (typeof playerPuuid !== 'string' || playerPuuid.trim() === '') {
@@ -478,9 +489,17 @@ function observeVerifiedMatch(matchData, playerPuuid, options = {}) {
     kast: undefined, fk: undefined, fd: undefined, econRating: undefined, winPct: undefined, clutches: undefined
   };
   const roundResults = Array.isArray(matchData && matchData.roundResults) ? matchData.roundResults : [];
+  budgets.checkRounds(roundResults.length);
   const rounds = [];
+  const roundBudget = new budgets.TimeBudget();
   roundResults.forEach((rr, idx) => {
+    roundBudget.sample(idx + 1, 'adaptador VAL-MATCH-V1');
     const psList = Array.isArray(rr && rr.playerStats) ? rr.playerStats : [];
+    budgets.checkArrayItems('playerStats', psList.length);
+    for (const ps of psList) {
+      if (Array.isArray(ps && ps.damage)) budgets.checkArrayItems('damage', ps.damage.length);
+      if (Array.isArray(ps && ps.kills)) budgets.checkArrayItems('kills', ps.kills.length);
+    }
     const ps = psList.find(p => p && p.puuid === (focus && focus.puuid)) || null;
     if (!ps) return;
     const roundRef = num(rr.roundNum) !== null ? num(rr.roundNum) + 1 : idx + 1;
@@ -496,7 +515,7 @@ function observeVerifiedMatch(matchData, playerPuuid, options = {}) {
       rounds.push(mintVerifiedEvent({ sourceRef, roundRef, event: 'economy', detail: `spent ${spent}`, context: { spentCredits: spent } }));
     }
   });
-  return { observed, rounds, sourceRef, matchId, provenance: 'verified_source' };
+  return { observed, rounds, sourceRef, matchId, provenance: 'verified_source', schemaDiagnostics: schemaValidation.diagnostics };
 }
 
 // Operación de PRODUCTO: ingesta verificada de una partida real (fetch

@@ -21,6 +21,8 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const budgets = require('./resource_budget');
+const schemaContract = require('./schema_contract');
 
 const AGENTS = [
   'Jett', 'Reyna', 'Raze', 'Phoenix', 'Yoru', 'Neon', 'Iso',
@@ -108,11 +110,14 @@ function parseTextScoreboard(rawText, options = {}) {
   if (!rawText || typeof rawText !== 'string') {
     throw new Error('parseTextScoreboard requiere una cadena de texto no vacía.');
   }
+  budgets.checkTextLength(rawText);
 
   const text = String(rawText).replace(/^\uFEFF/, '');
   const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const players = [];
   const mapName = options.map || detectMap(text) || null;
+  const timeBudget = new budgets.TimeBudget();
+  let lineNo = 0;
 
   // Candidatos #TAG Unicode-safe (nombres CJK, acentos, etc.).
   const HANDLE_CANDIDATE = /([^\s#][^#\n]*?)#([A-Za-z0-9]{1,16})/gu;
@@ -123,6 +128,7 @@ function parseTextScoreboard(rawText, options = {}) {
     .trim();
 
   for (const line of lines) {
+    timeBudget.sample(++lineNo, 'parse de scoreboard');
     const candidates = [];
     for (const c of line.matchAll(HANDLE_CANDIDATE)) {
       const name = cleanHandleName(c[1]);
@@ -182,6 +188,8 @@ function parseTextScoreboard(rawText, options = {}) {
     );
   }
 
+  budgets.checkPlayers(players.length);
+  budgets.checkEvents(players.length);
   return buildObservedMatch(players, {
     mapName,
     matchId: options.matchId,
@@ -206,6 +214,9 @@ function assembleRawMatchStructure(extractedPlayers, mapName, roundsPlayed = 24,
     err.code = 'TARGET_REQUIRED';
     throw err;
   }
+  budgets.checkRounds(roundsPlayed);
+  budgets.checkPlayers((extractedPlayers || []).length + 10);
+  budgets.checkEvents(((extractedPlayers || []).length + 10) * (roundsPlayed + 1) * 2 + roundsPlayed * 10);
   const matchId = options.matchId || `demo-${sha256Text(`${mapName}|${roundsPlayed}|${targetHandle}|${(extractedPlayers || []).map(p => p && p.handle).join(',')}`).slice(0, 16)}`;
   const defaultRoster = [
     { handle: targetHandle, agent: 'Iso', rank: 'Gold 2', kills: 18, deaths: 15, assists: 4, acs: 238, adr: 156.4, hs: 24.2, fk: 3, fd: 2 },
@@ -322,8 +333,10 @@ function assembleRawMatchStructure(extractedPlayers, mapName, roundsPlayed = 24,
 
   const blueRoster = finalRoster.slice(0, 5);
   const redRoster = finalRoster.slice(5, 10);
+  const demoBudget = new budgets.TimeBudget();
 
   for (let r = 1; r <= roundsPlayed; r++) {
+    demoBudget.sample(r, 'generación demo de rondas');
     const isBlueWin = r <= 13;
     let loadoutVal = 4200;
     if (r === 1 || r === 13) loadoutVal = 800;
@@ -485,18 +498,34 @@ function resolveMatchDataResilient(source, playerHandle = null, options = {}) {
     if (!canonical) bareExistingFile = fs.existsSync(source);
   }
   const looksLikeFile = typeof source === 'string' && !isUrl && (sep || ext || bareExistingFile);
+  const timeBudget = new budgets.TimeBudget();
   if (looksLikeFile) {
     if (!fs.existsSync(source)) {
       throw new Error(`Archivo no encontrado: "${source}". Proporciona una ruta existente, un volcado de scoreboard, un match ID canónico o usa --demo.`);
     }
+    const stat = fs.statSync(source);
+    // Presupuesto de tamaño ANTES de leer: fail-closed sin análisis parcial.
+    budgets.checkFileSize(stat.size);
     const content = fs.readFileSync(source, 'utf8').replace(/^\uFEFF/, '');
+    timeBudget.checkpoint('lectura de archivo');
     if (content.trim().startsWith('{')) {
+      let parsed;
       try {
-        return JSON.parse(content);
+        parsed = JSON.parse(content);
       } catch (jsonErr) {
         throw new Error(`Archivo JSON corrupto "${source}": ${jsonErr.message}. No se generó telemetría sintética para evitar análisis falsos.`);
       }
+      // Contrato de esquema: profundidad, estructura y versión ANTES de analizar.
+      budgets.checkJsonDepth(parsed);
+      const validation = schemaContract.validateNormalizedMatch(parsed);
+      if (parsed && parsed.data && parsed.data.metadata) {
+        parsed.data.metadata.schemaDiagnostics = validation.diagnostics;
+      }
+      timeBudget.checkpoint('validación de esquema');
+      return parsed;
     }
+    // Texto de marcador: presupuesto de longitud antes de parsear.
+    budgets.checkTextLength(content);
     return parseTextScoreboard(content, { targetPlayer: playerHandle, ...options });
   }
 

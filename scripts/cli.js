@@ -386,6 +386,10 @@ if (!command || command === '--help' || command === '-h') {
   console.log(`FLAGS: --json, --demo, --trust-new-key, --advanced son independientes del orden y nunca se interpretan como posicionales.`);
   console.log(`CÓDIGOS DE SALIDA: 0 = resultado descriptivo válido (incluye n/d y "omitido" como respuesta contractual);`);
   console.log(`                   1 = entrada, objetivo o comando inválido; 2 = evidencia insuficiente para el resultado principal (plan, guardian, drift).`);
+  console.log(`PRESUPUESTOS: tamaño de archivo, longitud de texto, profundidad JSON, jugadores/rondas/eventos/arreglos, tiempo y workers.`);
+  console.log(`              Al excederse: INPUT_TOO_LARGE · SCHEMA_LIMIT_EXCEEDED · RESOURCE_BUDGET_EXCEEDED (configurables con VA_BUDGET_*, p. ej. VA_BUDGET_MAX_PLAYERS).`);
+  console.log(`ESQUEMA: schemaVersion 1; canónica matchInfo.schemaVersion (Riot) / data.metadata.schemaVersion (normalizado).`);
+  console.log(`         Ausente = legado limitado; incompatible o versión de raíz sin canónica = SCHEMA_UNSUPPORTED. Campos desconocidos se declaran sin elevar procedencia.`);
   console.log(`OBJETIVO: ningún comando selecciona un jugador, archivo o fixture en silencio.`);
   console.log(`========================================================================\n`);
   throw new CliExit(EXIT.OK);
@@ -417,6 +421,10 @@ try {
       printBanner();
       console.log(`🧭 PLAN PARA LA SIGUIENTE PARTIDA: ${plan.player} | ${plan.estado}`);
       console.log(`Procedencia: ${plan.provenanceLabel}`);
+      if (plan.schema && plan.schema.schemaStatus !== 'supported') {
+        const unknown = (plan.schema.unknownMetadataFields || plan.schema.unknownFields || []);
+        console.log(`ℹ️ Esquema: ${plan.schema.schemaStatus}${plan.schema.limited ? ' (limitado)' : ''}${unknown.length ? ` · campos desconocidos ignorados: ${unknown.join(', ')}` : ''}`);
+      }
       if (plan.es_simulacion) console.log(`⚠️  ${plan.advertencia}`);
       console.log(`------------------------------------------------------------------------`);
       console.log(plan.es_simulacion ? `1. LO QUE EL DEMO SIMULA (NO observado):` : `1. LO OBSERVADO (solo métricas presentes):`);
