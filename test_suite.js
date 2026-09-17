@@ -4013,12 +4013,27 @@ check('plan store: perímetro de directorio y TOCTOU (0777/0770/symlink/sustituc
         }
       }
     }
-    // Sustitución entre lstat y apertura: solo si dev/ino son utilizables.
-    const probe = path.join(os.tmpdir(), `ino-probe-${process.pid}.json`);
-    fs.writeFileSync(probe, '{}');
-    const inoUsable = fs.statSync(probe).ino !== 0;
-    fs.unlinkSync(probe);
-    if (inoUsable) {
+    // Sustitución real entre lstat y apertura: SOLO donde el filesystem ofrece
+    // identidad estable (recrear el archivo cambia dev/ino). En Windows/NTFS el
+    // file-id puede reutilizarse, así que allí la garantía no depende del azar
+    // del inodo: la cubren las pruebas deterministas con estadísticas inyectadas
+    // (checks siguientes) sobre el predicado puro.
+    const identityStable = (() => {
+      const probe = path.join(os.tmpdir(), `identity-probe-${process.pid}.json`);
+      try {
+        fs.writeFileSync(probe, 'probe');
+        const first = fs.lstatSync(probe);
+        fs.unlinkSync(probe);
+        fs.writeFileSync(probe, 'probe');
+        const second = fs.lstatSync(probe);
+        return first.ino !== 0 && second.ino !== 0 && first.ino !== second.ino;
+      } catch (e) {
+        return false;
+      } finally {
+        try { fs.unlinkSync(probe); } catch (e) { /* limpio */ }
+      }
+    })();
+    if (identityStable) {
       withPlansDir((dir) => {
         const created = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json']));
         const file = path.join(dir, `${created.planId}.json`);
@@ -4039,6 +4054,50 @@ check('plan store: perímetro de directorio y TOCTOU (0777/0770/symlink/sustituc
           fs.openSync = origOpen;
         }
       });
+    } else {
+      assert.ok(true, 'filesystem sin identidad estable (NTFS): el fallback se prueba con estadísticas inyectadas');
+    }
+  });
+
+check('safe_fs: substitutionDetected puro (identidad, metadatos y estadísticas inválidas)',
+  () => {
+    const safeFs = require(path.join(scriptsDir, 'safe_fs.js'));
+    const base = { dev: 1, ino: 100, size: 10, mtimeMs: 1000, birthtimeMs: 500 };
+    assert.strictEqual(safeFs.substitutionDetected(base, { ...base }).detected, false, 'idénticos => sin sustitución');
+    assert.strictEqual(safeFs.substitutionDetected(base, { ...base, ino: 101 }).reason, 'IDENTITY_CHANGED', 'ino distinto => identidad');
+    assert.strictEqual(safeFs.substitutionDetected(base, { ...base, dev: 2 }).reason, 'IDENTITY_CHANGED', 'dev distinto => identidad');
+    const winZero = { ...base, dev: 0, ino: 0 };
+    assert.strictEqual(safeFs.substitutionDetected(winZero, { ...winZero, size: 11 }).reason, 'METADATA_CHANGED', 'identidad cero + tamaño distinto => metadatos');
+    assert.strictEqual(safeFs.substitutionDetected(winZero, { ...winZero, mtimeMs: 1001 }).reason, 'METADATA_CHANGED', 'identidad cero + mtime distinto => metadatos');
+    assert.strictEqual(safeFs.substitutionDetected(winZero, { ...winZero, birthtimeMs: 501 }).reason, 'METADATA_CHANGED', 'identidad cero + birthtime distinto => metadatos');
+    assert.strictEqual(safeFs.substitutionDetected(base, { ...base, size: 11 }).reason, 'METADATA_CHANGED', 'identidad igual no es concluyente: metadatos deciden');
+    assert.strictEqual(safeFs.substitutionDetected(winZero, { ...winZero }).detected, false, 'identidad cero y metadatos iguales => best-effort sin detección');
+    const invalid = [[null, base], [base, undefined], [{}, {}], [{ ...base, size: NaN }, base], [{ ...base, mtimeMs: Infinity }, base], [{ ...base, dev: '1' }, base]];
+    for (const [a, b] of invalid) {
+      assert.strictEqual(safeFs.substitutionDetected(a, b).reason, 'INVALID_STAT', 'estadísticas inválidas => fail-closed');
+    }
+  });
+
+check('safe_fs: readFileNoFollow falla cerrado con estadísticas inyectadas (sin depender del filesystem)',
+  () => {
+    const safeFs = require(path.join(scriptsDir, 'safe_fs.js'));
+    const tmp = path.join(os.tmpdir(), `safe-fs-inject-${process.pid}.json`);
+    fs.writeFileSync(tmp, JSON.stringify({ ok: true }));
+    try {
+      const st = fs.lstatSync(tmp);
+      const snapshot = (overrides) => Object.assign({
+        dev: st.dev, ino: st.ino, size: st.size, mtimeMs: st.mtimeMs, birthtimeMs: st.birthtimeMs
+      }, overrides);
+      const buf = safeFs.readFileNoFollow(tmp, 'prueba', snapshot({}));
+      assert.ok(Buffer.isBuffer(buf) && buf.length === st.size, 'lectura normal sin falso positivo');
+      assert.throws(() => safeFs.readFileNoFollow(tmp, 'prueba', snapshot({ dev: st.dev + 1, ino: st.ino + 1 })),
+        e => /Sustitución/.test(e.message) && /dev\/ino/.test(e.message), 'identidad inyectada => fail-closed');
+      assert.throws(() => safeFs.readFileNoFollow(tmp, 'prueba', snapshot({ size: st.size + 1 })),
+        e => /Sustitución/.test(e.message) && /metadatos/.test(e.message), 'metadatos inyectados => fail-closed');
+      assert.throws(() => safeFs.readFileNoFollow(tmp, 'prueba', { ino: st.ino }),
+        e => /Sustitución|inválidas/.test(e.message), 'estadísticas inválidas => fail-closed');
+    } finally {
+      try { fs.unlinkSync(tmp); } catch (e) { /* limpio */ }
     }
   });
 

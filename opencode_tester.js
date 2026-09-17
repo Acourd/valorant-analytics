@@ -144,16 +144,15 @@ property('P12', 'SKILL.md no promete bypass de Cloudflare ni API de Tracker', ()
   return { pass: !bad, details: bad ? 'referencias contradictorias presentes' : 'documentación coherente' };
 });
 
-// P13 — El harness determinista completo sigue verde.
-property('P13', 'test_suite.js completa (con gate de manifiesto) sale con Exit 0', () => {
-  const r = runNode([path.join(rootDir, 'test_suite.js')]);
-  const ok = r.code === 0 && /All valorant-analytics deterministic tests passed/.test(r.out);
-  const fails = String(r.out).split('\n').filter(l => /FAIL:/.test(l)).slice(0, 5).join(' | ');
-  if (!ok) {
-    // Diagnóstico visible en el log de CI (el output hijo está capturado).
-    console.error(`P13 DIAG exit=${r.code}\n${String(r.out).slice(-2500)}`);
-  }
-  return { pass: ok, details: ok ? 'exit=0' : `exit=${r.code}${fails ? ` :: ${fails}` : ` :: ${String(r.out).slice(-300)}`}` };
+// P13 — Un solo punto de ejecución de la suite (sin reejecución anidada).
+property('P13', 'run_all_tests incluye la suite una vez y el tester no la reejecuta', () => {
+  const runner = fs.readFileSync(path.join(rootDir, 'run_all_tests.js'), 'utf8');
+  const testerSrc = fs.readFileSync(__filename, 'utf8');
+  const runnerIncludes = /test_suite\.js/.test(runner);
+  // Ausencia de invocación anidada (regex literal, no auto-coincide).
+  const nested = /runNode\([^\n]*test_suite\.js/.test(testerSrc);
+  const ok = runnerIncludes && !nested;
+  return { pass: ok, details: ok ? 'runner único, sin reejecución anidada' : `runnerIncluye=${runnerIncludes} reejecuta=${nested}` };
 });
 
 // P14 — --json produce salida estructurada pura (sin render humano).
