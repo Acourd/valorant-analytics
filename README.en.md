@@ -76,8 +76,6 @@ a documented threshold?"}
 
 It does not query Tracker.gg or OP.GG, does not read browser cache, cookies or sessions, and does not interpret screenshots (OCR not implemented). Riot RSO is an **optional future possibility**, not a requirement or a feature available today.
 
-
-
 ---
 
 ## ◈ Three Ways to Start
@@ -206,7 +204,6 @@ node cli.js plan export --pseudonymized                # explicit stdout export 
 
 **Output profiles (same evidence, different presentation):** `--profile player` (brief), `--profile coach` (evidence, limits and suggested questions) and `--profile analyst` (structured JSON). They do not change the evidence policy.
 
-
 ## 🧱 Resource budgets and schema contract
 
 Untrusted inputs are processed with **explicit limits**. `VA_BUDGET_*` (e.g. `VA_BUDGET_MAX_PLAYERS=32`) **can only REDUCE** a limit: invalid values (text, NaN, Infinity, non-integers, ≤0) or attempts to raise it above the compiled safe maximum **fail closed** with `RESOURCE_BUDGET_EXCEEDED`. There is no environment escape hatch to raise limits. Exceeding a limit fails closed with a stable code and **no partial analysis**:
@@ -229,7 +226,6 @@ Codes: `INPUT_TOO_LARGE` (file/text), `SCHEMA_LIMIT_EXCEEDED` (depth, players, r
 
 **Stress modality (outside the normal matrix):** `node tests/stress_dsse.js` runs bounded rounds of concurrent DSSE keystore registrations with the full invariant each round and no silent retries (the first error is logged). CI runs it in a separate job (`VA_STRESS_ROUNDS=3`).
 
-
 ## 📥 Minimum useful input (what you can provide)
 
 You don't need impossible telemetry. The `plan` flow works by levels:
@@ -241,7 +237,6 @@ You don't need impossible telemetry. The `plan` flow works by levels:
 | 3. Verified source | Riot RSO with attestation (credentials pending) | The only path that could enable attributable causes/leaks; not available yet |
 
 If your input is not enough, `plan` doesn't fail generically: it states the **smallest concrete next datum** (e.g. "HS% from the scoreboard" or "round events with trade marks").
-
 
 ## ◈ Gemini Gems & Custom GPTs Support
 

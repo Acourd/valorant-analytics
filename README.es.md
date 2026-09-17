@@ -76,8 +76,6 @@ un umbral documentado?"}
 
 No consulta Tracker.gg ni OP.GG, no lee caché/cookies/sesiones del navegador y no interpreta capturas (OCR no implementado). Riot RSO es una **posibilidad futura opcional**, no un requisito ni una funcionalidad disponible hoy.
 
-
-
 ---
 
 ## ◈ Tres Formas de Empezar
@@ -206,7 +204,6 @@ node cli.js plan export --pseudonymized                # exportación explícita
 
 **Perfiles de salida (misma evidencia, distinta presentación):** `--profile player` (breve), `--profile coach` (evidencia, límites y preguntas sugeridas) y `--profile analyst` (JSON estructurado). No cambian la política de evidencia.
 
-
 ## 🧱 Presupuestos de recursos y contrato de esquema
 
 Las entradas no confiables se procesan con **límites explícitos**. `VA_BUDGET_*` (p. ej. `VA_BUDGET_MAX_PLAYERS=32`) **solo puede REDUCIR** un límite: los valores inválidos (texto, NaN, Infinity, no enteros, ≤0) o los intentos de ampliación por encima del máximo seguro compilado **fallan cerrado** con `RESOURCE_BUDGET_EXCEEDED`. No existe escape de entorno para ampliar límites. Al exceder un límite se falla cerrado con un código estable y **sin análisis parcial**:
@@ -229,7 +226,6 @@ Códigos: `INPUT_TOO_LARGE` (archivo/texto), `SCHEMA_LIMIT_EXCEEDED` (profundida
 
 **Modalidad de estrés (fuera de la matriz normal):** `node tests/stress_dsse.js` ejecuta rondas acotadas de registro concurrente en el keystore DSSE con invariante completo en cada ronda y sin reintentos silenciosos (el primer error queda en logs). CI la corre en un job separado (`VA_STRESS_ROUNDS=3`).
 
-
 ## 📥 Entrada mínima útil (qué puedes aportar)
 
 No necesitas telemetría imposible. El flujo `plan` funciona por niveles:
@@ -241,7 +237,6 @@ No necesitas telemetría imposible. El flujo `plan` funciona por niveles:
 | 3. Fuente verificada | Riot RSO con atestación (credenciales pendientes) | Única vía que podría habilitar causas/fugas atribuibles; hoy no disponible |
 
 Si tu entrada no alcanza, `plan` no falla de forma genérica: indica el **siguiente dato más pequeño y concreto** (p. ej. "HS% del marcador" o "eventos de ronda con marcas de trade").
-
 
 ## ◈ Soporte para Gemini Gems y Custom GPTs
 
