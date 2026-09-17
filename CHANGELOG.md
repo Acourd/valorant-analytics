@@ -8,6 +8,11 @@
 - **Fixtures y pruebas:** `examples/tracker_text_{victory,defeat,partial,truncated}.txt` (anonimizados, handles inventados) + 11 checks (`#201`–`#211`). 211/211 checks. Versión 4.12.0.
 - **Fechas sin precisión fabricada:** `dateText` conserva siempre el texto original; `timestamp` (ISO) solo se genera cuando el formato es inequívoco (ISO, mes textual o numérico con un campo >12 que desambigua D/M vs M/D). Una fecha numérica ambigua (`6/9/26`) deja `timestamp: null`, `dateAmbiguity: 'fecha_ambigua_por_locale'` y lo declara en faltantes y límites.
 - **Fail-closed de duplicados:** `learning_profile` conserva la lista de handles CON duplicados, de modo que un Riot ID repetido en la entrada devuelve `TARGET_AMBIGUOUS` en vez de colapsarse silenciosamente a un único jugador.
+
+### Nota de trazabilidad
+
+El merge **`b97e50e`** en `main` corresponde al contenido de la **PR #23**, aunque su mensaje diga erróneamente *“Merge pull request #22 from Acourd/feat/tracker-text-import”*. La historia de `main` **no se reescribe**: la relación correcta es **PR #23 → `8b20062` → `b97e50e`**. Lección operativa: el título del merge se deriva del API de la PR (sin número fijo en el script) para que `#N` coincida siempre.
+
 ## 4.11.4 — Detección de sustitución determinista (sin reejecución de la suite)
 
 - **Corregido (confiabilidad del test #195):** la prueba mezclaba seguridad con comportamiento del filesystem (monkeypatch de `fs.openSync` esperando que `dev/ino` cambiaran); en NTFS el file-id puede reutilizarse al recrear un archivo y el check fallaba aunque no hubiera regresión. `scripts/safe_fs.js` expone ahora el predicado **puro** `substitutionDetected(expectedStat, openedStat)`: identidad `dev/ino` primero y, como señal ADICIONAL, tamaño/mtime/birthtime (la identidad igual no es concluyente: en NTFS puede reutilizarse el file-id); estadísticas inválidas ⇒ fail-closed. Windows sigue documentado como best-effort (identidad y metadatos iguales no son distinguibles).
