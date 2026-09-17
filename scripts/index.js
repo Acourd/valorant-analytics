@@ -52,6 +52,12 @@ const {
   assembleRawMatchStructure,
   resolveMatchDataResilient
 } = require('./universal_ingestor');
+const {
+  detectTrackerTextExport,
+  looksLikeTrackerText,
+  parseTrackerTextExport,
+  TRACKER_FORMAT_CODE
+} = require('./tracker_text_ingestor');
 const { SessionGuardian } = require('./session_guardian');
 const { DriftDetector } = require('./drift_detector');
 const { ConsensusArbiter } = require('./consensus_arbiter');
@@ -91,6 +97,10 @@ module.exports = {
   parseTextScoreboard,
   assembleRawMatchStructure,
   resolveMatchDataResilient,
+  detectTrackerTextExport,
+  looksLikeTrackerText,
+  parseTrackerTextExport,
+  TRACKER_FORMAT_CODE,
   // Observabilidad longitudinal
   SessionGuardian,
   DriftDetector,

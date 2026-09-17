@@ -1,6 +1,6 @@
 {
   "name": "valorant-analytics",
-  "version": "4.11.4",
+  "version": "4.12.0",
   "description": "Motor determinista de telemetría competitiva de Valorant (Node.js nativo, cero dependencias); biblioteca y CLI",
   "main": "scripts/index.js",
   "bin": {

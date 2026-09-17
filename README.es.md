@@ -4,10 +4,10 @@
 
 ### Telemetría Competitiva Local · Diagnóstico Descriptivo 360° · Motor de Puntería Adaptativo
 
-[![Versión](https://img.shields.io/badge/versión-4.11.4_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
+[![Versión](https://img.shields.io/badge/versión-4.12.0_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
 [![Runtime](https://img.shields.io/badge/runtime-Node.js_18%2B_Nativo-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Dependencias](https://img.shields.io/badge/dependencias-0_npm_(Core)-38BDF8.svg?style=for-the-badge&logo=codeforces&logoColor=white)](package.json)
-[![Pruebas](https://img.shields.io/badge/tests-200%2F200_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
+[![Pruebas](https://img.shields.io/badge/tests-211%2F211_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
 [![Auditoría](https://img.shields.io/badge/auditoría-15%2F15_propiedades_PASS-8B5CF6.svg?style=for-the-badge&logo=codereview&logoColor=white)](opencode_tester.js)
 [![Licencia](https://img.shields.io/badge/licencia-MIT-6B7280.svg?style=for-the-badge)](LICENSE)
 
@@ -16,7 +16,7 @@
   Produce observaciones descriptivas con límites visibles, una acción priorizada (y su rutina) solo cuando existe evidencia observada, y un seguimiento local que compara métricas compatibles. No mide MMR interno, talento, rango merecido, causalidad ni mejora, y no sustituye a un coach humano.
 </p>
 
-[Tres Formas de Empezar](#-tres-formas-de-empezar) • [Estado y límites de valor](#-estado-actual-y-límites-de-valor) • [Comparativa](#-el-problema-con-los-rastreadores-convencionales) • [Flujo real](#-arquitectura-del-flujo-de-análisis) • [Diagnóstico en Acción](#-diagnóstico-en-acción) • [Comandos CLI](#-guía-de-comandos-principales) • [Gemini Gems & GPTs](#-soporte-para-gemini-gems-y-custom-gpts) • [English](README.en.md)
+[Tres Formas de Empezar](#-tres-formas-de-empezar) • [Estado y límites de valor](#-estado-actual-y-límites-de-valor) • [Comparativa](#-el-problema-con-los-rastreadores-convencionales) • [Flujo real](#-arquitectura-del-flujo-de-análisis) • [Importar de Tracker](#-importar-una-partida-desde-texto-descargado) • [Diagnóstico en Acción](#-diagnóstico-en-acción) • [Comandos CLI](#-guía-de-comandos-principales) • [Gemini Gems & GPTs](#-soporte-para-gemini-gems-y-custom-gpts) • [English](README.en.md)
 
 </div>
 
@@ -198,7 +198,7 @@ node cli.js plan close <planId> | cancel <planId>      # cierra o cancela
 node cli.js plan export --pseudonymized                # exportación explícita a stdout (jugador pseudonimizado)
 ```
 
-**Privacidad y retención:** el historial vive en `VALORANT_PLANS_DIR` (por defecto `<cache>/plans`), un archivo JSON por plan con permisos 0600 en POSIX y escritura atómica. El **perímetro del directorio** se verifica en cada operación **componente a componente** (raíz incluida): se rechazan symlinks en cualquier nivel — también **padres y abuelos**, p. ej. `/ruta/enlace/planes` —, rutas que no son directorio, propietario ajeno (POSIX) y escritura de grupo/otros (0770/0777 no son admisibles). Única excepción documentada: los symlinks **de sistema que cuelgan directamente de la raíz** (p. ej. `/var` o `/tmp` en macOS) se resuelven a su destino canónico; cualquier enlace bajo un padre no-raíz o en el componente final se rechaza. La creación es **escalonada** (nunca `recursive: true` a través de padres no validados). Los **padres intermedios** no pueden ser escribibles por grupo/otros ni pertenecer a otro usuario (se tolera root como propietario de directorios de sistema); el directorio **final** exige además propiedad del usuario actual y se ajusta a 0700. Solo los **hijos directos de la raíz** (`/tmp`, `/var`, `/private`…) quedan exentos de política: son raíces de sistema, no padres controlables. La cadena se revalida antes de crear el temporal y antes del `rename`. La lectura de cada registro abre por descriptor con `O_NOFOLLOW` donde existe y compara `dev/ino` contra la inspección previa (sustitución ⇒ fail-closed); en Windows no hay `O_NOFOLLOW` y la detección de sustitución se apoya en el file-id de NTFS (best-effort documentado). Se guardan solo campos del plan: jugador, referencia+digest de la entrada, procedencia, fecha, métrica/valor/umbral/limitación, acción, rutina, siguiente dato, estado y bitácora breve. **No** se guardan credenciales, tokens ni datos de terceros. Retención local indefinida hasta cierre/cancelación (puedes borrar los archivos manualmente); límite de 500 planes. Los datos `synthetic_demo` **no se persisten** ni se comparan.
+**Privacidad y retención:** el historial vive en `VALORANT_PLANS_DIR` (por defecto `<cache>/plans`): un JSON por plan (0600 en POSIX, escritura atómica) con jugador, referencia+digest de la entrada, procedencia, fecha, métrica/valor/umbral/limitación, acción, rutina, siguiente dato, estado y bitácora breve. **No** se guardan credenciales, tokens ni datos de terceros. **Perímetro del directorio** validado componente a componente (raíz incluida): nada de symlinks en ningún nivel, rutas que no sean directorio, propietario ajeno ni escritura de grupo/otros (0770/0777 no admisibles); únicos exentos, los hijos directos de la raíz (`/tmp`, `/var`…), que son raíces de sistema. La creación es escalonada, el directorio final exige 0700 del usuario actual y la cadena se revalida antes del `rename`. La lectura abre por descriptor (`O_NOFOLLOW` donde existe) y verifica identidad y metadatos (sustitución ⇒ fail-closed); en Windows es best-effort documentado. Límite de 500 planes; los datos `synthetic_demo` no se persisten ni se comparan.
 
 **Comparación honesta:** exige mismo jugador exacto, métrica observada y procedencia compatible. Estados: `MEDICION_COMPARABLE`, `DATOS_INSUFICIENTES`, `NO_COMPARABLE`, `SIMULACION_DEMO`; con `--json`, un único objeto. El resultado es un **delta descriptivo** con limitación explícita: una variación entre dos partidas no demuestra efecto de la rutina, mejora, MMR, rango ni talento.
 
@@ -238,26 +238,42 @@ No necesitas telemetría imposible. El flujo `plan` funciona por niveles:
 
 Si tu entrada no alcanza, `plan` no falla de forma genérica: indica el **siguiente dato más pequeño y concreto** (p. ej. "HS% del marcador" o "eventos de ronda con marcas de trade").
 
+## 📄 Importar una partida desde texto descargado
+
+También puedes evitar plantillas: guarda la página de una partida como texto y el importador local detecta el formato.
+
+1. Abre la partida en Tracker en tu navegador.
+2. Guarda la página como `.txt` (Ctrl+S → “Solo texto” / “Página de texto”).
+3. Ejecuta el análisis con tu Riot ID exacto:
+
+```bash
+node cli.js plan  "partida-tracker.txt" "Nombre#TAG"   # plan + registro local
+node cli.js parse "partida-tracker.txt" "Nombre#TAG"   # ingesta descriptiva
+node cli.js match "partida-tracker.txt" "Nombre#TAG"   # diagnóstico 360°
+```
+
+- **Solo origen manual de texto:** el archivo lo aportas tú. El producto **no inicia sesión, no consulta Tracker, no lee caché del navegador y no evita Cloudflare**; tampoco hace scraping ni usa APIs de Tracker.
+- **Detección explícita con fallo cerrado:** si el bloque `Scoreboard` está incompleto o el formato cambió, termina con `TRACKER_TEXT_FORMAT_UNSUPPORTED` y **no** cae al parser genérico ni emite análisis parcial.
+- **Extrae solo lo observado** (agente, rango, ACS, K/D/A, +/-, K/D, DDΔ, ADR, HS%, KAST, FK, FD, MK, mapa, modo, marcador, fecha, duración y rango medio) y deja `null` + declarado lo ausente; no inventa rondas, posiciones, economía, trades, duelos ni eventos.
+- **Procedencia `normalized_input`** con digest local del texto, nunca `verified_source`. Aplican los mismos límites: no atribuye causas, no mide MMR interno/talento/rango merecido ni demuestra mejora.
+- Con `--json`, la salida indica `sourceFormat: tracker_text_export`, campos extraídos/ausentes y límites declarados.
+
 ## ◈ Soporte para Gemini Gems y Custom GPTs
 
-Si utilizas **Google Gemini (Gems)** o **OpenAI (Custom GPTs)**, el archivo [`standalone_prompt.md`](standalone_prompt.md) ha sido completamente optimizado con:
+Si utilizas **Google Gemini (Gems)** o **OpenAI (Custom GPTs)**, el archivo [`standalone_prompt.md`](standalone_prompt.md) está optimizado para trabajar solo con datos que aportas (JSON/export, texto o `.txt` guardado de Tracker):
 
-- **Instrucciones de Sistema (System Prompt)** estructuradas con tags XML (`<system_role>`, `<vision_and_input_protocol>`, `<output_specification>`, etc.) con rigor matemático y guardas anti-alucinación.
-- **Protocolo de Ingesta Multi-Formato:** Diseñado para JSON/export aportado por ti, texto plano pegado o archivos existentes; OCR de capturas NO implementado.
-- **Iniciadores de Conversación Listos para Usar:** 4 botones pre-configurados para diagnósticos de partida, sinergia de dúo, rutinas KovaaK's y señal heurística de MMR.
-- **Formato Visual Estable:** barras ASCII y tablas para la salida humana; sin promesas de coaching interactivo garantizado.
-
-👉 **Consulta la guía completa de configuración en [standalone_prompt.md](standalone_prompt.md)**.
+- **System prompt con tags XML** (`<system_role>`, `<vision_and_input_protocol>`, `<output_specification>`) y guardas anti-alucinación.
+- **Ingesta multi-formato local:** JSON/export, texto de marcador o `.txt` guardado de Tracker; OCR de capturas no implementado. Versión completa en inglés: [`standalone_prompt.en.md`](standalone_prompt.en.md).
 
 ---
 
 ## ◈ Privacidad y Especificaciones de Ingeniería
 
 - **100% Local y Confidencial:** todo el análisis se ejecuta en tu equipo; nada sale de tu máquina. No hay llamadas de red salvo que en el futuro actives Riot RSO con credenciales propias.
-- **Sin red por defecto:** el análisis es local. No se cosecha la caché del navegador ni se consulta Tracker.gg. La entrada es un JSON/export o texto de marcador que aportas explícitamente; el OCR de capturas no está implementado.
+- **Sin red por defecto:** el análisis es local. No se cosecha la caché del navegador ni se consulta Tracker.gg. La entrada es un JSON/export, texto de marcador o un `.txt` guardado manualmente desde Tracker (origen manual de texto: sin sesión, sin scraping y sin integración automática); el OCR de capturas no está implementado.
 - **Zero Dependencias NPM:** Diseñado exclusivamente sobre las librerías estándar de Node.js (`fs`, `path`, `zlib`, `crypto`, `child_process`). Cero descargas externas.
 - **Compatibilidad Multiplataforma:** Probado en CI sobre Windows, macOS y Linux (Node 18/20/22/24); sin garantía de resultados.
-- **Garantía Determinista:** 200 pruebas automatizadas y suites modulares verificadas con Exit Code 0 (`node run_all_tests.js`) y auditoría semántica de propiedades fail-closed, sin puntuación promocional (`node opencode_tester.js`).
+- **Garantía Determinista:** 211 pruebas automatizadas y suites modulares verificadas con Exit Code 0 (`node run_all_tests.js`) y auditoría semántica de propiedades fail-closed, sin puntuación promocional (`node opencode_tester.js`).
 - **Contrato CLI:** salida humana y `--json`; códigos `0`/`1`/`2` documentados (resultado válido / entrada inválida / evidencia insuficiente); ningún comando selecciona un jugador en silencio.
 
 ---

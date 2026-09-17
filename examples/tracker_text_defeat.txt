@@ -1,0 +1,357 @@
+Tracker.gg <https://tracker.gg/>
+
+Valorant <https://tracker.gg/valorant>
+
+Rocket League <https://rocketleague.tracker.network/>League of Legends
+<https://tracker.gg/lol>More Games
+
+Sign In <https://tracker.network/auth/login>
+
+Competitive
+Competitive
+Bind
+Team A
+7
+ 
+:
+Team B
+13
+
+Copy Share Link
+7/3/26, 21:15
+31m 05s
+Platinum III
+Platinum III
+Average Rank
+Platinum III Platinum III
+Scoreboard
+Performance
+Economy
+Rounds
+Duels
+Team A
+7
+Team B
+13
+•
+Elimination
+1
+
+•
+Elimination
+2
+
+Elimination
+•
+3
+
+•
+Defuse
+4
+
+•
+Elimination
+5
+
+Elimination
+•
+6
+
+•
+Elimination
+7
+
+•
+Elimination
+8
+
+•
+Defuse
+9
+
+Elimination
+•
+10
+
+•
+Elimination
+11
+
+•
+Elimination
+12
+
+•
+Defuse
+13
+
+•
+Elimination
+14
+
+Elimination
+•
+15
+
+•
+Elimination
+16
+
+•
+Elimination
+17
+
+•
+Defuse
+18
+
+Elimination
+•
+19
+
+•
+Elimination
+20
+
+Team A•Avg. Rank:Gold III Gold III
+Match Rank
+TRS
+
+ACS
+K
+D
+A
++/-
+K/D
+DDΔ
+ADR
+HS%
+KAST
+FK
+FD
+MK
+Jett
+Иван Драго#RU7
+Gold 1Gold 1
+ <https://tracker.gg/valorant/profile/riot/%D0%98%D0%B2%D0%B0%D0%BD%23RU7?
+playlist=competitive&force-defaults>
+Gold 2
+410
+190
+12
+16
+3
+-4
+0.8
+-20
+140.2
+21%
+64%
+1
+3
+0
+Omen
+Sombra 9#MX3
+Platinum 1Platinum 1
+ <https://tracker.gg/valorant/profile/riot/Sombra%209%23MX3?
+playlist=competitive&force-defaults>
+Platinum 1
+380
+175
+10
+15
+6
+-5
+0.7
+-30
+128.0
+18%
+70%
+0
+2
+0
+Killjoy
+Alba#IT5
+Gold 2Gold 2
+ <https://tracker.gg/valorant/profile/riot/Alba%23IT5?
+playlist=competitive&force-defaults>
+Gold 1
+350
+160
+8
+14
+4
+-6
+0.6
+-35
+118.5
+15%
+66%
+0
+1
+0
+Sova
+Franz Kafka#DE1
+Gold 3Gold 3
+ <https://tracker.gg/valorant/profile/riot/Franz%20Kafka%23DE1?
+playlist=competitive&force-defaults>
+Gold 2
+300
+150
+7
+15
+7
+-8
+0.5
+-40
+105.3
+19%
+72%
+1
+2
+0
+Reyna
+Vex#NA9
+Platinum 2Platinum 2
+ <https://tracker.gg/valorant/profile/riot/Vex%23NA9?
+playlist=competitive&force-defaults>
+Platinum 2
+290
+145
+6
+16
+2
+-10
+0.4
+-45
+98.1
+25%
+60%
+0
+4
+0
+Team B•Avg. Rank:Diamond II Diamond II
+Match Rank
+TRS
+
+ACS
+K
+D
+A
++/-
+K/D
+DDΔ
+ADR
+HS%
+KAST
+FK
+FD
+MK
+Raze
+Boom 星#KR1
+Diamond 2Diamond 2
+ <https://tracker.gg/valorant/profile/riot/Boom%20%E6%98%9F%23KR1?
+playlist=competitive&force-defaults>
+Diamond 1
+950
+350
+26
+9
+4
++17
+2.9
++90
+220.4
+30%
+90%
+5
+1
+5
+Breach
+Piedra#ES2
+Platinum 3Platinum 3
+ <https://tracker.gg/valorant/profile/riot/Piedra%23ES2?
+playlist=competitive&force-defaults>
+Platinum 2
+900
+300
+20
+10
+8
++10
+2.0
++70
+190.0
+24%
+86%
+3
+0
+2
+Chamber
+Le  Maçon#FR7
+Diamond 1Diamond 1
+ <https://tracker.gg/valorant/profile/riot/Le%20%20Ma%C3%A7on%23FR7?
+playlist=competitive&force-defaults>
+Diamond 1
+700
+210
+15
+11
+3
++4
+1.4
++25
+150.6
+40%
+82%
+2
+1
+1
+Astra
+Nébula#PT3
+Platinum 1Platinum 1
+ <https://tracker.gg/valorant/profile/riot/N%C3%A9bula%23PT3?
+playlist=competitive&force-defaults>
+Platinum 1
+650
+180
+12
+12
+9
+0
+1.0
++5
+135.7
+17%
+88%
+1
+2
+0
+KAY/O
+Unit 07#EU9
+Platinum 2Platinum 2
+ <https://tracker.gg/valorant/profile/riot/Unit%2007%23EU9?
+playlist=competitive&force-defaults>
+Platinum 2
+600
+170
+11
+13
+5
+-2
+0.8
+-10
+120.0
+29%
+80%
+2
+3
+1
+
+Preview of our mobile app available on Android and iOS
+Get the Mobile App
+
+2026 © Tracker Network <https://tracker.gg/>
+Valorant Tracker isn't endorsed by Riot Games and doesn't reflect the
+views or opinions of Riot Games or anyone officially involved in
+producing or managing Riot Games properties.

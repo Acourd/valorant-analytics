@@ -17,3 +17,6 @@ temp*.json
 .pipeline/
 .drive-checkpoint/
 .cache/
+
+# Páginas locales guardadas (no subir nunca datos personales)
+/Find your stats*.txt

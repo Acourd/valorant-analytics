@@ -4241,6 +4241,262 @@ check('plan store: padres intermedios escribibles (0777/0770) rechazados; no se 
     }
   });
 
+// ---- Bloque importador de texto Tracker (v4.12.0): detección explícita, fallo cerrado y extracción observada ----
+
+const trackerIngestor = require(path.join(scriptsDir, 'tracker_text_ingestor.js'));
+const trackerFixture = name => path.join(__dirname, 'examples', name);
+
+check('tracker text: detección explícita del export y NO confusión con plantillas genéricas',
+  () => {
+    const victory = fs.readFileSync(trackerFixture('tracker_text_victory.txt'), 'utf8');
+    const detection = trackerIngestor.detectTrackerTextExport(victory);
+    assert.strictEqual(detection.isTracker, true, 'el export de Tracker debe detectarse');
+    assert.ok(detection.headerClusters.length >= 2, 'deben detectarse los clusters de cabeceras por equipo');
+    assert.strictEqual(trackerIngestor.looksLikeTrackerText(victory), true);
+    const generic = 'Focus#NA1\t10\t8\t2\t150\t120\nOtro#NA2\t9\t9\t1\t140\t110';
+    assert.strictEqual(trackerIngestor.detectTrackerTextExport(generic).isTracker, false, 'plantilla genérica no es Tracker');
+    assert.strictEqual(trackerIngestor.looksLikeTrackerText(generic), false);
+    assert.strictEqual(trackerIngestor.looksLikeTrackerText('{"data":{"segments":[]}}'), false);
+  });
+
+check('tracker text: victoria — metadatos observados (modo, mapa, resultado, fecha, duración, rango medio)',
+  () => {
+    const text = fs.readFileSync(trackerFixture('tracker_text_victory.txt'), 'utf8');
+    const match = trackerIngestor.parseTrackerTextExport(text);
+    const meta = match.data.metadata;
+    assert.strictEqual(meta.modeName, 'Competitive');
+    assert.strictEqual(meta.mapName, 'Ascent');
+    assert.deepStrictEqual(meta.score, { teamA: 13, teamB: 7 });
+    assert.strictEqual(meta.winner, 'Team A');
+    assert.strictEqual(meta.timestamp, null, 'fecha numérica ambigua => sin ISO fabricado');
+    assert.strictEqual(meta.dateText, '6/9/26, 14:07', 'se conserva el texto original de la fecha');
+    assert.strictEqual(meta.dateAmbiguity, 'fecha_ambigua_por_locale');
+    assert.strictEqual(meta.durationText, '27m 40s');
+    assert.strictEqual(meta.durationSeconds, 1660);
+    assert.strictEqual(meta.averageRank, 'Platinum 2');
+    assert.strictEqual(meta.roundEndTypes.length, 20, '20 finales de ronda observados (sin atribuir equipo)');
+    assert.strictEqual(meta.rounds, null, 'sin eventos por ronda: rounds permanece null');
+    assert.ok(meta.extraction.teamsDetected.includes('Team A') && meta.extraction.teamsDetected.includes('Team B'));
+  });
+
+check('tracker text: extracción exacta de columnas por jugador (10 filas, equipos y agentes)',
+  () => {
+    const text = fs.readFileSync(trackerFixture('tracker_text_victory.txt'), 'utf8');
+    const match = trackerIngestor.parseTrackerTextExport(text);
+    const players = match.data.segments.filter(s => s.type === 'player-summary');
+    assert.strictEqual(players.length, 10, '10 jugadores del scoreboard');
+    const byHandle = Object.fromEntries(players.map(p => [p.attributes.platformUserIdentifier, p]));
+    const nova = byHandle['Nova 星#NA1'];
+    assert.ok(nova, 'handle Unicode con espacios');
+    assert.strictEqual(nova.metadata.agentName, 'Chamber');
+    assert.strictEqual(nova.metadata.teamId, 'Team A');
+    assert.strictEqual(nova.stats.kills.value, 15);
+    assert.strictEqual(nova.stats.deaths.value, 14);
+    assert.strictEqual(nova.stats.assists.value, 3);
+    assert.strictEqual(nova.stats.scorePerRound.displayValue, '278');
+    assert.strictEqual(nova.stats.damagePerRound.displayValue, '188.9');
+    assert.strictEqual(nova.stats.headshotsPercentage.displayValue, '38%');
+    assert.strictEqual(nova.stats.kast.displayValue, '69%');
+    assert.strictEqual(nova.stats.kdRatio.displayValue, '1.1');
+    assert.strictEqual(nova.stats.damageDeltaPerRound.displayValue, '+34');
+    assert.strictEqual(nova.stats.differential.displayValue, '+1');
+    assert.strictEqual(nova.stats.firstKills.value, 0);
+    assert.strictEqual(nova.stats.firstDeaths.value, 2);
+    assert.strictEqual(nova.stats.multikills.value, 1);
+    assert.strictEqual(nova.stats.trackerScore.value, 599);
+    assert.strictEqual(nova.stats.matchRank.displayValue, 'Gold 3');
+    assert.strictEqual(nova.stats.rank.displayValue, 'Gold 2');
+    const taco = byHandle['El Taco#5998'];
+    assert.strictEqual(taco.metadata.teamId, 'Team B');
+    assert.strictEqual(taco.stats.scorePerRound.displayValue, '381');
+    assert.strictEqual(taco.stats.kills.value, 24);
+    assert.strictEqual(taco.stats.kdRatio.displayValue, '3.0');
+    assert.strictEqual(taco.stats.damagePerRound.displayValue, '217.1');
+    assert.strictEqual(taco.stats.kast.displayValue, '88%');
+    assert.strictEqual(taco.stats.multikills.value, 4);
+    assert.strictEqual(taco.stats.trackerScore.value, 987);
+    assert.strictEqual(byHandle['Пламя#RU9'].metadata.agentName, 'Omen');
+    assert.strictEqual(byHandle['Marco Polo#SRG2'].stats.matchRank.displayValue, 'Diamond 1');
+    assert.strictEqual(byHandle['NyE kura ツ#1521'].metadata.agentName, 'KAY/O');
+  });
+
+check('tracker text: derrota — resultado correcto y agentes/handles especiales',
+  () => {
+    const text = fs.readFileSync(trackerFixture('tracker_text_defeat.txt'), 'utf8');
+    const match = trackerIngestor.parseTrackerTextExport(text);
+    const meta = match.data.metadata;
+    assert.strictEqual(meta.mapName, 'Bind');
+    assert.deepStrictEqual(meta.score, { teamA: 7, teamB: 13 });
+    assert.strictEqual(meta.winner, 'Team B');
+    assert.ok(/Team B/.test(meta.result));
+    assert.strictEqual(meta.averageRank, 'Platinum 3');
+    const players = match.data.segments.filter(s => s.type === 'player-summary');
+    const byHandle = Object.fromEntries(players.map(p => [p.attributes.platformUserIdentifier, p]));
+    const ivan = byHandle['Иван Драго#RU7'];
+    assert.strictEqual(ivan.metadata.agentName, 'Jett');
+    assert.strictEqual(ivan.stats.kdRatio.displayValue, '0.8');
+    assert.strictEqual(ivan.stats.damageDeltaPerRound.displayValue, '-20');
+    assert.strictEqual(byHandle['Le  Maçon#FR7'].metadata.agentName, 'Chamber');
+    assert.strictEqual(byHandle['Unit 07#EU9'].metadata.agentName, 'KAY/O');
+    assert.strictEqual(byHandle['Boom 星#KR1'].stats.multikills.value, 5);
+  });
+
+check('tracker text: navegación, enlaces y cabeceras jamás se interpretan como jugadores',
+  () => {
+    const text = fs.readFileSync(trackerFixture('tracker_text_victory.txt'), 'utf8');
+    const match = trackerIngestor.parseTrackerTextExport(text);
+    const players = match.data.segments.filter(s => s.type === 'player-summary');
+    for (const p of players) {
+      const h = p.attributes.platformUserIdentifier;
+      assert.ok(!/tracker\.gg|https?:|%23|Valorant|Search|Leaderboards|Premium|Sign In/i.test(h), `handle contaminado: ${h}`);
+    }
+    const handles = players.map(p => p.attributes.platformUserIdentifier);
+    assert.strictEqual(new Set(handles).size, 10, 'sin duplicados por líneas de navegación');
+    assert.ok(!handles.some(h => /^https?/i.test(h)));
+    assert.ok(match.data.metadata.extraction.navigationIgnored === true);
+  });
+
+check('tracker text: datos parciales — campos ausentes quedan null y se declaran',
+  () => {
+    const text = fs.readFileSync(trackerFixture('tracker_text_partial.txt'), 'utf8');
+    const match = trackerIngestor.parseTrackerTextExport(text);
+    const meta = match.data.metadata;
+    const players = match.data.segments.filter(s => s.type === 'player-summary');
+    assert.strictEqual(players.length, 6, 'roster parcial observado (6/10)');
+    const byHandle = Object.fromEntries(players.map(p => [p.attributes.platformUserIdentifier, p]));
+    const ping = byHandle['Pingüino Azul#CL1'];
+    assert.ok(!('damagePerRound' in ping.stats), 'ADR "-" => null (celda ausente), nunca inventado');
+    for (const p of players) {
+      assert.ok(!('kast' in p.stats), 'KAST no está en el scoreboard parcial');
+      assert.ok(!('firstKills' in p.stats) && !('firstDeaths' in p.stats) && !('multikills' in p.stats));
+      assert.ok(!('trackerScore' in p.stats));
+    }
+    assert.ok(meta.missing.includes('roster completo (6/10 observados)'), 'declara roster parcial');
+    assert.ok(meta.extraction.fieldsMissing.includes('KAST') && meta.extraction.fieldsMissing.includes('MK'));
+    assert.ok(meta.extraction.fieldsMissing.includes('TRS') && meta.extraction.fieldsMissing.includes('DDΔ'));
+    assert.strictEqual(meta.rounds, null);
+    assert.ok(!match.data.segments.some(s => s.type === 'player-round'), 'sin eventos por ronda inventados');
+  });
+
+check('tracker text: formato truncado => TRACKER_TEXT_FORMAT_UNSUPPORTED sin análisis parcial',
+  () => {
+    const text = fs.readFileSync(trackerFixture('tracker_text_truncated.txt'), 'utf8');
+    assert.strictEqual(trackerIngestor.detectTrackerTextExport(text).isTracker, true, 'parece Tracker');
+    assert.throws(
+      () => trackerIngestor.parseTrackerTextExport(text),
+      e => e.code === trackerIngestor.TRACKER_FORMAT_CODE,
+      'bloque incompleto debe fallar cerrado con código estable'
+    );
+    const err = (() => { try { trackerIngestor.parseTrackerTextExport(text); } catch (e) { return e; } })();
+    assert.ok(/Scoreboard incompleto|formato cambiado/i.test(err.message));
+    assert.ok(!/verified_source/.test(JSON.stringify(err.details || {})));
+  });
+
+check('tracker text: procedencia normalized_input, digest local y nunca verified_source',
+  () => {
+    const text = fs.readFileSync(trackerFixture('tracker_text_victory.txt'), 'utf8');
+    const a = trackerIngestor.parseTrackerTextExport(text);
+    const b = trackerIngestor.parseTrackerTextExport(text);
+    assert.strictEqual(a.data.metadata.matchId, b.data.metadata.matchId, 'digest determinista');
+    assert.strictEqual(a.data.metadata.sourceFormat, 'tracker_text_export');
+    assert.ok(/^tracker-text:sha256:[0-9a-f]{16}$/.test(a.data.metadata.sourceRef));
+    assert.ok(/^[0-9a-f]{64}$/.test(a.data.metadata.sourceDigest));
+    const { sourceProvenance, mayAssertCauses } = require(path.join(scriptsDir, 'data_contract.js'));
+    assert.strictEqual(sourceProvenance(a.data.metadata), 'normalized_input');
+    assert.strictEqual(mayAssertCauses('normalized_input'), false);
+    assert.ok(!JSON.stringify(a).includes('"verified_source"'), 'ningún dato local se eleva');
+    assert.strictEqual(a.data.metadata.synthetic, undefined);
+    assert.strictEqual(a.data.metadata.derived.synthesizedRounds, false);
+  });
+
+check('tracker text: límites declarados y campos fuera de alcance',
+  () => {
+    const text = fs.readFileSync(trackerFixture('tracker_text_victory.txt'), 'utf8');
+    const meta = trackerIngestor.parseTrackerTextExport(text).data.metadata;
+    assert.strictEqual(meta.declaredLimits.length, 4);
+    assert.ok(meta.declaredLimits.some(l => /fecha_ambigua_por_locale/.test(l)), 'declara la ambigüedad de fecha como límite');
+    assert.ok(meta.missing.some(m => /fecha_ambigua_por_locale/.test(m)), 'declara la fecha ambigua como dato faltante');
+    assert.ok(meta.declaredLimits.some(l => /No es fuente verificada/.test(l)));
+    assert.ok(meta.declaredLimits.some(l => /No atribuye causas/.test(l)));
+    assert.ok(meta.declaredLimits.some(l => /MMR interno, talento, rango merecido/.test(l)));
+    for (const out of ['rounds (eventos por ronda)', 'economía por ronda', 'posiciones y distancias', 'trades y duelos 1v1']) {
+      assert.ok(meta.missing.some(m => m.startsWith(out)), `declara fuera de alcance: ${out}`);
+    }
+    assert.deepStrictEqual(meta.extraction.fieldsMissing, [], 'victoria completa: sin columnas ausentes');
+    assert.ok(meta.extraction.columnsDetected.includes('ACS') && meta.extraction.columnsDetected.includes('MK'));
+  });
+
+check('tracker text: CLI parse/plan/match con --json (un único JSON, sourceFormat y fallo cerrado de objetivo)',
+  () => {
+    withPlansDir(() => {
+      const parseOut = cliOk(['parse', trackerFixture('tracker_text_victory.txt'), 'El Taco#5998', '--json']);
+      const parsed = JSON.parse(parseOut);
+      assert.strictEqual(parsed.sourceFormat, 'tracker_text_export');
+      assert.strictEqual(parsed.provenance, 'normalized_input');
+      assert.strictEqual(parsed.extraction.playersExtracted, 10);
+      assert.strictEqual(parsed.limits.length, 4);
+      const planOut = cliOk(['plan', trackerFixture('tracker_text_victory.txt'), 'Hecate#PGM2', '--json']);
+      const planned = JSON.parse(planOut);
+      assert.strictEqual(planned.sourceFormat, 'tracker_text_export');
+      assert.strictEqual(planned.provenance, 'normalized_input');
+      assert.strictEqual(planned.estado, 'ACCION_DISPONIBLE');
+      const matchOut = cliOk(['match', trackerFixture('tracker_text_victory.txt'), 'Falco#PRX2', '--json']);
+      const matched = JSON.parse(matchOut);
+      assert.strictEqual(matched.sourceFormat, 'tracker_text_export');
+      assert.strictEqual(matched.provenance, 'normalized_input');
+      let missingTarget = '';
+      try { cliOk(['parse', trackerFixture('tracker_text_victory.txt'), 'NoExiste#9999', '--json']); } catch (e) { missingTarget = String(e.stdout || ''); }
+      assert.strictEqual(JSON.parse(missingTarget).error.code, 'TARGET_NOT_FOUND', 'objetivo inexistente fail-closed');
+      let noTarget = '';
+      try { cliOk(['parse', trackerFixture('tracker_text_victory.txt'), '--json']); } catch (e) { noTarget = String(e.stdout || ''); }
+      assert.strictEqual(JSON.parse(noTarget).error.code, 'TARGET_REQUIRED', 'objetivo ausente fail-closed');
+      let truncated = '';
+      try { cliOk(['parse', trackerFixture('tracker_text_truncated.txt'), 'Corta Página#TR1', '--json']); } catch (e) { truncated = String(e.stdout || ''); }
+      assert.strictEqual(JSON.parse(truncated).error.code, 'TRACKER_TEXT_FORMAT_UNSUPPORTED', 'formato truncado fail-closed sin parser genérico');
+      const dupFile = path.join(os.tmpdir(), `va-tracker-dup-${process.pid}.txt`);
+      fs.writeFileSync(dupFile, fs.readFileSync(trackerFixture('tracker_text_victory.txt'), 'utf8').split('Nova 星#NA1').join('El Taco#5998'), 'utf8');
+      try {
+        let dup = '';
+        try { cliOk(['parse', dupFile, 'El Taco#5998', '--json']); } catch (e) { dup = String(e.stdout || ''); }
+        assert.strictEqual(JSON.parse(dup).error.code, 'TARGET_AMBIGUOUS', 'objetivo duplicado fail-closed');
+      } finally {
+        try { fs.unlinkSync(dupFile); } catch (e) { /* limpio */ }
+      }
+    });
+  });
+
+check('tracker text: fechas — ISO solo si es inequívoca; ambigüedad declarada (6/9/26, 13/9/26, ISO, mes textual)',
+  () => {
+    const base = fs.readFileSync(trackerFixture('tracker_text_defeat.txt'), 'utf8');
+    const parseWithDate = d => {
+      const text = base.replace('7/3/26, 21:15', d);
+      assert.ok(text.includes(d), 'el fixture base debe contener la fecha reemplazada');
+      return trackerIngestor.parseTrackerTextExport(text).data.metadata;
+    };
+    const ambiguous = parseWithDate('6/9/26, 14:07');
+    assert.strictEqual(ambiguous.dateText, '6/9/26, 14:07', 'texto original conservado');
+    assert.strictEqual(ambiguous.timestamp, null, 'sin ISO para fecha ambigua por locale');
+    assert.strictEqual(ambiguous.dateAmbiguity, 'fecha_ambigua_por_locale');
+    assert.ok(ambiguous.missing.some(m => /fecha_ambigua_por_locale/.test(m)));
+    assert.ok(ambiguous.declaredLimits.some(l => /fecha_ambigua_por_locale/.test(l)));
+    const dayFirst = parseWithDate('13/9/26, 14:07');
+    assert.strictEqual(dayFirst.timestamp, '2026-09-13T14:07:00', '>12 en el primer campo desambigua D/M');
+    assert.strictEqual(dayFirst.dateAmbiguity, null);
+    const monthFirst = parseWithDate('9/13/26, 14:07');
+    assert.strictEqual(monthFirst.timestamp, '2026-09-13T14:07:00', '>12 en el segundo campo desambigua M/D');
+    assert.strictEqual(monthFirst.dateAmbiguity, null);
+    const iso = parseWithDate('2026-06-09T14:07');
+    assert.strictEqual(iso.timestamp, '2026-06-09T14:07:00');
+    assert.strictEqual(iso.dateText, '2026-06-09T14:07');
+    assert.strictEqual(iso.dateAmbiguity, null);
+    const textual = parseWithDate('June 9, 2026, 14:07');
+    assert.strictEqual(textual.timestamp, '2026-06-09T14:07:00');
+    assert.strictEqual(textual.dateAmbiguity, null);
+    const textualNoTime = parseWithDate('9 June 2026');
+    assert.strictEqual(textualNoTime.timestamp, '2026-06-09', 'sin hora: ISO a precisión de fecha');
+    assert.strictEqual(textualNoTime.dateAmbiguity, null);
+  });
+
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben
 // reflejar EXACTAMENTE el número de casos registrados y ejecutados. Un
 // manifiesto desincronizado hace fallar la suite (imposible sobre-declarar

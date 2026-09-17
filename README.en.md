@@ -4,10 +4,10 @@
 
 ### Local Competitive Telemetry · 360° Descriptive Diagnostics · Adaptive Aim Engine
 
-[![Version](https://img.shields.io/badge/version-4.11.4_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
+[![Version](https://img.shields.io/badge/version-4.12.0_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
 [![Runtime](https://img.shields.io/badge/runtime-Node.js_18%2B_Native-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-0_npm_(Core)-38BDF8.svg?style=for-the-badge&logo=codeforces&logoColor=white)](package.json)
-[![Tests](https://img.shields.io/badge/tests-200%2F200_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
+[![Tests](https://img.shields.io/badge/tests-211%2F211_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
 [![Audit](https://img.shields.io/badge/audit-15%2F15_properties_PASS-8B5CF6.svg?style=for-the-badge&logo=codereview&logoColor=white)](opencode_tester.js)
 [![License](https://img.shields.io/badge/license-MIT-6B7280.svg?style=for-the-badge)](LICENSE)
 
@@ -16,7 +16,7 @@
   It produces descriptive observations with visible limits, one prioritized action (and its routine) only when observed evidence exists, and local tracking that compares compatible metrics. It does not measure internal MMR, talent, deserved rank, causality or improvement, and it does not replace a human coach.
 </p>
 
-[Three Ways to Start](#-three-ways-to-start) • [Status and value limits](#-current-status-and-value-limits) • [Comparison](#-the-problem-with-conventional-trackers) • [Real flow](#-analysis-flow-architecture) • [Diagnostics in Action](#-diagnostics-in-action) • [CLI Commands](#-master-cli-command-guide) • [Gemini Gems & GPTs](#-gemini-gems--custom-gpts-support) • [Español](README.es.md)
+[Three Ways to Start](#-three-ways-to-start) • [Status and value limits](#-current-status-and-value-limits) • [Comparison](#-the-problem-with-conventional-trackers) • [Real flow](#-analysis-flow-architecture) • [Import from Tracker](#-import-a-match-from-downloaded-text) • [Diagnostics in Action](#-diagnostics-in-action) • [CLI Commands](#-master-cli-command-guide) • [Gemini Gems & GPTs](#-gemini-gems--custom-gpts-support) • [Español](README.es.md)
 
 </div>
 
@@ -198,7 +198,7 @@ node cli.js plan close <planId> | cancel <planId>      # close or cancel
 node cli.js plan export --pseudonymized                # explicit stdout export (pseudonymized player)
 ```
 
-**Privacy and retention:** history lives in `VALORANT_PLANS_DIR` (default `<cache>/plans`), one JSON file per plan, 0600 permissions on POSIX and atomic writes. The **directory perimeter** is verified on every operation, **component by component** (from the filesystem root): symlinks at any level — **parents and grandparents included**, e.g. `/path/link/plans` —, non-directory paths, foreign ownership (POSIX) and group/other write (0770/0777 are not admissible) are rejected. Single documented exception: **system symlinks hanging directly from the filesystem root** (e.g. `/var` or `/tmp` on macOS) are resolved to their canonical target; any link under a non-root parent or at the final component is rejected. Creation is **stepwise** (never `recursive: true` through unvalidated parents). **Intermediate parents** must not be group/other writable or owned by another user (root as system-directory owner is tolerated); the **final** directory additionally requires current-user ownership and is set to 0700. Only **direct children of the filesystem root** (`/tmp`, `/var`, `/private`…) are exempt from policy: they are system roots, not controllable parents. The chain is revalidated before creating the temp file and before the `rename`. Each record is opened by descriptor with `O_NOFOLLOW` where available and `dev/ino` is compared against the prior inspection (substitution ⇒ fail-closed); Windows lacks `O_NOFOLLOW`, so substitution detection relies on the NTFS file-id (documented best-effort). Only plan fields are stored: player, input reference+digest, provenance, date, metric/value/threshold/limitation, action, routine, next datum, status and a short log. **No** credentials, tokens or third-party data. Retention is local and indefinite until close/cancel (you may delete files manually); 500-plan limit. `synthetic_demo` data is **not persisted** and cannot be compared.
+**Privacy and retention:** history lives in `VALORANT_PLANS_DIR` (default `<cache>/plans`): one JSON file per plan (0600 on POSIX, atomic writes) with player, input reference+digest, provenance, date, metric/value/threshold/limitation, action, routine, next datum, status and a short log. **No** credentials, tokens or third-party data are stored. **Directory perimeter** validated component by component (root included): no symlinks at any level, no non-directory paths, no foreign ownership, no group/other write (0770/0777 not admissible); the only exempt entries are direct children of the filesystem root (`/tmp`, `/var`…), which are system roots. Creation is stepwise, the final directory requires current-user ownership and 0700, and the chain is revalidated before the `rename`. Reads use a descriptor (`O_NOFOLLOW` where available) and verify identity and metadata (substitution ⇒ fail-closed); on Windows this is documented best-effort. 500-plan limit; `synthetic_demo` data is not persisted nor compared.
 
 **Honest comparison:** requires the exact same player, an observed metric and compatible provenance. States: `MEDICION_COMPARABLE`, `DATOS_INSUFICIENTES`, `NO_COMPARABLE`, `SIMULACION_DEMO`; with `--json`, a single object. The result is a **descriptive delta** with an explicit limitation: a variation across two matches does not prove routine effect, improvement, MMR, rank or talent.
 
@@ -238,26 +238,42 @@ You don't need impossible telemetry. The `plan` flow works by levels:
 
 If your input is not enough, `plan` doesn't fail generically: it states the **smallest concrete next datum** (e.g. "HS% from the scoreboard" or "round events with trade marks").
 
+## 📄 Import a match from downloaded text
+
+You can also skip templates: save a match page as text and the local importer detects the format.
+
+1. Open the match on Tracker in your browser.
+2. Save the page as `.txt` (Ctrl+S → “Text only” / “Text page”).
+3. Run the analysis with your exact Riot ID:
+
+```bash
+node cli.js plan  "tracker-match.txt" "Name#TAG"   # plan + local record
+node cli.js parse "tracker-match.txt" "Name#TAG"   # descriptive ingest
+node cli.js match "tracker-match.txt" "Name#TAG"   # 360° diagnostic
+```
+
+- **Manual text origin only:** you provide the file. The product **does not sign in, does not query Tracker, does not read browser cache and does not bypass Cloudflare**; it performs no scraping and uses no Tracker APIs.
+- **Explicit detection with fail-closed behavior:** if the `Scoreboard` block is incomplete or the format changed, it ends with `TRACKER_TEXT_FORMAT_UNSUPPORTED` and does **not** fall back to the generic parser or emit partial analysis.
+- **Extracts only what is observed** (agent, rank, ACS, K/D/A, +/-, K/D, DDΔ, ADR, HS%, KAST, FK, FD, MK, map, mode, score, date, duration and average rank) and leaves absent data as `null` + declared; it invents no rounds, positions, economy, trades, duels or events.
+- **Provenance `normalized_input`** with a local digest of the text, never `verified_source`. The same limits apply: it attributes no causes, measures no internal MMR/talent/deserved rank and demonstrates no improvement.
+- With `--json`, the output reports `sourceFormat: tracker_text_export`, extracted/missing fields and declared limits.
+
 ## ◈ Gemini Gems & Custom GPTs Support
 
-If you use **Google Gemini (Gems)** or **OpenAI (Custom GPTs)**, [`standalone_prompt.md`](standalone_prompt.md) is fully optimized with:
+If you use **Google Gemini (Gems)** or **OpenAI (Custom GPTs)**, [`standalone_prompt.md`](standalone_prompt.md) (Spanish) and [`standalone_prompt.en.md`](standalone_prompt.en.md) (English) are optimized to work only with data you provide (JSON/export, text or a saved Tracker `.txt`):
 
-- **System Instructions** structured with clean XML tags (`<system_role>`, `<vision_and_input_protocol>`, `<output_specification>`, etc.) ensuring mathematical rigor and anti-hallucination guardrails.
-- **Multi-Format Ingestion Protocol:** Built for JSON/export you provide, pasted plain text, or existing files; screenshot OCR is NOT implemented.
-- **Ready-to-Use Conversation Starters:** 4 pre-configured buttons for match diagnostics, duo synergy, KovaaK's aim routines, and the heuristic MMR signal.
-- **Stable Visual Output:** ASCII bars and tables for human output; no guaranteed interactive coaching promises.
-
-👉 **Read the full setup guide in [standalone_prompt.md](standalone_prompt.md)**.
+- **System prompt with XML tags** (`<system_role>`, `<vision_and_input_protocol>`, `<output_specification>`) and anti-hallucination guardrails.
+- **Local multi-format ingest:** JSON/export, scoreboard text or a saved Tracker `.txt`; screenshot OCR not implemented. Full Spanish version: [`standalone_prompt.md`](standalone_prompt.md).
 
 ---
 
 ## ◈ Privacy & Engineering Specifications
 
 - **100% Local & Confidential:** all analysis runs on your machine; nothing leaves it. No network calls unless you later enable Riot RSO with your own credentials.
-- **No network by default:** analysis is local. No browser cache harvesting and no Tracker.gg queries. Input is a JSON/export or scoreboard text you explicitly provide; screenshot OCR is not implemented.
+- **No network by default:** analysis is local. No browser cache harvesting and no Tracker.gg queries. Input is a JSON/export, scoreboard text or a `.txt` manually saved from Tracker (manual text origin: no sign-in, no scraping, no automatic integration); screenshot OCR is not implemented.
 - **Zero NPM Dependencies:** Built strictly on native Node.js core libraries (`fs`, `path`, `zlib`, `crypto`, `child_process`). Zero external downloads.
 - **Cross-Platform Compatibility:** Tested in CI on Windows, macOS and Linux (Node 18/20/22/24); no result guarantee.
-- **Deterministic Reliability:** 200 automated tests plus modular suites passing with Exit Code 0 (`node run_all_tests.js`) and a semantic fail-closed property audit, with no promotional score (`node opencode_tester.js`).
+- **Deterministic Reliability:** 211 automated tests plus modular suites passing with Exit Code 0 (`node run_all_tests.js`) and a semantic fail-closed property audit, with no promotional score (`node opencode_tester.js`).
 - **CLI Contract:** human and `--json` output; documented exit codes `0`/`1`/`2` (valid result / invalid input / insufficient evidence); no command silently picks a player.
 
 ---

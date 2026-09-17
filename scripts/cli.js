@@ -585,12 +585,27 @@ try {
     const matchData = resolveMatchData(input, args[2]);
     const effectivePlayer = resolveEffectivePlayer(matchData, args[2]);
     const { plan, tracking } = planFlow.createPlanWithTracking(matchData, effectivePlayer, { originPath: input });
-    const payload = Object.assign({}, plan, { profile, planId: tracking.ok ? tracking.planId : null, tracking });
+    const metaPlan = (matchData && matchData.data && matchData.data.metadata) || {};
+    const payload = Object.assign({}, plan, {
+      profile,
+      planId: tracking.ok ? tracking.planId : null,
+      tracking,
+      sourceFormat: metaPlan.sourceFormat || null,
+      sourceDigest: metaPlan.sourceDigest || null,
+      extraction: metaPlan.extraction || null,
+      limits: metaPlan.declaredLimits || []
+    });
 
     const humanPlan = () => {
       printBanner();
       console.log(`🧭 PLAN PARA LA SIGUIENTE PARTIDA: ${plan.player} | ${plan.estado}`);
       console.log(`Procedencia: ${plan.provenanceLabel}`);
+      if (metaPlan.sourceFormat === 'tracker_text_export') {
+        console.log(`📄 Formato: tracker_text_export | digest ${String(metaPlan.sourceDigest || '').slice(0, 16)} | jugadores extraídos: ${metaPlan.extraction ? metaPlan.extraction.playersExtracted : 'n/d'}`);
+        if (metaPlan.extraction && metaPlan.extraction.fieldsMissing.length > 0) {
+          console.log(`   Columnas ausentes en el scoreboard: ${metaPlan.extraction.fieldsMissing.join(', ')}`);
+        }
+      }
       if (plan.schema && plan.schema.schemaStatus !== 'supported') {
         const unknown = (plan.schema.unknownMetadataFields || plan.schema.unknownFields || []);
         console.log(`ℹ️ Esquema: ${plan.schema.schemaStatus}${plan.schema.limited ? ' (limitado)' : ''}${unknown.length ? ` · campos desconocidos ignorados: ${unknown.join(', ')}` : ''}`);
@@ -651,11 +666,16 @@ try {
     const res = evaluateLearningProfile(matchData, player);
     validateLearningProfile(res);
     const evidence = deriveMatchEvidence(matchData, player, target);
+    const metaIn = (matchData && matchData.data && matchData.data.metadata) || {};
 
     emit(jsonOut, {
       command: 'match',
       player: res.player, agent: res.agent, rank: res.rank, map: res.map,
       provenance: res.provenance, provenanceLabel: provenanceLabel(res.provenance),
+      sourceFormat: metaIn.sourceFormat || null,
+      sourceDigest: metaIn.sourceDigest || null,
+      extraction: metaIn.extraction || null,
+      limits: metaIn.declaredLimits || [],
       dataQuality: res.dataQuality, warning: res.warning,
       evidence: { level: evidence.level, missing: evidence.missing, allowedSections: evidence.allowedSections },
       radar: res.radar, pillarsObserved: res.pillarsObserved, eloLeaks: res.eloLeaks,
@@ -664,6 +684,9 @@ try {
     }, () => {
     printBanner();
     console.log(`🎯 DIAGNÓSTICO 360°: ${res.player} (${res.agent} - ${res.rank}) | Mapa: ${res.map} [descriptivo]`);
+    if (metaIn.sourceFormat === 'tracker_text_export') {
+      console.log(`📄 Formato: tracker_text_export | digest ${String(metaIn.sourceDigest || '').slice(0, 16)} | jugadores extraídos: ${metaIn.extraction ? metaIn.extraction.playersExtracted : 'n/d'}`);
+    }
     printEvidenceLimits(evidence);
     console.log(`------------------------------------------------------------------------`);
     if (evidence.allowedSections.includes('aggregate_radar')) {
@@ -1156,10 +1179,15 @@ try {
     const res = evaluateLearningProfile(matchData, player);
     validateLearningProfile(res);
     const evidence = deriveMatchEvidence(matchData, player, fileInput);
+    const metaIn = (matchData && matchData.data && matchData.data.metadata) || {};
     emit(jsonOut, {
       command: 'parse',
       player: res.player, agent: res.agent, rank: res.rank, map: res.map,
       provenance: res.provenance, provenanceLabel: provenanceLabel(res.provenance),
+      sourceFormat: metaIn.sourceFormat || null,
+      sourceDigest: metaIn.sourceDigest || null,
+      extraction: metaIn.extraction || null,
+      limits: metaIn.declaredLimits || [],
       evidence: { level: evidence.level, missing: evidence.missing, allowedSections: evidence.allowedSections },
       radar: res.radar, pillarsObserved: res.pillarsObserved, eloLeaks: res.eloLeaks,
       observations: (evidence.observedEvents || []).slice(0, 50),
@@ -1167,6 +1195,9 @@ try {
     }, () => {
     printBanner();
     console.log(`📋 INGESTA UNIVERSAL RESILIENTE (offline): ${res.player} (${res.agent} - ${res.rank}) | Mapa: ${res.map}`);
+    if (metaIn.sourceFormat === 'tracker_text_export') {
+      console.log(`📄 Formato: tracker_text_export | digest ${String(metaIn.sourceDigest || '').slice(0, 16)} | jugadores extraídos: ${metaIn.extraction ? metaIn.extraction.playersExtracted : 'n/d'}`);
+    }
     printEvidenceLimits(evidence);
     console.log(`------------------------------------------------------------------------`);
     if (evidence.allowedSections.includes('aggregate_radar')) {
