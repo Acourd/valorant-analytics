@@ -53,7 +53,11 @@ function classifySchema(meta) {
 const KNOWN_NORMALIZED_META = new Set([
   'matchId', 'mapName', 'modeName', 'rounds', 'timestamp', 'ingestionType',
   'provenance', 'derived', 'missing', 'synthetic', 'wafContainment', 'schemaVersion',
-  'ingestionDiagnostics', 'resilientEngine'
+  'ingestionDiagnostics', 'resilientEngine',
+  // Importador de texto Tracker (observado, normalized_input)
+  'dateText', 'durationText', 'durationSeconds', 'score', 'winner', 'result',
+  'averageRank', 'teams', 'roundEndTypes', 'sourceFormat', 'sourceRef',
+  'sourceDigest', 'declaredLimits', 'extraction'
 ]);
 
 function validateNormalizedMatch(matchData) {

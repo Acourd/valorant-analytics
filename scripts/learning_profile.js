@@ -23,6 +23,7 @@ function evaluateLearningProfile(matchData, targetHandle) {
   const playerSummaries = segments.filter(s => s.type === 'player-summary');
   
   const playerMap = {};
+  const handlesInOrder = [];
   playerSummaries.forEach(p => {
     const handle = p.metadata?.platformUserHandle || p.attributes?.platformUserIdentifier;
     playerMap[handle] = {
@@ -32,12 +33,15 @@ function evaluateLearningProfile(matchData, targetHandle) {
       rank: p.stats?.rank?.displayValue || p.metadata?.tierName || 'Unranked',
       stats: p.stats || {}
     };
+    handlesInOrder.push(handle);
   });
 
   if (Object.keys(playerMap).length === 0) {
     throw new Error('No se encontraron jugadores válidos en la telemetría de la partida.');
   }
-  const target = resolveExactHandle(Object.keys(playerMap), targetHandle);
+  // Lista CON duplicados: un handle repetido es ambiguo y falla cerrado en vez
+  // de colapsarse silenciosamente a un único jugador en el mapa.
+  const target = resolveExactHandle(handlesInOrder, targetHandle);
   const p = playerMap[target];
   if (!p) {
     throw new Error(`Jugador "${targetHandle}" no encontrado en la partida. Sin telemetría del objetivo no se emite diagnóstico.`);

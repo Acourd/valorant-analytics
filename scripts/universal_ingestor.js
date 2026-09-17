@@ -23,6 +23,7 @@ const path = require('path');
 const crypto = require('crypto');
 const budgets = require('./resource_budget');
 const schemaContract = require('./schema_contract');
+const trackerText = require('./tracker_text_ingestor');
 
 const AGENTS = [
   'Jett', 'Reyna', 'Raze', 'Phoenix', 'Yoru', 'Neon', 'Iso',
@@ -524,8 +525,14 @@ function resolveMatchDataResilient(source, playerHandle = null, options = {}) {
       timeBudget.checkpoint('validación de esquema');
       return parsed;
     }
-    // Texto de marcador: presupuesto de longitud antes de parsear.
+    // Texto de marcador: presupuesto de longitud antes de parsear. Si el texto
+    // es un export guardado de Tracker, se usa el importador dedicado (falla
+    // cerrado con TRACKER_TEXT_FORMAT_UNSUPPORTED si el formato no es fiable);
+    // si no, se mantiene el parser genérico.
     budgets.checkTextLength(content);
+    if (trackerText.looksLikeTrackerText(content)) {
+      return trackerText.parseTrackerTextExport(content, { targetPlayer: playerHandle, ...options, sourceText: content });
+    }
     return parseTextScoreboard(content, { targetPlayer: playerHandle, ...options });
   }
 
@@ -536,6 +543,9 @@ function resolveMatchDataResilient(source, playerHandle = null, options = {}) {
     (source.includes('#') && (source.includes(' ') || /\d/.test(source))) ||
     (source.includes(' ') && AGENTS.some(a => source.includes(a)))
   )) {
+    if (trackerText.looksLikeTrackerText(source)) {
+      return trackerText.parseTrackerTextExport(source, { targetPlayer: playerHandle, ...options, sourceText: source });
+    }
     return parseTextScoreboard(source, { targetPlayer: playerHandle, ...options });
   }
 

@@ -1,5 +1,12 @@
 # Changelog — valorant-analytics
 
+## 4.12.0 — Importador local de texto de Tracker (manual, sin scraping)
+
+- **Nuevo (`scripts/tracker_text_ingestor.js`):** detecta y parsea un archivo `.txt` guardado manualmente desde una página de partida de Tracker ("Save page as text"): bloque `Scoreboard`, cabeceras `Match Rank/TRS/ACS/K/D/A/+/-/K/D/DDΔ/ADR/HS%/KAST/FK/FD/MK`, equipos, metadatos (modo, mapa, marcador, resultado, fecha, duración, rango medio) y filas con nombres con espacios/Unicode. Ignora navegación, enlaces, perfiles y pie. Los campos ausentes permanecen `null` y se declaran; no se inventan rondas, posiciones, economía, trades, duelos ni eventos.
+- **Detección explícita y fallo cerrado:** solo se activa con marcadores Tracker + `Scoreboard` + cluster de cabeceras; si el bloque está incompleto o cambió el formato ⇒ `TRACKER_TEXT_FORMAT_UNSUPPORTED` (jamás cae en silencio al parser genérico). Sin red, caché, cookies, scraping ni OCR; procedencia `normalized_input` con digest SHA-256 local.
+- **CLI:** `parse`, `plan` y `match` aceptan el `.txt` y exponen `sourceFormat: tracker_text_export`, digest, campos extraídos/ausentes y límites declarados (no es fuente verificada, no atribuye causas, no mide MMR/talento/rango merecido ni demuestra mejora).
+- **Fixtures y pruebas:** `examples/tracker_text_{victory,defeat,partial,truncated}.txt` (anonimizados, handles inventados) + 10 checks (`#201`–`#210`). 210/210 checks. Versión 4.12.0.
+- **Fail-closed de duplicados:** `learning_profile` conserva la lista de handles CON duplicados, de modo que un Riot ID repetido en la entrada devuelve `TARGET_AMBIGUOUS` en vez de colapsarse silenciosamente a un único jugador.
 ## 4.11.4 — Detección de sustitución determinista (sin reejecución de la suite)
 
 - **Corregido (confiabilidad del test #195):** la prueba mezclaba seguridad con comportamiento del filesystem (monkeypatch de `fs.openSync` esperando que `dev/ino` cambiaran); en NTFS el file-id puede reutilizarse al recrear un archivo y el check fallaba aunque no hubiera regresión. `scripts/safe_fs.js` expone ahora el predicado **puro** `substitutionDetected(expectedStat, openedStat)`: identidad `dev/ino` primero y, como señal ADICIONAL, tamaño/mtime/birthtime (la identidad igual no es concluyente: en NTFS puede reutilizarse el file-id); estadísticas inválidas ⇒ fail-closed. Windows sigue documentado como best-effort (identidad y metadatos iguales no son distinguibles).
