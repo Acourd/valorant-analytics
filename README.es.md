@@ -12,26 +12,41 @@
 [![Licencia](https://img.shields.io/badge/licencia-MIT-6B7280.svg?style=for-the-badge)](LICENSE)
 
 <p align="center">
-  <b>Transforma micro-eventos de ronda en decisiones tácticas deterministas.</b><br>
-  Diseñado para describir patrones de rendimiento y fugas probables de ronda, señalar posibles indicios de anclaje de MMR (hipótesis, no verificado) y sugerir rutinas biomecánicas de 15 minutos en KovaaK's y Aim Lab.
+  <b>Beta técnica de autoanálisis local post-partida: trabaja con datos que aportas explícitamente.</b><br>
+  Produce observaciones descriptivas con límites visibles, una acción priorizada (y su rutina) solo cuando existe evidencia observada, y un seguimiento local que compara métricas compatibles. No mide MMR interno, talento, rango merecido, causalidad ni mejora, y no sustituye a un coach humano.
 </p>
 
-[Tres Formas de Empezar](#-tres-formas-de-empezar) • [Matriz de Telemetría](#-el-problema-con-los-rastreadores-convencionales) • [Arquitectura](#-arquitectura-del-flujo-de-análisis) • [Diagnóstico en Acción](#-diagnóstico-en-acción) • [Comandos CLI](#-guía-de-comandos-principales) • [Gemini Gems & GPTs](#-soporte-para-gemini-gems-y-custom-gpts) • [English](README.en.md)
+[Tres Formas de Empezar](#-tres-formas-de-empezar) • [Estado y límites de valor](#-estado-actual-y-límites-de-valor) • [Comparativa](#-el-problema-con-los-rastreadores-convencionales) • [Flujo real](#-arquitectura-del-flujo-de-análisis) • [Diagnóstico en Acción](#-diagnóstico-en-acción) • [Comandos CLI](#-guía-de-comandos-principales) • [Gemini Gems & GPTs](#-soporte-para-gemini-gems-y-custom-gpts) • [English](README.en.md)
 
 </div>
 
 ---
 
+## ◈ Estado actual y límites de valor
+
+**Qué es hoy:** una **beta técnica de autoanálisis local post-partida**. Trabaja con **datos que aportas explícitamente** (JSON/export o texto de marcador) y produce observaciones descriptivas, límites visibles y, solo si existe evidencia observada, una acción priorizada con su rutina. **No es una plataforma de importación automática de perfiles**: no consulta Tracker.gg ni OP.GG, no lee caché, cookies o sesiones del navegador, no interpreta capturas (OCR no implementado) y no accede a la API de Riot. Riot RSO es una **posibilidad futura opcional** para telemetría autenticada, nunca un requisito ni una funcionalidad disponible hoy.
+
+| Nivel de entrada | Qué puedes esperar | Qué NO se deriva |
+|---|---|---|
+| Agregados (marcador o stats de resumen) | Observaciones descriptivas de las métricas presentes y, si una cruza su umbral documentado, **una** acción mecánica limitada con su rutina | Causas, condiciones de ronda, conclusiones tácticas |
+| Eventos por ronda (JSON normalizado) | Métricas adicionales observables por ronda (daño, kills, economía) | Aperturas/tradeo sin marcas temporales |
+| Timestamps, posición o marcas de trade | Requisito para cualquier lectura de aperturas o tradeo | Nada si faltan: se declara la limitación |
+| Datos insuficientes | Plan de recolección con el siguiente dato concreto | Diagnóstico inventado, puntajes decorativos |
+
+**Qué no mide:** MMR interno, talento, rango merecido, causalidad ni mejora; **no reemplaza a un coach humano**. Una variación entre dos partidas es descriptiva y puede ser ruido.
+
+---
+
 ## ◈ El Problema con los Rastreadores Convencionales
 
-La mayoría de rastreadores web públicos solo suman cifras acumuladas al final de la partida: bajas totales, muertes y un porcentaje genérico de tiros a la cabeza. **Describen el marcador, pero son ciegos ante el por qué se perdió la partida.**
+La mayoría de rastreadores web públicos solo suman cifras acumuladas al final de la partida: bajas totales, muertes y un porcentaje genérico de tiros a la cabeza. Este motor, con datos locales, trabaja sobre los mismos agregados: **sin eventos con contexto temporal y fuente verificada, ninguno de los dos atribuye causas tácticas; ambos se limitan a describir.**
 
-| Dimensión Analítica | Rastreadores Públicos | Motor Valorant Analytics | Impacto Directo en tu Rango |
+| Dimensión Analítica | Rastreadores Públicos | Motor Valorant Analytics | Qué aporta realmente (con límites) |
 | :--- | :---: | :---: | :--- |
-| **Bajas de Impacto Real** | 🔴 K/D plano sin contexto | 🟢 **ADR útil + Ratio $FK/FD$** | Diferencia bajas clave de apertura de rondas basura en desventajas 1v4 ya perdidas. |
+| **Bajas de Apertura (FK/FD)** | 🔴 K/D plano sin contexto | 🟡 **ADR observado + Ratio $FK/FD$ (agregados)** | Cuenta FK (bajas de apertura) y FD (muertes de apertura) observadas; con agregados no separa causas tácticas ni bajas clave. |
 | **Mecánica de Disparo** | 🔴 % Headshot global | 🟢 **Ratio $SE/TP$ (zonas observadas)** | Mide sobre-spray con zonas observadas; la distancia es n/d sin posiciones (no se infiere). |
 | **Sinergia en Pareja** | 🔴 Inexistente | 🟢 **Auditoría de Dúo (agregados)** | Describe balance de bajas y carga; NO mide ventanas de tradeo sin eventos con contexto temporal. |
-| **Economía de Rondas** | 🔴 Total gastado global | 🟢 **Conversión por Buy-Tiers (Eco/Semi/Full)** | Identifica si estás regalando rondas clave tras ganar pistolas o en compras completas. |
+| **Economía de Rondas** | 🔴 Total gastado global | 🟢 **Conversión por Buy-Tiers (Eco/Semi/Full)** | Describe la conversión por buy-tier con umbrales observados; no atribuye causas ni proyecta mejora. |
 | **Salud de Cuenta** | 🔴 Solo rango visual | 🟡 **Señal heurística de MMR & estimación de rango** | Plantea una HIPÓTESIS (no verificada) de posible anclaje y una estimación orientativa de rango. No mide el MMR interno de Riot ni el talento real. |
 | **Entrada de datos** | 🔴 Cosecha de caché / Tracker | 🟢 **JSON/export o texto aportados por ti** | Sin cosecha de caché ni descarga automática: la entrada la aportas explícitamente; la vía autorizada (Riot RSO) está pendiente de credenciales. |
 
@@ -39,46 +54,33 @@ La mayoría de rastreadores web públicos solo suman cifras acumuladas al final 
 
 ## ◈ Arquitectura del Flujo de Análisis
 
-El pipeline extrae micro-datos de cada ronda y los somete a verificación formal e inferencia táctica:
+El flujo real es local y condicionado por la evidencia (sin Tracker, sin caché, sin OCR de capturas):
 
 ```mermaid
-flowchart TD
-    subgraph INGESTION["1. INGESTA RESILIENTE MULTI-FUENTE"]
-        A1["JSON / Export del usuario"] --> B["universal_ingestor.js"]
-        A2["Volcado de Marcador
-(Texto Plano / OCR)"] --> B
-        A3["Historial JSON / API
-(Anti-WAF Turnstile)"] --> B
-    end
-
-    subgraph ENGINE["2. MOTORES DE TELEMETRÍA PROFUNDA"]
-        B --> C1["learning_profile.js
-(Radar 360° & Fugas de ELO)"]
-        B --> C2["weapon_telemetry.js
-(Bandas 0-15m / 15-30m / 30-50m)"]
-        B --> C3["economy_analyzer.js
-(Conversión Pistol / Eco / Full-Buy)"]
-        B --> C4["duo_synergy.js
-(Tradeos & Balance de Carga)"]
-        B --> C5["autodiagnostic_engine.js
-(señal heurística MMR & estimación de rango)"]
-    end
-
-    subgraph OUTPUT["3. PRESCRIPCIÓN Y ACCIÓN INMEDIATA"]
-        C1 --> D1["Rutina KovaaK's / Aim Lab
-(15 min adaptativos)"]
-        C2 --> D1
-        C3 --> D2["Ajuste de Compras & Pacing"]
-        C4 --> D3["Directivas Tácticas de Dúo"]
-        C5 --> D4["Proyección de Carrera & Hitos"]
-    end
+flowchart LR
+    A["Datos aportados
+(JSON/export o texto de marcador)"] --> B["Validación local
+(esquema, presupuestos, procedencia)"]
+    B --> C["Observaciones y límites
+(solo métricas presentes)"]
+    C --> D{"¿Evidencia observada cruza
+un umbral documentado?"}
+    D -- "Sí" --> E["UNA acción + UNA rutina
+(con métrica, umbral y limitación)"]
+    D -- "No" --> F["Recolección requerida
+(siguiente dato concreto)"]
+    E --> G["Seguimiento local
+(plan intent/compare: delta descriptivo)"]
+    F --> A
 ```
+
+No consulta Tracker.gg ni OP.GG, no lee caché/cookies/sesiones del navegador y no interpreta capturas (OCR no implementado). Riot RSO es una **posibilidad futura opcional**, no un requisito ni una funcionalidad disponible hoy.
 
 ---
 
 ## ◈ Tres Formas de Empezar
 
-Diseñado para adaptarse a cualquier flujo de trabajo sin fricciones:
+Tres caminos de entrada manual; elige el que menos fricción añada a los datos que ya tienes:
 
 ### 🔹 Opción 1: Modo Directo sin Terminal (Vía Asistente Web o Gem)
 > **Ideal si buscas un análisis conversacional inmediato desde un JSON/export o el texto de tu marcador (OCR de capturas: no implementado).**
@@ -88,7 +90,7 @@ Diseñado para adaptarse a cualquier flujo de trabajo sin fricciones:
 3. Pega el texto de tu marcador o aporta un JSON/export (OCR de capturas NO implementado; Tracker no soportado).
 
 ### ⚡ Opción 2: Modo Local en Terminal (Despachador Maestro `cli.js`)
-> **Ideal para jugadores competitivos que buscan velocidad (<100ms) y análisis 100% local. No hay descarga automática de Tracker ni cosecha de caché: aportas un JSON/export, el texto de tu marcador o una captura (con confirmación).**
+> **Análisis 100% local con datos aportados por ti: JSON/export o texto de marcador. Sin descarga automática de Tracker/OP.GG, sin caché del navegador y sin OCR de capturas (no implementado).**
 
 ```bash
 # 1. Clona el repositorio
@@ -113,7 +115,7 @@ node cli.js --advanced --help
 > **Para desarrolladores y usuarios avanzados que integran habilidades agénticas.**
 
 - Carga la carpeta como skill activa enlazando [`SKILL.md`](SKILL.md).
-- Dispondrás de más de 16 comandos con verificación formal de invariantes matemáticos y atestaciones criptográficas in-toto DSSE v1.
+- Más de 16 comandos; las herramientas criptográficas/de integridad (DSSE, Merkle, invariantes) son de **verificación técnica**, no coaching, y viven en el modo avanzado (`--advanced --help`).
 
 ---
 
@@ -134,18 +136,15 @@ Ejemplo ilustrativo (fixture local; no es telemetría real ni una salida validad
   • Disciplina Económica      : [█████████░]  90 / 100  (68.0% win en compra completa)
   • Compostura en Clutch      : [████████░░]  80 / 100  (33.3% conversión en situaciones 1v2)
 
-🚨 TOP FUGAS DE ELO IDENTIFICADAS (DÓNDE REGALASTE RONDAS):
-  [#1] Sobre-asomo en post-plant (Rondas 7 y 14)
-       Situación: Ventaja numérica de 5v3 con la spike plantada.
-       Causa:     Búsqueda agresiva de la baja final en lugar de cruzar fuego.
-       Ajuste:    Jugar esquinas cerradas y consumir el reloj del defensor.
+🔎 OBSERVACIONES POR RONDA (datos normalizados; NO verificados; NO se atribuyen causas):
+  • R3 [damage] dmg 165 (H1/B2/L0)
+  • R9 [economy] spent 2600
+  (Fugas/causas omitidas: requieren fuente verificada + regla + resultado + contexto.)
 
-  [#2] Ráfagas prolongadas en rondas observadas (ejemplo ilustrativo; distancia n/d sin posiciones)
-       Situación: Duelos largos contra Vandal rival en A Principal.
-       Causa:     Ratio de spray elevado (SE/TP > 1.8) con dispersión excesiva.
-       Ajuste:    Ráfagas cortas de 2 balas con desplazamiento lateral (counter-strafe).
+📌 LÍMITES DE ESTE EJEMPLO: procedencia `normalized_input`; sin timestamps, posición ni marcas
+   de trade, por lo que no se emiten reglas de timing, tradeo o posicionamiento.
 
-🎯 RUTINA BIOMECÁNICA PRESCRITA (15 MINUTOS EXACTOS):
+🎯 RUTINA SUGERIDA (solo si la evidencia observada cruza su umbral; ~15 min, orientativa):
   ┌───────────────────────────┬──────────┬──────────────────────┬─────────────────────────────────────┐
   │ Bloque de Entrenamiento   │ Duración │ Escenario KovaaK's   │ Objetivo Biomecánico                │
   ├───────────────────────────┼──────────┼──────────────────────┼─────────────────────────────────────┤
@@ -164,8 +163,8 @@ El despachador maestro `cli.js` provee acceso unificado a todas las capacidades 
 
 | Comando | Sintaxis | Descripción |
 | :--- | :--- | :--- |
-| **Diagnóstico 360°** | `node cli.js match [partida.json] <jugador>` | Evalúa los 5 pilares de rendimiento y extrae las 3 fugas críticas de ELO. |
-| **Rutina de Puntería** | `node cli.js aim [partida.json] <jugador>` | Genera una playlist adaptativa de 15 minutos en KovaaK's / Aim Lab. |
+| **Diagnóstico 360°** | `node cli.js match [partida.json] <jugador>` | Describe los pilares con métricas observadas; las fugas atribuibles requieren fuente verificada. |
+| **Rutina de Puntería** | `node cli.js aim [partida.json] <jugador>` | Propone, solo si existe evidencia observada, una playlist de aim orientativa (~15 min) en KovaaK's / Aim Lab. |
 | **Telemetría de Armas** | `node cli.js weapons [partida.json] <jugador>` | Mide zonas observadas (Head/Body/Leg) y ratio SE/TP; la distancia es n/d: no se infiere sin posiciones. |
 | **Economía & Buy Tiers**| `node cli.js economy [partida.json] <jugador>` | Desglosa winrate, K/D y ADR en rondas Pistol, Eco, Semi-Buy y Full-Buy. |
 | **Coaching Introspectivo**| `node cli.js coaching [partida.json] <jugador>` | Identifica duelos de máxima fricción y prescribe recursos tácticos de YouTube. |
@@ -205,7 +204,6 @@ node cli.js plan export --pseudonymized                # exportación explícita
 
 **Perfiles de salida (misma evidencia, distinta presentación):** `--profile player` (breve), `--profile coach` (evidencia, límites y preguntas sugeridas) y `--profile analyst` (JSON estructurado). No cambian la política de evidencia.
 
-
 ## 🧱 Presupuestos de recursos y contrato de esquema
 
 Las entradas no confiables se procesan con **límites explícitos**. `VA_BUDGET_*` (p. ej. `VA_BUDGET_MAX_PLAYERS=32`) **solo puede REDUCIR** un límite: los valores inválidos (texto, NaN, Infinity, no enteros, ≤0) o los intentos de ampliación por encima del máximo seguro compilado **fallan cerrado** con `RESOURCE_BUDGET_EXCEEDED`. No existe escape de entorno para ampliar límites. Al exceder un límite se falla cerrado con un código estable y **sin análisis parcial**:
@@ -228,7 +226,6 @@ Códigos: `INPUT_TOO_LARGE` (archivo/texto), `SCHEMA_LIMIT_EXCEEDED` (profundida
 
 **Modalidad de estrés (fuera de la matriz normal):** `node tests/stress_dsse.js` ejecuta rondas acotadas de registro concurrente en el keystore DSSE con invariante completo en cada ronda y sin reintentos silenciosos (el primer error queda en logs). CI la corre en un job separado (`VA_STRESS_ROUNDS=3`).
 
-
 ## 📥 Entrada mínima útil (qué puedes aportar)
 
 No necesitas telemetría imposible. El flujo `plan` funciona por niveles:
@@ -241,7 +238,6 @@ No necesitas telemetría imposible. El flujo `plan` funciona por niveles:
 
 Si tu entrada no alcanza, `plan` no falla de forma genérica: indica el **siguiente dato más pequeño y concreto** (p. ej. "HS% del marcador" o "eventos de ronda con marcas de trade").
 
-
 ## ◈ Soporte para Gemini Gems y Custom GPTs
 
 Si utilizas **Google Gemini (Gems)** o **OpenAI (Custom GPTs)**, el archivo [`standalone_prompt.md`](standalone_prompt.md) ha sido completamente optimizado con:
@@ -249,7 +245,7 @@ Si utilizas **Google Gemini (Gems)** o **OpenAI (Custom GPTs)**, el archivo [`st
 - **Instrucciones de Sistema (System Prompt)** estructuradas con tags XML (`<system_role>`, `<vision_and_input_protocol>`, `<output_specification>`, etc.) con rigor matemático y guardas anti-alucinación.
 - **Protocolo de Ingesta Multi-Formato:** Diseñado para JSON/export aportado por ti, texto plano pegado o archivos existentes; OCR de capturas NO implementado.
 - **Iniciadores de Conversación Listos para Usar:** 4 botones pre-configurados para diagnósticos de partida, sinergia de dúo, rutinas KovaaK's y señal heurística de MMR.
-- **Formato Visual Deterministico:** Salida con barras ASCII de progreso (`[████████░░]`), matrices limpias de datos y bifurcaciones de coaching interactivo.
+- **Formato Visual Estable:** barras ASCII y tablas para la salida humana; sin promesas de coaching interactivo garantizado.
 
 👉 **Consulta la guía completa de configuración en [standalone_prompt.md](standalone_prompt.md)**.
 
@@ -258,9 +254,9 @@ Si utilizas **Google Gemini (Gems)** o **OpenAI (Custom GPTs)**, el archivo [`st
 ## ◈ Privacidad y Especificaciones de Ingeniería
 
 - **100% Local y Confidencial:** todo el análisis se ejecuta en tu equipo; nada sale de tu máquina. No hay llamadas de red salvo que en el futuro actives Riot RSO con credenciales propias.
-- **Sin red por defecto:** el análisis es local. No se cosecha la caché del navegador ni se consulta Tracker.gg. La entrada es un JSON/export, texto o captura que aportas explícitamente.
+- **Sin red por defecto:** el análisis es local. No se cosecha la caché del navegador ni se consulta Tracker.gg. La entrada es un JSON/export o texto de marcador que aportas explícitamente; el OCR de capturas no está implementado.
 - **Zero Dependencias NPM:** Diseñado exclusivamente sobre las librerías estándar de Node.js (`fs`, `path`, `zlib`, `crypto`, `child_process`). Cero descargas externas.
-- **Compatibilidad Multiplataforma:** Probado y garantizado en Windows 11 (PowerShell/CMD), macOS (zsh) y Linux (bash).
+- **Compatibilidad Multiplataforma:** Probado en CI sobre Windows, macOS y Linux (Node 18/20/22/24); sin garantía de resultados.
 - **Garantía Determinista:** 198 pruebas automatizadas y suites modulares verificadas con Exit Code 0 (`node run_all_tests.js`) y auditoría semántica de propiedades fail-closed, sin puntuación promocional (`node opencode_tester.js`).
 - **Contrato CLI:** salida humana y `--json`; códigos `0`/`1`/`2` documentados (resultado válido / entrada inválida / evidencia insuficiente); ningún comando selecciona un jugador en silencio.
 
@@ -275,7 +271,7 @@ Este proyecto **describe** lo que la telemetría local permite observar; no cert
 - **Rango merecido:** la "estimación de rango" es una **cota orientativa** derivada de umbrales heurísticos, no un rango real.
 - **Validación pendiente:** el motor aún no se ha validado con telemetría real ni con una muestra de jugadores. Hasta entonces, ninguna salida debe presentarse como diagnóstico concluyente.
 - **`verified_source` (frente #1):** la única fuente autorizada para VALORANT es la **API oficial de Riot (production key + Riot Sign-On)**; las claves personales/developer no tienen acceso. El adaptador (`scripts/riot_source.js`) exige token Riot, host en allowlist, `matchId` verificable y una atestación Ed25519 **verificada contra el trust store del operador** (`RIOT_ATTESTATION_TRUST`), que **no se acepta como argumento**; la firma la produce la clave privada del **ingestor autorizado** (`RIOT_ATTESTATION_KEY`, 0600 fuera del repo), nunca una clave del llamador. Una firma local acredita **procedencia del ingestor**, no que Riot emitiera criptográficamente el contenido. Sin credenciales aprobadas, `verified_source` es inalcanzable y todo queda como `normalized_input`. Credenciales Riot: **pendientes de solicitud**.
-- **Fugas de ELO (aprendizaje 360°):** son señales derivadas de micro-eventos de la partida analizada (fixture o datos que aportes), no una auditoría forense de la cuenta.
+- **Fugas de ELO (aprendizaje 360°):** solo se emiten como atribuibles con fuente verificada; con datos locales se muestran observaciones descriptivas, no una auditoría forense de la cuenta.
 
 ---
 
