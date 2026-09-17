@@ -4268,7 +4268,9 @@ check('tracker text: victoria — metadatos observados (modo, mapa, resultado, f
     assert.strictEqual(meta.mapName, 'Ascent');
     assert.deepStrictEqual(meta.score, { teamA: 13, teamB: 7 });
     assert.strictEqual(meta.winner, 'Team A');
-    assert.strictEqual(meta.timestamp, '2026-06-09T14:07:00');
+    assert.strictEqual(meta.timestamp, null, 'fecha numérica ambigua => sin ISO fabricado');
+    assert.strictEqual(meta.dateText, '6/9/26, 14:07', 'se conserva el texto original de la fecha');
+    assert.strictEqual(meta.dateAmbiguity, 'fecha_ambigua_por_locale');
     assert.strictEqual(meta.durationText, '27m 40s');
     assert.strictEqual(meta.durationSeconds, 1660);
     assert.strictEqual(meta.averageRank, 'Platinum 2');
@@ -4411,7 +4413,9 @@ check('tracker text: límites declarados y campos fuera de alcance',
   () => {
     const text = fs.readFileSync(trackerFixture('tracker_text_victory.txt'), 'utf8');
     const meta = trackerIngestor.parseTrackerTextExport(text).data.metadata;
-    assert.strictEqual(meta.declaredLimits.length, 3);
+    assert.strictEqual(meta.declaredLimits.length, 4);
+    assert.ok(meta.declaredLimits.some(l => /fecha_ambigua_por_locale/.test(l)), 'declara la ambigüedad de fecha como límite');
+    assert.ok(meta.missing.some(m => /fecha_ambigua_por_locale/.test(m)), 'declara la fecha ambigua como dato faltante');
     assert.ok(meta.declaredLimits.some(l => /No es fuente verificada/.test(l)));
     assert.ok(meta.declaredLimits.some(l => /No atribuye causas/.test(l)));
     assert.ok(meta.declaredLimits.some(l => /MMR interno, talento, rango merecido/.test(l)));
@@ -4430,7 +4434,7 @@ check('tracker text: CLI parse/plan/match con --json (un único JSON, sourceForm
       assert.strictEqual(parsed.sourceFormat, 'tracker_text_export');
       assert.strictEqual(parsed.provenance, 'normalized_input');
       assert.strictEqual(parsed.extraction.playersExtracted, 10);
-      assert.strictEqual(parsed.limits.length, 3);
+      assert.strictEqual(parsed.limits.length, 4);
       const planOut = cliOk(['plan', trackerFixture('tracker_text_victory.txt'), 'Hecate#PGM2', '--json']);
       const planned = JSON.parse(planOut);
       assert.strictEqual(planned.sourceFormat, 'tracker_text_export');
@@ -4459,6 +4463,38 @@ check('tracker text: CLI parse/plan/match con --json (un único JSON, sourceForm
         try { fs.unlinkSync(dupFile); } catch (e) { /* limpio */ }
       }
     });
+  });
+
+check('tracker text: fechas — ISO solo si es inequívoca; ambigüedad declarada (6/9/26, 13/9/26, ISO, mes textual)',
+  () => {
+    const base = fs.readFileSync(trackerFixture('tracker_text_defeat.txt'), 'utf8');
+    const parseWithDate = d => {
+      const text = base.replace('7/3/26, 21:15', d);
+      assert.ok(text.includes(d), 'el fixture base debe contener la fecha reemplazada');
+      return trackerIngestor.parseTrackerTextExport(text).data.metadata;
+    };
+    const ambiguous = parseWithDate('6/9/26, 14:07');
+    assert.strictEqual(ambiguous.dateText, '6/9/26, 14:07', 'texto original conservado');
+    assert.strictEqual(ambiguous.timestamp, null, 'sin ISO para fecha ambigua por locale');
+    assert.strictEqual(ambiguous.dateAmbiguity, 'fecha_ambigua_por_locale');
+    assert.ok(ambiguous.missing.some(m => /fecha_ambigua_por_locale/.test(m)));
+    assert.ok(ambiguous.declaredLimits.some(l => /fecha_ambigua_por_locale/.test(l)));
+    const dayFirst = parseWithDate('13/9/26, 14:07');
+    assert.strictEqual(dayFirst.timestamp, '2026-09-13T14:07:00', '>12 en el primer campo desambigua D/M');
+    assert.strictEqual(dayFirst.dateAmbiguity, null);
+    const monthFirst = parseWithDate('9/13/26, 14:07');
+    assert.strictEqual(monthFirst.timestamp, '2026-09-13T14:07:00', '>12 en el segundo campo desambigua M/D');
+    assert.strictEqual(monthFirst.dateAmbiguity, null);
+    const iso = parseWithDate('2026-06-09T14:07');
+    assert.strictEqual(iso.timestamp, '2026-06-09T14:07:00');
+    assert.strictEqual(iso.dateText, '2026-06-09T14:07');
+    assert.strictEqual(iso.dateAmbiguity, null);
+    const textual = parseWithDate('June 9, 2026, 14:07');
+    assert.strictEqual(textual.timestamp, '2026-06-09T14:07:00');
+    assert.strictEqual(textual.dateAmbiguity, null);
+    const textualNoTime = parseWithDate('9 June 2026');
+    assert.strictEqual(textualNoTime.timestamp, '2026-06-09', 'sin hora: ISO a precisión de fecha');
+    assert.strictEqual(textualNoTime.dateAmbiguity, null);
   });
 
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben

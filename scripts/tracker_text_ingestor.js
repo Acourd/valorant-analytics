@@ -410,16 +410,57 @@ function extractRoundEndTypes(text) {
   return out;
 }
 
-function extractDate(text) {
-  const m = text.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4}),?\s+(\d{1,2}):(\d{2})/);
-  if (!m) return { dateText: null, timestamp: null };
-  const rawYear = Number(m[3]);
-  const year = m[3].length <= 2 ? (rawYear < 70 ? 2000 + rawYear : 1900 + rawYear) : rawYear;
+const MONTHS = {
+  january: 1, february: 2, march: 3, april: 4, may: 5, june: 6, july: 7,
+  august: 8, september: 9, october: 10, november: 11, december: 12,
+  jan: 1, feb: 2, mar: 3, apr: 4, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12
+};
+
+function isoFromParts(year, month, day, hh, mm, hasTime) {
   const pad = n => String(n).padStart(2, '0');
-  return {
-    dateText: m[0],
-    timestamp: `${year}-${pad(Number(m[1]))}-${pad(Number(m[2]))}T${pad(Number(m[4]))}:${pad(Number(m[5]))}:00`
-  };
+  if (!Number.isInteger(year) || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const date = `${year}-${pad(month)}-${pad(day)}`;
+  return hasTime ? `${date}T${pad(hh)}:${pad(mm)}:00` : date;
+}
+
+/**
+ * Extrae la fecha SIN fabricar precisión: el texto original se conserva en
+ * `dateText` y `timestamp` solo se genera cuando el formato es inequívoco
+ * (ISO, mes textual, o numérico donde >12 desambigua día/mes). Un formato
+ * numérico ambiguo (p. ej. `6/9/26`) deja `timestamp: null` y marca
+ * `fecha_ambigua_por_locale`.
+ */
+function extractDate(text) {
+  const iso = text.match(/\b(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{1,2}):(\d{2}))?\b/);
+  if (iso) {
+    const ts = isoFromParts(Number(iso[1]), Number(iso[2]), Number(iso[3]), Number(iso[4] || 0), Number(iso[5] || 0), iso[4] !== undefined);
+    if (ts) return { dateText: iso[0], timestamp: ts, ambiguous: false };
+  }
+  const monthDayYear = text.match(/\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})(?:,?\s+(\d{1,2}):(\d{2}))?/);
+  const dayMonthYear = text.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?,?\s+(\d{4})(?:,?\s+(\d{1,2}):(\d{2}))?/);
+  const md = monthDayYear && MONTHS[String(monthDayYear[1]).toLowerCase()];
+  const dm = dayMonthYear && MONTHS[String(dayMonthYear[2]).toLowerCase()];
+  if (md) {
+    const ts = isoFromParts(Number(monthDayYear[3]), MONTHS[String(monthDayYear[1]).toLowerCase()], Number(monthDayYear[2]), Number(monthDayYear[4] || 0), Number(monthDayYear[5] || 0), monthDayYear[4] !== undefined);
+    if (ts) return { dateText: monthDayYear[0], timestamp: ts, ambiguous: false };
+  } else if (dm) {
+    const ts = isoFromParts(Number(dayMonthYear[3]), MONTHS[String(dayMonthYear[2]).toLowerCase()], Number(dayMonthYear[1]), Number(dayMonthYear[4] || 0), Number(dayMonthYear[5] || 0), dayMonthYear[4] !== undefined);
+    if (ts) return { dateText: dayMonthYear[0], timestamp: ts, ambiguous: false };
+  }
+  const numeric = text.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:,?\s+(\d{1,2}):(\d{2}))?/);
+  if (!numeric) return { dateText: null, timestamp: null, ambiguous: false };
+  const rawYear = Number(numeric[3]);
+  const year = numeric[3].length <= 2 ? (rawYear < 70 ? 2000 + rawYear : 1900 + rawYear) : rawYear;
+  const first = Number(numeric[1]);
+  const second = Number(numeric[2]);
+  const hasTime = numeric[4] !== undefined;
+  const dateText = numeric[0];
+  if (first > 31 || second > 31 || (first > 12 && second > 12)) {
+    return { dateText, timestamp: null, ambiguous: false };
+  }
+  if (first > 12) return { dateText, timestamp: isoFromParts(year, second, first, Number(numeric[4] || 0), Number(numeric[5] || 0), hasTime), ambiguous: false };
+  if (second > 12) return { dateText, timestamp: isoFromParts(year, first, second, Number(numeric[4] || 0), Number(numeric[5] || 0), hasTime), ambiguous: false };
+  return { dateText, timestamp: null, ambiguous: true };
 }
 
 function extractDuration(text) {
@@ -446,7 +487,7 @@ function extractMeta(lines, text, clusters, players) {
   if (!mapName) mapName = null;
   const score = extractScore(lines, firstClusterStart);
   const winner = score ? (score.teamA === score.teamB ? null : (score.teamA > score.teamB ? 'Team A' : 'Team B')) : null;
-  const { dateText, timestamp } = extractDate(text);
+  const { dateText, timestamp, ambiguous } = extractDate(text);
   const { durationText, durationSeconds } = extractDuration(text);
   const avgIndex = head.findIndex(l => l === 'Average Rank');
   let averageRank = null;
@@ -458,6 +499,7 @@ function extractMeta(lines, text, clusters, players) {
   const teams = teamBlocks(lines, clusters).map(b => ({ teamId: b.teamId, averageRank: normalizeRank(b.avgRankText) }));
   return {
     modeName, mapName, score, winner, dateText, timestamp,
+    dateAmbiguity: ambiguous ? 'fecha_ambigua_por_locale' : null,
     durationText, durationSeconds, averageRank, teams,
     roundEndTypes: extractRoundEndTypes(text)
   };
@@ -547,10 +589,21 @@ function buildTrackerMatch(players, meta, extraction, options) {
   if (!meta.mapName) missing.push('mapa');
   if (!meta.modeName) missing.push('modo');
   if (!meta.score) missing.push('resultado/marcador');
-  if (!meta.timestamp) missing.push('fecha');
+  if (!meta.timestamp) {
+    missing.push(meta.dateAmbiguity ? 'fecha interpretable (fecha_ambigua_por_locale)' : 'fecha');
+  }
   if (!meta.durationText) missing.push('duración');
   if (!meta.averageRank) missing.push('rango medio');
   if (extraction.fieldsMissing.length > 0) missing.push(`columnas no presentes en el scoreboard: ${extraction.fieldsMissing.join(', ')}`);
+
+  const declaredLimits = [
+    'No es fuente verificada: es texto de una página guardado manualmente por el usuario.',
+    'No atribuye causas ni fugas.',
+    'No mide MMR interno, talento, rango merecido ni demuestra mejora.'
+  ];
+  if (meta.dateAmbiguity) {
+    declaredLimits.push('Fecha numérica ambigua por locale (fecha_ambigua_por_locale): se conserva el texto original y no se convierte a ISO.');
+  }
 
   return {
     data: {
@@ -562,6 +615,7 @@ function buildTrackerMatch(players, meta, extraction, options) {
         rounds: null,
         timestamp: meta.timestamp,
         dateText: meta.dateText,
+        dateAmbiguity: meta.dateAmbiguity,
         durationText: meta.durationText,
         durationSeconds: meta.durationSeconds,
         score: meta.score,
@@ -576,11 +630,7 @@ function buildTrackerMatch(players, meta, extraction, options) {
         sourceRef: `tracker-text:sha256:${digest.slice(0, 16)}`,
         sourceDigest: digest,
         derived: { synthesizedRounds: false },
-        declaredLimits: [
-          'No es fuente verificada: es texto de una página guardado manualmente por el usuario.',
-          'No atribuye causas ni fugas.',
-          'No mide MMR interno, talento, rango merecido ni demuestra mejora.'
-        ],
+        declaredLimits,
         extraction,
         missing
       },
