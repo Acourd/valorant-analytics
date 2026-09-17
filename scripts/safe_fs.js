@@ -6,12 +6,15 @@
  * probada del keystore DSSE; misma lógica, sin modificarlo).
  *
  *   - Lectura SIN carrera TOCTOU: `lstat` → `open` con O_NOFOLLOW (donde la
- *     plataforma lo permite) → `fstat` → comparación dev/ino contra la
- *     inspección previa. Sustitución o enlace ⇒ fail-closed.
- *   - Windows no soporta O_NOFOLLOW: la sustitución se detecta con dev/ino del
- *     descriptor (NTFS expone file-id estable) y, cuando dev/ino no son
- *     fiables (p. ej. Node 18 en Windows devuelve 0), con tamaño/mtime/
- *     birthtime; se documenta como best-effort equivalente.
+ *     plataforma lo permite) → `fstat` → veredicto con el predicado PURO
+ *     `substitutionDetected` (identidad dev/ino y, como señal ADICIONAL,
+ *     tamaño/mtime/birthtime). Sustitución o enlace ⇒ fail-closed.
+ *   - Windows no soporta O_NOFOLLOW y el file-id de NTFS puede reutilizarse al
+ *     recrear un archivo: los metadatos actúan como segunda señal, pero la
+ *     detección en Windows sigue siendo best-effort documentada (dos archivos
+ *     con misma identidad Y mismos metadatos no son distinguibles).
+ *   - Estadísticas inválidas (ausentes, no numéricas, NaN/Infinity) ⇒ detecta
+ *     (fail-closed), nunca "sin sustitución" por defecto.
  *   - Política de directorio privado (pura y determinista): rechaza symlink,
  *     no-directorio, propietario ajeno (POSIX) y escritura de grupo/otros.
  *
@@ -38,8 +41,37 @@ function lstatRegularOrAbsent(p) {
 }
 
 /**
- * Lectura resistente a TOCTOU. Devuelve Buffer, o null si el archivo no existe.
- * `expectedStat` es el lstat previo; si dev/ino cambian, falla cerrado.
+ * Predicado PURO y total de sustitución entre dos inspecciones (el `lstat`
+ * previo y el `fstat` del descriptor abierto). Determinista, sin fs ni entorno:
+ *   - estadísticas inválidas (ausentes, no numéricas, NaN/Infinity) => detecta
+ *     (fail-closed; nunca asumir "sin sustitución");
+ *   - identidad `dev/ino` distinta => detecta;
+ *   - identidad igual (o cero/no fiable, p. ej. Node/Windows) => detecta si
+ *     cambian tamaño, mtime o birthtime. En NTFS el file-id puede reutilizarse
+ *     al recrear el archivo: los metadatos son señal ADICIONAL y Windows sigue
+ *     siendo best-effort documentado.
+ * Devuelve `{ detected, reason }` con reason ∈ 'IDENTITY_CHANGED' |
+ * 'METADATA_CHANGED' | 'INVALID_STAT' | null.
+ */
+function substitutionDetected(expectedStat, openedStat) {
+  const num = (v) => typeof v === 'number' && Number.isFinite(v);
+  const valid = (st) => !!st && typeof st === 'object' && num(st.dev) && num(st.ino) && num(st.size) && num(st.mtimeMs);
+  if (!valid(expectedStat) || !valid(openedStat)) return { detected: true, reason: 'INVALID_STAT' };
+  if (expectedStat.dev !== openedStat.dev || expectedStat.ino !== openedStat.ino) {
+    return { detected: true, reason: 'IDENTITY_CHANGED' };
+  }
+  const birthComparable = num(expectedStat.birthtimeMs) && num(openedStat.birthtimeMs);
+  const metadataChanged = expectedStat.size !== openedStat.size ||
+    expectedStat.mtimeMs !== openedStat.mtimeMs ||
+    (birthComparable
+      ? expectedStat.birthtimeMs !== openedStat.birthtimeMs
+      : num(expectedStat.birthtimeMs) !== num(openedStat.birthtimeMs));
+  if (metadataChanged) return { detected: true, reason: 'METADATA_CHANGED' };
+  return { detected: false, reason: null };
+}
+
+/** Lectura resistente a TOCTOU. Devuelve Buffer, o null si el archivo no existe.
+ * `expectedStat` es el lstat previo; el veredicto lo da `substitutionDetected`.
  */
 function readFileNoFollow(p, what, expectedStat) {
   let fd = null;
@@ -58,16 +90,12 @@ function readFileNoFollow(p, what, expectedStat) {
       throw new Error(`El ${what} (${p}) no es un archivo regular: fail-closed.`);
     }
     if (expectedStat) {
-      const devInoUsable = (expectedStat.ino !== undefined && expectedStat.ino !== 0) || (opened.ino !== undefined && opened.ino !== 0);
-      const identityChanged = opened.dev !== expectedStat.dev || opened.ino !== expectedStat.ino;
-      const metaChanged = opened.size !== expectedStat.size ||
-        opened.mtimeMs !== expectedStat.mtimeMs ||
-        (opened.birthtimeMs !== undefined && expectedStat.birthtimeMs !== undefined && opened.birthtimeMs !== expectedStat.birthtimeMs);
-      // Sustitución si cambia la identidad (dev/ino) o, donde dev/ino no son
-      // fiables (p. ej. Windows Node 18 devuelve 0), si cambian tamaño/mtime/
-      // birthtime entre la inspección y la apertura.
-      if (identityChanged || (!devInoUsable && metaChanged)) {
-        throw new Error(`Sustitución detectada en ${what} (${p}) entre la inspección y la apertura: fail-closed (${identityChanged ? 'dev/ino cambiaron' : 'metadatos de identidad cambiaron'}).`);
+      const verdict = substitutionDetected(expectedStat, opened);
+      if (verdict.detected) {
+        const motivo = verdict.reason === 'IDENTITY_CHANGED' ? 'dev/ino cambiaron'
+          : verdict.reason === 'METADATA_CHANGED' ? 'metadatos de identidad cambiaron'
+            : 'estadísticas de archivo inválidas';
+        throw new Error(`Sustitución detectada en ${what} (${p}) entre la inspección y la apertura: fail-closed (${motivo}).`);
       }
     }
     return fs.readFileSync(fd);
@@ -223,6 +251,7 @@ function ensurePrivateDir(dirPath, { code = 'UNSAFE_PATH' } = {}) {
 module.exports = {
   nofollowSupported,
   lstatRegularOrAbsent,
+  substitutionDetected,
   readFileNoFollow,
   storageDirPolicyViolation,
   intermediateDirPolicyViolation,

@@ -1,5 +1,11 @@
 # Changelog — valorant-analytics
 
+## 4.11.4 — Detección de sustitución determinista (sin reejecución de la suite)
+
+- **Corregido (confiabilidad del test #195):** la prueba mezclaba seguridad con comportamiento del filesystem (monkeypatch de `fs.openSync` esperando que `dev/ino` cambiaran); en NTFS el file-id puede reutilizarse al recrear un archivo y el check fallaba aunque no hubiera regresión. `scripts/safe_fs.js` expone ahora el predicado **puro** `substitutionDetected(expectedStat, openedStat)`: identidad `dev/ino` primero y, como señal ADICIONAL, tamaño/mtime/birthtime (la identidad igual no es concluyente: en NTFS puede reutilizarse el file-id); estadísticas inválidas ⇒ fail-closed. Windows sigue documentado como best-effort (identidad y metadatos iguales no son distinguibles).
+- **Tests deterministas:** predicado puro (`IDENTITY_CHANGED`/`METADATA_CHANGED`/`INVALID_STAT`) e integración con **estadísticas inyectadas** (sin depender de reutilización real de file-ids); la sustitución real con swap se ejecuta solo donde el filesystem ofrece identidad estable. `tests #199`–`#200`: 200/200 checks.
+- **P13 sin reejecución:** `opencode_tester.js` ya no vuelve a ejecutar `test_suite.js` (duplicaba la suite entera, sumaba contención de temporales y era la superficie del flake en Windows). Ahora verifica que el runner único (`run_all_tests.js`) la incluye y que no existe invocación anidada; el runner ya la ejecuta una sola vez en CI.
+- Versión 4.11.4.
 ## 4.11.3 — Padres intermedios no controlables
 
 - **Corregido (perímetro dependiente de ancestro):** una ruta como `/tmp/padre-compartido-0777/plans` era admisible si `plans` acababa en 0700, pero un ancestro escribible podía renombrar/sustituir el directorio final. Ahora **cada padre intermedio** debe ser directorio, no symlink, no escribible por grupo/otros y no pertenecer a otro usuario (se tolera root como propietario de directorios de sistema). Excepción mínima sin extensión a hijos: solo los **hijos directos de la raíz** (`/tmp`, `/var`, `/private`…) quedan exentos. La cadena completa se **revalida antes de crear el temporal y antes del `rename`**.
