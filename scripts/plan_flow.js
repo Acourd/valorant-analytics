@@ -50,6 +50,18 @@ function createPlanWithTracking(matchData, player, options = {}) {
   if (plan.provenance === 'synthetic_demo') {
     return { plan, tracking: { ok: false, code: 'PLAN_DEMO_NOT_TRACKABLE', message: 'Los datos sintéticos no habilitan seguimiento: no se persiste.' } };
   }
+  // Política de persistencia: una acción válida se registra; SIN_ACCION y
+  // DATOS_INSUFICIENTES solo con petición explícita (--track).
+  if (plan.estado !== 'ACCION_DISPONIBLE' && options.track !== true) {
+    return {
+      plan,
+      tracking: {
+        ok: false,
+        code: 'PLAN_NOT_TRACKED',
+        message: 'Sin acción correctiva: no se persiste automáticamente. Usa --track si quieres registrar el seguimiento igualmente.'
+      }
+    };
+  }
   const metric = pickComparableMetric(plan);
   try {
     const record = store.savePlan({

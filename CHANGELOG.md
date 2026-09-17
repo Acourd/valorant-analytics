@@ -1,5 +1,15 @@
 # Changelog — valorant-analytics
 
+## 4.13.0 — UX del comando plan para jugadores
+
+- **Vista jugador compacta (`--profile player`, por defecto):** orden fijo 1) RESUMEN DE ESTA PARTIDA (resultado/mapa/modo, agente, hasta 4 métricas observadas), 2) RESULTADO DE ESTA MEDICIÓN con una de cuatro etiquetas —`ACCIÓN DISPONIBLE`, `SIN ACCIÓN CORRECTIVA`, `DATOS INSUFICIENTES PARA UNA ACCIÓN`, `SIMULACIÓN DEMO`—, 3) SIGUIENTE PASO (una sola recomendación) y una línea de alcance. `RECOLECCION_REQUERIDA` deja de ser titular cuando la partida sí tiene observaciones útiles.
+- **Siguiente paso honesto por formato:** con `tracker_text_export` se explica que el archivo no contiene eventos por ronda (ni posiciones, trades o timestamps) y se ofrecen alternativas realistas (3–5 partidas del mismo tipo; export con eventos si algún día se dispone de él), en vez de ordenar un dato que el formato no puede aportar.
+- **Detalles bajo demanda:** límites, procedencia, faltantes, digest y `planId` siguen en `--verbose`, `--profile coach` y `--profile analyst`; la vista jugador no muestra IDs técnicos ni comandos de seguimiento automáticos.
+- **Persistencia explícita:** una acción válida se registra; `SIN_ACCION_CORRECTIVA` y `DATOS_INSUFICIENTES` solo con `--track`; el demo nunca persiste ni habilita seguimiento. Nuevos flags `--verbose` y `--track` (independientes del orden).
+- **Tipografía:** verificado que no existe `RUINA ASOCIADA` en código ni salidas (la sección es `RUTINA ASOCIADA`); regresión nueva lo protege. `--json` conserva el contrato y añade el bloque `presentation`.
+- **Contrato de códigos por estado:** `ACCIÓN DISPONIBLE` y `SIN ACCIÓN CORRECTIVA` salen con **exit 0** (evidencia suficiente y resultado válido); `DATOS INSUFICIENTES PARA UNA ACCIÓN` y `SIMULACIÓN DEMO` con **exit 2**. Regresiones `#221`.
+- **Banner de fuente:** en `--profile player` normal se oculta `[FUENTE: …]` (redundante con la línea de alcance en lenguaje humano); se conserva en `--verbose`, coach, analyst y JSON. Regresión `#222`.
+- Regresiones `#212`–`#222`: 222/222 checks. Versión 4.13.0.
 ## 4.12.0 — Importador local de texto de Tracker (manual, sin scraping)
 
 - **Nuevo (`scripts/tracker_text_ingestor.js`):** detecta y parsea un archivo `.txt` guardado manualmente desde una página de partida de Tracker ("Save page as text"): bloque `Scoreboard`, cabeceras `Match Rank/TRS/ACS/K/D/A/+/-/K/D/DDΔ/ADR/HS%/KAST/FK/FD/MK`, equipos, metadatos (modo, mapa, marcador, resultado, fecha, duración, rango medio) y filas con nombres con espacios/Unicode. Ignora navegación, enlaces, perfiles y pie. Los campos ausentes permanecen `null` y se declaran; no se inventan rondas, posiciones, economía, trades, duelos ni eventos.

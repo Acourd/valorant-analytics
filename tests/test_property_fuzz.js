@@ -386,6 +386,8 @@ property('cli-args: permutaciones de flags no alteran posicionales ni semántica
       trustNewKey: chosen.includes('--trust-new-key'),
       advanced: false,
       pseudonymized: false,
+      verbose: false,
+      track: false,
       help: false,
       profile: null
     }, 'flags independientes del orden');
@@ -420,7 +422,7 @@ property('plan: la acción solo cita métricas observadas y es determinista', ()
     }
     const match = observedMatch('Focus#NA1', stats);
     const plan = buildPlan(match, 'Focus#NA1');
-    assert.ok(plan.observado.length <= 3, 'máximo 3 observaciones');
+    assert.ok(plan.observado.length <= 4, 'máximo 4 observaciones');
     assert.strictEqual(plan.provenance, 'normalized_input', 'procedencia sellada');
     for (const o of plan.observado) assert.ok(o.metrica && o.valor !== null && o.valor !== undefined, 'observación con valor real');
     if (plan.accion) {
@@ -435,7 +437,7 @@ property('plan: la acción solo cita métricas observadas y es determinista', ()
       if (m === 'fdMinusFk') assert.ok(stats.firstKills !== undefined && stats.firstDeaths !== undefined, 'FD/FK citados y observados');
       assert.ok(!['legPct', 'sprayTapRatio'].includes(m), 'sin eventos de daño no se cita leg/spray');
     } else {
-      assert.strictEqual(plan.estado, 'RECOLECCION_REQUERIDA');
+      assert.ok(['SIN_ACCION_CORRECTIVA', 'DATOS_INSUFICIENTES'].includes(plan.estado), `estado sin acción honesto (${plan.estado})`);
       assert.strictEqual(plan.rutina, null, 'sin acción no hay rutina');
       assert.ok(plan.siguiente_dato.dato.length > 0, 'dato requerido explícito');
     }
