@@ -79,7 +79,37 @@ function buildObservations(profile) {
   if (m.adr !== null && m.adr !== undefined) push('ADR', String(m.adr));
   if (m.acs !== null && m.acs !== undefined) push('ACS', String(m.acs));
   if (m.clutches !== null && m.clutches !== undefined) push('Clutches', String(m.clutches));
-  return obs.slice(0, 3);
+  return obs.slice(0, 4);
+}
+
+/**
+ * ¿Hay métricas suficientes para EVALUAR las reglas documentadas? Si no hay
+ * ninguna de las que alimentan reglas correctivas (HS%, KAST% o FK/FD), el
+ * resultado honesto es DATOS_INSUFICIENTES, no "recolección" genérica.
+ */
+function hasEvaluableMetrics(profile) {
+  const m = profile.mechanical || {};
+  const fkfd = m.fk !== null && m.fk !== undefined && m.fd !== null && m.fd !== undefined;
+  return m.hsPct !== null && m.hsPct !== undefined
+    ? true
+    : (m.kast !== null && m.kast !== undefined) || fkfd;
+}
+
+/** Una sola recomendación práctica para el jugador (sin jerga ni IDs). */
+function playerNextStep(plan, meta, temporal, suficiente) {
+  if (plan.esSimulacion) {
+    return 'Prueba con una partida real (JSON/export o texto de marcador): el demo no habilita acción, rutina ni seguimiento.';
+  }
+  if (meta.sourceFormat === 'tracker_text_export') {
+    return 'Este archivo es el texto de una página de Tracker y no contiene eventos por ronda (ni posiciones, trades o timestamps), así que no se puede leer más de él. Alternativas realistas: analizar 3–5 partidas del mismo tipo para observar consistencia, o aportar un export con eventos por ronda si algún día dispones de él.';
+  }
+  if (plan.accion) {
+    return `Aplica la acción en tu próxima partida y vuelve a medir ${plan.accion.metrica} con otra entrada (el seguimiento es local y descriptivo).`;
+  }
+  if (suficiente) {
+    return 'Repite el análisis con 3–5 partidas del mismo tipo para observar consistencia: una sola partida no demuestra nada.';
+  }
+  return `Para evaluar las reglas documentadas falta una métrica base (HS%, KAST% o FK/FD). Aporta una entrada que la incluya.`;
 }
 
 function nextDataFor(profile, gate, hasRoundEvents, temporal) {
@@ -188,6 +218,16 @@ function buildPlan(matchData, targetHandle) {
   } : null;
 
   const routine = weakness ? firstRoutine(weakness.area) : null;
+  const suficiente = hasEvaluableMetrics(profile);
+  const estado = esSimulacion
+    ? 'SIMULACION_DEMO'
+    : (accion ? 'ACCION_DISPONIBLE' : (suficiente ? 'SIN_ACCION_CORRECTIVA' : 'DATOS_INSUFICIENTES'));
+  const titular = {
+    ACCION_DISPONIBLE: 'ACCIÓN DISPONIBLE',
+    SIN_ACCION_CORRECTIVA: 'SIN ACCIÓN CORRECTIVA',
+    DATOS_INSUFICIENTES: 'DATOS INSUFICIENTES PARA UNA ACCIÓN',
+    SIMULACION_DEMO: 'SIMULACIÓN DEMO'
+  }[estado];
   const siguienteDato = esSimulacion
     ? {
       dato: 'datos reales (JSON/export, texto del marcador o captura con confirmación)',
@@ -198,10 +238,26 @@ function buildPlan(matchData, targetHandle) {
       ? { dato: `nueva medición de ${accion.metrica} en otra partida`, porQue: 'permite comprobar si el plan movió la métrica observada.', como: 'node cli.js plan <archivo.json> "Nombre#TAG"' }
       : nextDataFor(profile, gate, hasRoundEvents, temporal));
 
+  const presentation = {
+    titular,
+    resumen: {
+      resultado: profile.result && profile.result !== 'Finished' ? profile.result : null,
+      mapa: profile.map && profile.map !== 'Unknown' ? profile.map : null,
+      modo: (matchData.data && matchData.data.metadata && matchData.data.metadata.modeName) || null,
+      agente: profile.agent || null,
+      metricas: observado.map(o => `${o.metrica} ${o.valor}`)
+    },
+    siguiente: playerNextStep({ esSimulacion, accion, observado }, { sourceFormat: (matchData.data && matchData.data.metadata && matchData.data.metadata.sourceFormat) || null }, temporal, suficiente),
+    alcance: 'Datos locales no verificados; describe esta partida, no demuestra mejora.'
+  };
+
   timeBudget.checkpoint('construcción de plan');
   return {
     command: 'plan',
     player: handle,
+    agent: profile.agent || null,
+    map: profile.map || null,
+    result: profile.result || null,
     provenance: profile.provenance,
     provenanceLabel: provenanceLabel(profile.provenance),
     schema: schemaValidation.diagnostics,
@@ -209,7 +265,8 @@ function buildPlan(matchData, targetHandle) {
     advertencia: esSimulacion
       ? 'SINTÉTICA --demo: métricas inventadas por el demo; no son observaciones reales ni habilitan recomendaciones.'
       : null,
-    estado: esSimulacion ? 'SIMULACION_DEMO' : (accion ? 'ACCION_DISPONIBLE' : 'RECOLECCION_REQUERIDA'),
+    estado,
+    presentation,
     observado,
     // Métricas comparables entre partidas (solo las realmente observadas).
     comparables: {

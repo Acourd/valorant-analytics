@@ -294,6 +294,8 @@ const KNOWN_FLAGS = Object.freeze({
   '--trust-new-key': 'trustNewKey',
   '--advanced': 'advanced',
   '--pseudonymized': 'pseudonymized',
+  '--verbose': 'verbose',
+  '--track': 'track',
   '--help': 'help',
   '-h': 'help'
 });
@@ -302,7 +304,7 @@ const VALUE_FLAGS = Object.freeze({ '--profile': 'profile' });
 const PROFILES = Object.freeze(['player', 'coach', 'analyst']);
 
 function parseCliArgs(argv) {
-  const flags = { json: false, demo: false, trustNewKey: false, advanced: false, pseudonymized: false, help: false, profile: null };
+  const flags = { json: false, demo: false, trustNewKey: false, advanced: false, pseudonymized: false, verbose: false, track: false, help: false, profile: null };
   const positionals = [];
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
@@ -319,7 +321,7 @@ function parseCliArgs(argv) {
       continue;
     }
     if (token.startsWith('--') && token !== '--') {
-      throw cliFail(`Flag desconocido: "${token}". Flags admitidos: --json, --demo, --trust-new-key, --advanced, --pseudonymized, --profile <player|coach|analyst>.`, 'UNKNOWN_FLAG');
+      throw cliFail(`Flag desconocido: "${token}". Flags admitidos: --json, --demo, --trust-new-key, --advanced, --pseudonymized, --verbose, --track, --profile <player|coach|analyst>.`, 'UNKNOWN_FLAG');
     }
     positionals.push(token);
   }
@@ -416,6 +418,8 @@ if (!command || command === '--help' || command === '-h') {
   console.log(`  node cli.js aim <partida_o_texto> "<Nombre#TAG>"   ➔ Rutina Kovaaks 15 min (solo con evidencia)`);
   console.log(`  node cli.js plan list|show|intent|close|cancel|compare|export  ➔ Seguimiento local del plan`);
   console.log(`  --profile <player|coach|analyst>   ➔ Presentación por audiencia (misma evidencia); --pseudonymized en "plan export"`);
+  console.log(`  --verbose                          ➔ Detalles completos (límites, faltantes, procedencia, planId) también en player`);
+  console.log(`  --track                            ➔ Registra seguimiento aunque no haya acción correctiva (nunca en demo)`);
   console.log(`  --demo: simulación explícita; NO habilita acción, rutina ni medición (política de honestidad).`);
   console.log(`\nOTROS ANÁLISIS (misma entrada):`);
   console.log(`  duo <partida> "<p1>" "<p2>" · duels <partida> [jugador] · weapons <partida> [jugador]`);
@@ -428,7 +432,7 @@ if (!command || command === '--help' || command === '-h') {
   console.log(`\nSALIDA ESTRUCTURADA: --json en los comandos analíticos.`);
   console.log(`CONTRATO --json: stdout contiene EXACTAMENTE un JSON parseable (incluso en error); los avisos humanos van a stderr.`);
   console.log(`ERRORES EN JSON: { ok:false, exitCode, error:{ code, message, details } }.`);
-  console.log(`FLAGS: --json, --demo, --trust-new-key, --advanced son independientes del orden y nunca se interpretan como posicionales.`);
+  console.log(`FLAGS: --json, --demo, --trust-new-key, --advanced, --verbose, --track son independientes del orden y nunca se interpretan como posicionales.`);
   console.log(`CÓDIGOS DE SALIDA: 0 = resultado descriptivo válido (incluye n/d y "omitido" como respuesta contractual);`);
   console.log(`                   1 = entrada, objetivo o comando inválido; 2 = evidencia insuficiente para el resultado principal (plan, guardian, drift).`);
   console.log(`PRESUPUESTOS: tamaño de archivo, longitud de texto, profundidad JSON, jugadores/rondas/eventos/arreglos, tiempo y workers.`);
@@ -584,7 +588,7 @@ try {
     }
     const matchData = resolveMatchData(input, args[2]);
     const effectivePlayer = resolveEffectivePlayer(matchData, args[2]);
-    const { plan, tracking } = planFlow.createPlanWithTracking(matchData, effectivePlayer, { originPath: input });
+    const { plan, tracking } = planFlow.createPlanWithTracking(matchData, effectivePlayer, { originPath: input, track: flags.track === true });
     const metaPlan = (matchData && matchData.data && matchData.data.metadata) || {};
     const payload = Object.assign({}, plan, {
       profile,
@@ -656,7 +660,39 @@ try {
       humanPlan();
       console.log(`PREGUNTAS SUGERIDAS (coach): ${COACH_QUESTIONS.map(q => `\n   - ${q}`).join('')}\n`);
     };
-    emitProfile(jsonOut, profile, payload, humanPlan, humanCoach);
+    // Vista compacta para jugador (por defecto): sin IDs técnicos, digest,
+    // procedencia interna, listado de faltantes ni pasos de seguimiento
+    // automáticos (solo si hay acción o --track explícito).
+    const humanPlayer = () => {
+      const p = plan.presentation || {};
+      const r = p.resumen || {};
+      printBanner();
+      console.log(`🧭 PLAN · ${plan.player}`);
+      console.log(`\n1. RESUMEN DE ESTA PARTIDA`);
+      const linea = [r.resultado, r.mapa, r.modo].filter(Boolean).join(' · ');
+      if (linea) console.log(`   • ${linea}`);
+      if (r.agente) console.log(`   • Agente: ${r.agente}`);
+      if (r.metricas && r.metricas.length > 0) {
+        console.log(plan.es_simulacion ? `   • Métricas del demo (NO observadas): ${r.metricas.join(' · ')}` : `   • ${r.metricas.join(' · ')}`);
+      } else {
+        console.log('   • (sin métricas observadas en esta entrada)');
+      }
+      console.log(`\n2. RESULTADO DE ESTA MEDICIÓN`);
+      console.log(`   ${p.titular || plan.estado}`);
+      if (plan.accion) {
+        console.log(`   • ${plan.accion.que}`);
+        console.log(`     Métrica observada: ${plan.accion.metrica} (umbral ${plan.accion.umbral})`);
+      }
+      if (plan.rutina) console.log(`   • Rutina: ${plan.rutina.escenario} (${plan.rutina.duracion})`);
+      console.log(`\n3. SIGUIENTE PASO`);
+      console.log(`   • ${p.siguiente || plan.siguiente_dato.dato}`);
+      console.log(`\n${p.alcance || 'Datos locales no verificados; describe esta partida, no demuestra mejora.'}`);
+      if (tracking.ok) {
+        console.log(`Seguimiento local (opcional): "plan intent ${tracking.planId}" · "plan compare ${tracking.planId} <nueva_entrada>"`);
+      }
+      console.log(`========================================================================\n`);
+    };
+    emitProfile(jsonOut, profile, payload, flags.verbose === true ? humanPlan : humanPlayer, humanCoach);
     if (plan.estado !== 'ACCION_DISPONIBLE') throw new CliExit(EXIT.INSUFFICIENT);
     return;
 

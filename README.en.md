@@ -4,10 +4,10 @@
 
 ### Local Competitive Telemetry · 360° Descriptive Diagnostics · Adaptive Aim Engine
 
-[![Version](https://img.shields.io/badge/version-4.12.0_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
+[![Version](https://img.shields.io/badge/version-4.13.0_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
 [![Runtime](https://img.shields.io/badge/runtime-Node.js_18%2B_Native-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-0_npm_(Core)-38BDF8.svg?style=for-the-badge&logo=codeforces&logoColor=white)](package.json)
-[![Tests](https://img.shields.io/badge/tests-211%2F211_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
+[![Tests](https://img.shields.io/badge/tests-220%2F220_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
 [![Audit](https://img.shields.io/badge/audit-15%2F15_properties_PASS-8B5CF6.svg?style=for-the-badge&logo=codereview&logoColor=white)](opencode_tester.js)
 [![License](https://img.shields.io/badge/license-MIT-6B7280.svg?style=for-the-badge)](LICENSE)
 
@@ -202,7 +202,7 @@ node cli.js plan export --pseudonymized                # explicit stdout export 
 
 **Honest comparison:** requires the exact same player, an observed metric and compatible provenance. States: `MEDICION_COMPARABLE`, `DATOS_INSUFICIENTES`, `NO_COMPARABLE`, `SIMULACION_DEMO`; with `--json`, a single object. The result is a **descriptive delta** with an explicit limitation: a variation across two matches does not prove routine effect, improvement, MMR, rank or talent.
 
-**Output profiles (same evidence, different presentation):** `--profile player` (brief), `--profile coach` (evidence, limits and suggested questions) and `--profile analyst` (structured JSON). They do not change the evidence policy.
+**Output profiles (same evidence, different presentation):** `--profile player` (default: match summary, measurement result under one of four labels —action available, no corrective action, insufficient data or demo simulation— and a single next step; no technical jargon or `planId`), `--profile coach` (evidence, limits and suggested questions) and `--profile analyst` (structured JSON with traceability). `--verbose` shows full detail in player and `--track` records tracking even without a corrective action (never in demo). They do not change the evidence policy.
 
 ## 🧱 Resource budgets and schema contract
 
@@ -273,7 +273,7 @@ If you use **Google Gemini (Gems)** or **OpenAI (Custom GPTs)**, [`standalone_pr
 - **No network by default:** analysis is local. No browser cache harvesting and no Tracker.gg queries. Input is a JSON/export, scoreboard text or a `.txt` manually saved from Tracker (manual text origin: no sign-in, no scraping, no automatic integration); screenshot OCR is not implemented.
 - **Zero NPM Dependencies:** Built strictly on native Node.js core libraries (`fs`, `path`, `zlib`, `crypto`, `child_process`). Zero external downloads.
 - **Cross-Platform Compatibility:** Tested in CI on Windows, macOS and Linux (Node 18/20/22/24); no result guarantee.
-- **Deterministic Reliability:** 211 automated tests plus modular suites passing with Exit Code 0 (`node run_all_tests.js`) and a semantic fail-closed property audit, with no promotional score (`node opencode_tester.js`).
+- **Deterministic Reliability:** 220 automated tests plus modular suites passing with Exit Code 0 (`node run_all_tests.js`) and a semantic fail-closed property audit, with no promotional score (`node opencode_tester.js`).
 - **CLI Contract:** human and `--json` output; documented exit codes `0`/`1`/`2` (valid result / invalid input / insufficient evidence); no command silently picks a player.
 
 ---

@@ -3028,12 +3028,13 @@ check('--json: válido, inválido, insuficiente y sin salida estructurada son JS
 check('plan: evidencia mecánica suficiente => 1 observación, 1 acción y 1 rutina (exit 0)',
   () => {
     const out = cliOk(['plan', sampleFile, 'aspas#0001']);
-    assert.ok(/PLAN PARA LA SIGUIENTE PARTIDA/.test(out), 'debe mostrar el plan');
-    assert.ok(/ACCION_DISPONIBLE/.test(out), 'estado con acción');
-    assert.ok(/1\. LO OBSERVADO/.test(out) && /3\. ACCIÓN PRIORIZADA/.test(out) && /4\. RUTINA ASOCIADA/.test(out), 'secciones 1/3/4');
-    assert.ok(/Métrica: \w+ \| Umbral: [\d.]+ \| Procedencia: normalized_input/.test(out), 'acción con métrica, umbral y procedencia');
-    assert.ok(/Limitación:/.test(out), 'acción con limitación');
-    assert.ok(/5\. QUÉ APORTAR DESPUÉS/.test(out), 'siguiente dato');
+    assert.ok(/🧭 PLAN · aspas#0001/.test(out), 'debe mostrar el plan compacto');
+    assert.ok(/ACCIÓN DISPONIBLE/.test(out), 'titular con acción');
+    assert.ok(/1\. RESUMEN DE ESTA PARTIDA/.test(out) && /2\. RESULTADO DE ESTA MEDICIÓN/.test(out) && /3\. SIGUIENTE PASO/.test(out), 'orden de secciones');
+    assert.ok(/Métrica observada: \w+ \(umbral [\d.]+\)/.test(out), 'acción con métrica y umbral');
+    assert.ok(/Rutina: .+ \(.+\)/.test(out), 'una rutina asociada');
+    assert.ok(/Datos locales no verificados/.test(out), 'alcance de una línea');
+    assert.ok(!/Faltantes:|planId|digest|normalized_input/.test(out), 'sin jerga técnica en la vista jugador');
   });
 
 check('plan: datos parciales => sin recomendación y faltantes explícitos (exit 2)',
@@ -3046,10 +3047,10 @@ check('plan: datos parciales => sin recomendación y faltantes explícitos (exit
       try { cliOk(['plan', tmp, 'Focus#NA1']); }
       catch (e) { code = e.status; out = String(e.stdout || ''); }
       assert.strictEqual(code, 2, 'evidencia insuficiente => 2');
-      assert.ok(/RECOLECCION_REQUERIDA/.test(out), 'estado de recolección');
-      assert.ok(/sin acción: ninguna métrica observada cruza un umbral/.test(out), 'sin recomendación');
-      assert.ok(/Faltantes:/.test(out), 'faltantes explícitos');
-      assert.ok(/5\. QUÉ APORTAR DESPUÉS/.test(out), 'dato siguiente');
+      assert.ok(/DATOS INSUFICIENTES PARA UNA ACCIÓN/.test(out), 'titular de datos insuficientes');
+      assert.ok(/falta una métrica base \(HS%, KAST% o FK\/FD\)/.test(out), 'explica qué falta sin recomendar de más');
+      assert.ok(!/Faltantes:/.test(out), 'sin listado técnico de faltantes en la vista jugador');
+      assert.ok(/3\. SIGUIENTE PASO/.test(out), 'siguiente paso único');
     } finally {
       fs.unlinkSync(tmp);
     }
@@ -3095,10 +3096,11 @@ check('plan: evidencia insuficiente => código 2 y JSON válido con límites y d
       catch (e) { code = e.status; out = String(e.stdout || ''); }
       assert.strictEqual(code, 2, 'insuficiente => 2');
       const plan = JSON.parse(out);
-      assert.strictEqual(plan.estado, 'RECOLECCION_REQUERIDA');
+      assert.strictEqual(plan.estado, 'DATOS_INSUFICIENTES');
       assert.strictEqual(plan.accion, null);
       assert.strictEqual(plan.rutina, null);
       assert.strictEqual(plan.provenance, 'normalized_input');
+      assert.strictEqual(plan.presentation.titular, 'DATOS INSUFICIENTES PARA UNA ACCIÓN');
       assert.ok(plan.no_se_puede_saber.limites.length > 0, 'límites declarados');
       assert.ok(typeof plan.siguiente_dato.dato === 'string' && plan.siguiente_dato.dato.length > 0, 'dato requerido');
     } finally {
@@ -3154,8 +3156,9 @@ check('plan --demo: simulación explícita, sin etiquetas normalized_input ni re
     let human = '';
     try { human = cliOk(['plan', url, 'kirtmy#000', '--demo']); }
     catch (e) { human = String(e.stdout || ''); }
-    assert.ok(/SIMULACION_DEMO/.test(human) && /LO QUE EL DEMO SIMULA/.test(human), 'salida humana explícita');
-    assert.ok(/no habilitada en modo demo/.test(human), 'acción/rutina no habilitadas en demo');
+    assert.ok(/SIMULACIÓN DEMO/.test(human) && /Métricas del demo \(NO observadas\)/.test(human), 'salida humana explícita del demo');
+    assert.ok(/el demo no habilita acción, rutina ni seguimiento/.test(human), 'acción/rutina/seguimiento no habilitados en demo');
+    assert.ok(!/planId|digest|normalized_input/.test(human), 'sin jerga técnica en la vista jugador del demo');
   });
 
 check('plan: FK/FD agregado sin contexto temporal no habilita tradeo/aperturas (recolección)',
@@ -3179,7 +3182,7 @@ check('plan: FK/FD agregado sin contexto temporal no habilita tradeo/aperturas (
       catch (e) { code = e.status; out = String(e.stdout || ''); }
       assert.strictEqual(code, 2, 'sin contexto temporal => recolección (2)');
       const plan = JSON.parse(out);
-      assert.strictEqual(plan.estado, 'RECOLECCION_REQUERIDA');
+      assert.strictEqual(plan.estado, 'SIN_ACCION_CORRECTIVA');
       assert.strictEqual(plan.accion, null, 'FK/FD agregado no habilita acción de aperturas');
       assert.strictEqual(plan.rutina, null, 'sin rutina de tradeo');
       const advice = JSON.stringify({ accion: plan.accion, rutina: plan.rutina });
@@ -3727,7 +3730,7 @@ check('plan store: crear y recuperar conserva procedencia, límites y referencia
   () => {
     withPlansDir(() => {
       let out = '';
-      try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json']); }
+      try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json', '--track']); }
       catch (e) { out = String(e.stdout || ''); }
       const created = JSON.parse(out);
       assert.ok(created.planId, 'planId asignado');
@@ -3742,7 +3745,7 @@ check('plan store: crear y recuperar conserva procedencia, límites y referencia
       assert.ok(shown.plan.limitation, 'limitación registrada');
       assert.ok(shown.plan.nextData, 'siguiente dato registrado');
       // determinista: crear el mismo plan otra vez devuelve el mismo id
-      const again = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json']));
+      const again = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json', '--track']));
       assert.strictEqual(again.planId, created.planId, 'planId determinista');
     });
   });
@@ -3750,7 +3753,7 @@ check('plan store: crear y recuperar conserva procedencia, límites y referencia
 check('plan store: sin selección silenciosa de plan (id requerido y prefijo ambiguo)',
   () => {
     withPlansDir((dir) => {
-      const created = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json']));
+      const created = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json', '--track']));
       for (const sub of [['plan', 'show'], ['plan', 'compare'], ['plan', 'intent']]) {
         let code = 0;
         let out = '';
@@ -3779,7 +3782,7 @@ check('plan store: sin selección silenciosa de plan (id requerido y prefijo amb
 check('plan compare: un jugador distinto o ausente no se compara (NO_COMPARABLE, exit 2)',
   () => {
     withPlansDir(() => {
-      const created = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json']));
+      const created = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json', '--track']));
       const tmp = path.join(os.tmpdir(), `only-tenz-${process.pid}.txt`);
       fs.writeFileSync(tmp, 'TenZ#0001\tIso\tGold 2\t21\t14\t5\t245\t162\t26%\n', 'utf8');
       try {
@@ -3801,7 +3804,7 @@ check('plan compare: un jugador distinto o ausente no se compara (NO_COMPARABLE,
 check('plan compare: métricas ausentes, incompatibles y demo => estados honestos, nunca positivo',
   () => {
     withPlansDir(() => {
-      const created = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json']));
+      const created = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json', '--track']));
       const tmp = path.join(os.tmpdir(), `plan-min-${process.pid}.txt`);
       fs.writeFileSync(tmp, 'aspas#0001\t10\t8\t2\t150\t120\n', 'utf8');
       try {
@@ -3841,7 +3844,7 @@ check('plan compare: métricas ausentes, incompatibles y demo => estados honesto
 check('plan compare: medición válida muestra solo delta descriptivo + limitación',
   () => {
     withPlansDir(() => {
-      const created = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json']));
+      const created = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json', '--track']));
       const cmp = JSON.parse(cliOk(['plan', 'compare', created.planId, sampleFile, '--json']));
       assert.strictEqual(cmp.estado, 'MEDICION_COMPARABLE');
       assert.strictEqual(typeof cmp.delta, 'number');
@@ -3856,7 +3859,7 @@ check('plan compare: medición válida muestra solo delta descriptivo + limitaci
 check('plan store: corruptos/oversized/versión futura/symlink fallan cerrado sin destruir válidos',
   () => {
     withPlansDir((dir) => {
-      const created = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json']));
+      const created = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json', '--track']));
       fs.writeFileSync(path.join(dir, 'corrupt.json'), '{no-json', 'utf8');
       let code = 0;
       let out = '';
@@ -3905,7 +3908,7 @@ check('plan store: corruptos/oversized/versión futura/symlink fallan cerrado si
 check('plan perfiles: misma evidencia subyacente, sin elevar procedencia',
   () => {
     withPlansDir(() => {
-      const jsonOut = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json']));
+      const jsonOut = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json', '--track']));
       let analystOut = '';
       try { analystOut = cliOk(['plan', sampleFile, 'aspas#0001', '--profile', 'analyst']); }
       catch (e) { analystOut = String(e.stdout || ''); }
@@ -3924,7 +3927,7 @@ check('plan: --json puro en éxito, insuficiencia y error para los subcomandos',
   () => {
     withPlansDir(() => {
       const pure = out => { const t = String(out).trim(); if (!t.startsWith('{')) return false; try { JSON.parse(t); return true; } catch (e) { return false; } };
-      const createdRaw = cliOk(['plan', sampleFile, 'aspas#0001', '--json']);
+      const createdRaw = cliOk(['plan', sampleFile, 'aspas#0001', '--json', '--track']);
       assert.ok(pure(createdRaw), 'create JSON puro');
       const created = JSON.parse(createdRaw);
       assert.ok(pure(cliOk(['plan', 'list', '--json'])), 'list JSON puro');
@@ -3983,7 +3986,7 @@ check('plan store: perímetro de directorio y TOCTOU (0777/0770/symlink/sustituc
         process.env.VALORANT_PLANS_DIR = dir;
         try {
           let out = '';
-          try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json']); }
+          try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json', '--track']); }
           catch (e) { out = String(e.stdout || ''); }
           const created = JSON.parse(out);
           assert.strictEqual(created.tracking.ok, false, `modo ${mode.toString(8)} debe bloquear la persistencia`);
@@ -4003,7 +4006,7 @@ check('plan store: perímetro de directorio y TOCTOU (0777/0770/symlink/sustituc
         process.env.VALORANT_PLANS_DIR = link;
         try {
           let out = '';
-          try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json']); }
+          try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json', '--track']); }
           catch (e) { out = String(e.stdout || ''); }
           assert.strictEqual(JSON.parse(out).tracking.code, 'PLAN_UNSAFE_PATH', 'directorio symlink rechazado');
         } finally {
@@ -4035,7 +4038,7 @@ check('plan store: perímetro de directorio y TOCTOU (0777/0770/symlink/sustituc
     })();
     if (identityStable) {
       withPlansDir((dir) => {
-        const created = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json']));
+        const created = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json', '--track']));
         const file = path.join(dir, `${created.planId}.json`);
         const other = path.join(dir, 'other.json');
         fs.writeFileSync(other, fs.readFileSync(file));
@@ -4140,7 +4143,7 @@ check('plan store: evasión por symlink en padre/abuelo rechazada; ruta privada 
     const prev = process.env.VALORANT_PLANS_DIR;
     process.env.VALORANT_PLANS_DIR = path.join(base, 'a', 'b', 'plans');
     try {
-      const created = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json']));
+      const created = JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json', '--track']));
       assert.strictEqual(created.tracking.ok, true, 'ruta privada anidada se crea escalonada y persiste');
       assert.ok(fs.existsSync(path.join(base, 'a', 'b', 'plans', `${created.planId}.json`)));
     } finally {
@@ -4166,12 +4169,12 @@ check('plan store: evasión por symlink en padre/abuelo rechazada; ruta privada 
     try {
       process.env.VALORANT_PLANS_DIR = path.join(linkParent, 'plans');
       let out = '';
-      try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json']); } catch (e) { out = String(e.stdout || ''); }
+      try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json', '--track']); } catch (e) { out = String(e.stdout || ''); }
       assert.strictEqual(JSON.parse(out).tracking.code, 'PLAN_UNSAFE_PATH', 'symlink en el PADRE rechazado');
       assert.ok(!fs.existsSync(path.join(realParent, 'plans')), 'no se crea nada dentro del enlace padre');
       process.env.VALORANT_PLANS_DIR = path.join(linkGrand, 'gp', 'plans');
       out = '';
-      try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json']); } catch (e) { out = String(e.stdout || ''); }
+      try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json', '--track']); } catch (e) { out = String(e.stdout || ''); }
       assert.strictEqual(JSON.parse(out).tracking.code, 'PLAN_UNSAFE_PATH', 'symlink en el ABUELO rechazado');
       assert.ok(!fs.existsSync(path.join(realGrand, 'gp')), 'no se crea nada a través del enlace abuelo');
     } finally {
@@ -4189,7 +4192,7 @@ check('plan store: evasión por symlink en padre/abuelo rechazada; ruta privada 
       process.env.VALORANT_PLANS_DIR = p;
       try {
         let out = '';
-        try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json']); } catch (e) { out = String(e.stdout || ''); }
+        try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json', '--track']); } catch (e) { out = String(e.stdout || ''); }
         assert.strictEqual(JSON.parse(out).tracking.ok, true, '/tmp (symlink de sistema en macOS) se resuelve');
       } finally {
         process.env.VALORANT_PLANS_DIR = prevEnv2;
@@ -4217,7 +4220,7 @@ check('plan store: padres intermedios escribibles (0777/0770) rechazados; no se 
         fs.chmodSync(parent, mode);
         process.env.VALORANT_PLANS_DIR = path.join(parent, 'plans');
         let out = '';
-        try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json']); } catch (e) { out = String(e.stdout || ''); }
+        try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json', '--track']); } catch (e) { out = String(e.stdout || ''); }
         const created = JSON.parse(out);
         assert.strictEqual(created.tracking.ok, false, `padre ${mode.toString(8)}: persistencia bloqueada`);
         assert.strictEqual(created.tracking.code, 'PLAN_UNSAFE_PATH');
@@ -4232,7 +4235,7 @@ check('plan store: padres intermedios escribibles (0777/0770) rechazados; no se 
       fs.chmodSync(child, 0o700);
       process.env.VALORANT_PLANS_DIR = path.join(child, 'plans');
       let out = '';
-      try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json']); } catch (e) { out = String(e.stdout || ''); }
+      try { out = cliOk(['plan', sampleFile, 'aspas#0001', '--json', '--track']); } catch (e) { out = String(e.stdout || ''); }
       assert.strictEqual(JSON.parse(out).tracking.code, 'PLAN_UNSAFE_PATH', 'abuelo 0777 rechazado');
       assert.ok(!fs.existsSync(path.join(child, 'plans')), 'no se crea plans bajo abuelo controlable');
     } finally {
@@ -4495,6 +4498,150 @@ check('tracker text: fechas — ISO solo si es inequívoca; ambigüedad declarad
     const textualNoTime = parseWithDate('9 June 2026');
     assert.strictEqual(textualNoTime.timestamp, '2026-06-09', 'sin hora: ISO a precisión de fecha');
     assert.strictEqual(textualNoTime.dateAmbiguity, null);
+  });
+
+// ---- Bloque UX del comando plan (v4.13.0): vista jugador breve, estados claros y persistencia explícita ----
+
+// La vista jugador puede salir con código 2 (sin acción / insuficiente / demo):
+// se captura stdout sin exigir exit 0.
+const planOut = args => { try { return cliOk(args); } catch (e) { return String(e.stdout || ''); } };
+
+check('plan UX: métricas altas en texto Tracker => SIN ACCIÓN CORRECTIVA, resumen breve y sin rutina',
+  () => {
+    withPlansDir(() => {
+      const out = planOut(['plan', trackerFixture('tracker_text_victory.txt'), 'El Taco#5998']);
+      assert.ok(/SIN ACCIÓN CORRECTIVA/.test(out), 'titular de sin acción');
+      assert.ok(/1\. RESUMEN DE ESTA PARTIDA/.test(out), 'resumen primero');
+      assert.ok(/Equipo ganador: Team A · Ascent · Competitive/.test(out), 'resultado/mapa/modo');
+      assert.ok(/Agente: Iso/.test(out), 'agente visible');
+      assert.ok(/HS% 32%/.test(out) && /KAST% 88%/.test(out), 'métricas presentes');
+      assert.ok(!/Rutina:/.test(out), 'sin rutina sin acción');
+      assert.ok(!/planId|digest|normalized_input|Faltantes:/.test(out), 'sin jerga técnica');
+    });
+  });
+
+check('plan UX: métrica bajo umbral => ACCIÓN DISPONIBLE con una acción y una rutina',
+  () => {
+    withPlansDir(() => {
+      const out = planOut(['plan', sampleFile, 'aspas#0001']);
+      assert.ok(/ACCIÓN DISPONIBLE/.test(out), 'titular de acción');
+      assert.ok(/Métrica observada: hsPct \(umbral 25\)/.test(out), 'métrica y umbral documentados');
+      assert.ok(/Rutina: .+ \(.+\)/.test(out), 'una rutina');
+      assert.ok((out.match(/Rutina:/g) || []).length === 1, 'exactamente una rutina');
+      assert.ok(!/Rutina:\s*\(sin rutina/.test(out));
+    });
+  });
+
+check('plan UX: métricas insuficientes => DATOS INSUFICIENTES PARA UNA ACCIÓN, sin recomendación falsa',
+  () => {
+    const tmp = path.join(os.tmpdir(), `ux-insuf-${process.pid}.txt`);
+    fs.writeFileSync(tmp, 'Focus#NA1\t10\t8\t2\t150\t120\n', 'utf8');
+    try {
+      let code = 0;
+      let out = '';
+      try { cliOk(['plan', tmp, 'Focus#NA1']); } catch (e) { code = e.status; out = String(e.stdout || ''); }
+      assert.strictEqual(code, 2, 'insuficiente => 2');
+      assert.ok(/DATOS INSUFICIENTES PARA UNA ACCIÓN/.test(out), 'titular de insuficiencia');
+      assert.ok(/falta una métrica base \(HS%, KAST% o FK\/FD\)/.test(out), 'explica el faltante sin prescribir');
+      assert.ok(!/Rutina:|ACCIÓN DISPONIBLE|plan intent/.test(out), 'sin acción, rutina ni seguimiento');
+    } finally {
+      fs.unlinkSync(tmp);
+    }
+  });
+
+check('plan UX: demo => SIMULACIÓN DEMO, sin persistencia ni seguimiento',
+  () => {
+    withPlansDir((dir) => {
+      const url = 'https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04';
+      let out = '';
+      try { out = cliOk(['plan', url, 'kirtmy#000', '--demo', '--json']); } catch (e) { out = String(e.stdout || ''); }
+      const plan = JSON.parse(out);
+      assert.strictEqual(plan.estado, 'SIMULACION_DEMO');
+      assert.strictEqual(plan.presentation.titular, 'SIMULACIÓN DEMO');
+      assert.strictEqual(plan.accion, null);
+      assert.strictEqual(plan.rutina, null);
+      assert.strictEqual(plan.planId, null, 'el demo no persiste plan');
+      assert.strictEqual(plan.tracking.ok, false);
+      assert.strictEqual(plan.tracking.code, 'PLAN_DEMO_NOT_TRACKABLE');
+      const human = (() => { try { return cliOk(['plan', url, 'kirtmy#000', '--demo']); } catch (e) { return String(e.stdout || ''); } })();
+      assert.ok(/SIMULACIÓN DEMO/.test(human) && /Métricas del demo \(NO observadas\)/.test(human));
+      assert.ok(!/plan intent|planId/.test(human), 'sin seguimiento en la vista jugador');
+      assert.ok(!fs.readdirSync(dir).some(f => f.endsWith('.json')), 'nada persistido');
+    });
+  });
+
+check('plan UX: vista jugador sin planId/digest/procedencia interna/faltantes ni seguimiento automático',
+  () => {
+    withPlansDir(() => {
+      const out = planOut(['plan', trackerFixture('tracker_text_victory.txt'), 'El Taco#5998']);
+      assert.ok(!/planId/.test(out), 'sin planId');
+      assert.ok(!/sha256|digest|sourceDigest/.test(out), 'sin digest');
+      assert.ok(!/normalized_input|procedencia: /i.test(out), 'sin procedencia interna');
+      assert.ok(!/Faltantes:|LO QUE NO PUEDE SABERSE|ENTRADA MÍNIMA/.test(out), 'sin listado técnico');
+      assert.ok(!/plan intent|plan compare/.test(out), 'sin comandos de seguimiento automáticos');
+      assert.ok(/Datos locales no verificados; describe esta partida, no demuestra mejora\./.test(out), 'una línea de alcance');
+      const lines = out.split(/\r?\n/).filter(l => /^\s{3}•/.test(l)).length;
+      assert.ok(lines <= 8, `resumen breve (líneas con viñeta: ${lines})`);
+    });
+  });
+
+check('plan UX: --verbose, coach y analyst conservan los detalles',
+  () => {
+    withPlansDir(() => {
+      const verbose = planOut(['plan', trackerFixture('tracker_text_victory.txt'), 'El Taco#5998', '--verbose']);
+      assert.ok(/PLAN PARA LA SIGUIENTE PARTIDA/.test(verbose) && /LO QUE NO PUEDE SABERSE/.test(verbose), 'verbose detallado');
+      assert.ok(/Faltantes:/.test(verbose) && /tracker_text_export/.test(verbose), 'verbose con faltantes/formato');
+      const coach = (() => { try { return cliOk(['plan', trackerFixture('tracker_text_victory.txt'), 'El Taco#5998', '--profile', 'coach']); } catch (e) { return String(e.stdout || ''); } })();
+      assert.ok(/PREGUNTAS SUGERIDAS/.test(coach) && /LO OBSERVADO|RESUMEN/.test(coach), 'coach con evidencia y preguntas');
+      const analystOut = (() => { try { return cliOk(['plan', trackerFixture('tracker_text_victory.txt'), 'El Taco#5998', '--profile', 'analyst']); } catch (e) { return String(e.stdout || ''); } })();
+      const analyst = JSON.parse(analystOut);
+      assert.strictEqual(analyst.provenance, 'normalized_input');
+      assert.ok(Array.isArray(analyst.observado) && analyst.no_se_puede_saber.faltantes.length > 0, 'analyst con trazabilidad');
+      assert.ok(analyst.presentation && analyst.presentation.titular === 'SIN ACCIÓN CORRECTIVA', 'presentation añadida sin romper contrato');
+    });
+  });
+
+check('plan UX: tracker_text_export no pide eventos por ronda como paso inmediato sin explicar el formato',
+  () => {
+    withPlansDir(() => {
+      const out = planOut(['plan', trackerFixture('tracker_text_victory.txt'), 'El Taco#5998']);
+      assert.ok(/no contiene eventos por ronda/.test(out), 'explica la limitación del formato');
+      assert.ok(/3–5 partidas del mismo tipo/.test(out), 'alternativa realista: consistencia');
+      assert.ok(/export con eventos por ronda si algún día dispones de él/.test(out), 'alternativa condicionada, no orden');
+      assert.ok(!/^\s*•\s*Aporta eventos por ronda\.?\s*$/m.test(out), 'no ordena eventos por ronda como si el formato pudiera producirlos');
+    });
+    const generic = (() => { try { return cliOk(['plan', sampleFile, 'TenZ#0001']); } catch (e) { return String(e.stdout || ''); } })();
+    assert.ok(!/no contiene eventos por ronda/.test(generic), 'la nota de formato es específica de tracker_text_export');
+  });
+
+check('plan UX: tipografía RUTINA ASOCIADA sin "RUINA" en código ni salidas',
+  () => {
+    const scripts = fs.readdirSync(scriptsDir).filter(f => f.endsWith('.js'));
+    for (const f of scripts) {
+      const src = fs.readFileSync(path.join(scriptsDir, f), 'utf8');
+      assert.ok(!/RUINA/.test(src), `${f} no debe contener "RUINA"`);
+    }
+    const verbose = planOut(['plan', trackerFixture('tracker_text_victory.txt'), 'El Taco#5998', '--verbose']);
+    assert.ok(/4\. RUTINA ASOCIADA \(UNA\):/.test(verbose), 'sección "RUTINA ASOCIADA"');
+    assert.ok(!/RUINA/.test(verbose), 'sin el typo en la salida');
+  });
+
+check('plan UX: a lo sumo una acción, una rutina y un siguiente paso; sin claims prohibidos',
+  () => {
+    withPlansDir(() => {
+      const payloads = [];
+      try { payloads.push(JSON.parse(cliOk(['plan', sampleFile, 'aspas#0001', '--json']))); } catch (e) { payloads.push(JSON.parse(String(e.stdout || '{}'))); }
+      try { payloads.push(JSON.parse(cliOk(['plan', trackerFixture('tracker_text_victory.txt'), 'El Taco#5998', '--json']))); } catch (e) { payloads.push(JSON.parse(String(e.stdout || '{}'))); }
+      for (const p of payloads) {
+        assert.ok(p.accion === null || !Array.isArray(p.accion), 'acción única, nunca lista');
+        assert.ok(p.rutina === null || !Array.isArray(p.rutina), 'rutina única, nunca lista');
+        assert.strictEqual(typeof p.presentation.siguiente, 'string');
+        assert.ok(p.presentation.siguiente.split(/\n/).length === 1, 'una sola recomendación de siguiente paso');
+        const claimScope = JSON.stringify({ a: p.accion, r: p.rutina, s: p.presentation.siguiente });
+        assert.ok(!/has mejorado|vas a mejorar|demuestra que|MMR real|talento real es|rango merecido es|garantiza (la|el|que)/i.test(claimScope), 'sin claims prohibidos');
+        assert.ok(/no demuestra mejora/.test(p.presentation.alcance), 'alcance explícito');
+      }
+    });
   });
 
 // GATE DE TRAZABILIDAD DEL MANIFIESTO: el badge y el conteo del README deben
