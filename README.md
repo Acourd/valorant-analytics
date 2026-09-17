@@ -39,11 +39,11 @@
 
 ## ◈ El Problema con los Rastreadores Convencionales
 
-La mayoría de rastreadores web públicos solo suman cifras acumuladas al final de la partida: bajas totales, muertes y un porcentaje genérico de tiros a la cabeza. **Describen el marcador, pero son ciegos ante el por qué se perdió la partida.**
+La mayoría de rastreadores web públicos solo suman cifras acumuladas al final de la partida: bajas totales, muertes y un porcentaje genérico de tiros a la cabeza. Este motor, con datos locales, trabaja sobre los mismos agregados: **sin eventos con contexto temporal y fuente verificada, ninguno de los dos atribuye causas tácticas; ambos se limitan a describir.**
 
 | Dimensión Analítica | Rastreadores Públicos | Motor Valorant Analytics | Qué aporta realmente (con límites) |
 | :--- | :---: | :---: | :--- |
-| **Bajas de Impacto Real** | 🔴 K/D plano sin contexto | 🟢 **ADR útil + Ratio $FK/FD$** | Distingue FK (bajas de apertura) y FD (muertes de apertura) observadas; sin contexto temporal no atribuye causa. |
+| **Bajas de Apertura (FK/FD)** | 🔴 K/D plano sin contexto | 🟡 **ADR observado + Ratio $FK/FD$ (agregados)** | Cuenta FK (bajas de apertura) y FD (muertes de apertura) observadas; con agregados no separa causas tácticas ni bajas clave. |
 | **Mecánica de Disparo** | 🔴 % Headshot global | 🟢 **Ratio $SE/TP$ (zonas observadas)** | Mide sobre-spray con zonas observadas; la distancia es n/d sin posiciones (no se infiere). |
 | **Sinergia en Pareja** | 🔴 Inexistente | 🟢 **Auditoría de Dúo (agregados)** | Describe balance de bajas y carga; NO mide ventanas de tradeo sin eventos con contexto temporal. |
 | **Economía de Rondas** | 🔴 Total gastado global | 🟢 **Conversión por Buy-Tiers (Eco/Semi/Full)** | Describe la conversión por buy-tier con umbrales observados; no atribuye causas ni proyecta mejora. |
@@ -80,7 +80,7 @@ No consulta Tracker.gg ni OP.GG, no lee caché/cookies/sesiones del navegador y 
 
 ## ◈ Tres Formas de Empezar
 
-Diseñado para adaptarse a cualquier flujo de trabajo sin fricciones:
+Tres caminos de entrada manual; elige el que menos fricción añada a los datos que ya tienes:
 
 ### 🔹 Opción 1: Modo Directo sin Terminal (Vía Asistente Web o Gem)
 > **Ideal si buscas un análisis conversacional inmediato desde un JSON/export o el texto de tu marcador (OCR de capturas: no implementado).**
@@ -144,7 +144,7 @@ Ejemplo ilustrativo (fixture local; no es telemetría real ni una salida validad
 📌 LÍMITES DE ESTE EJEMPLO: procedencia `normalized_input`; sin timestamps, posición ni marcas
    de trade, por lo que no se emiten reglas de timing, tradeo o posicionamiento.
 
-🎯 RUTINA BIOMECÁNICA PRESCRITA (15 MINUTOS EXACTOS):
+🎯 RUTINA SUGERIDA (solo si la evidencia observada cruza su umbral; ~15 min, orientativa):
   ┌───────────────────────────┬──────────┬──────────────────────┬─────────────────────────────────────┐
   │ Bloque de Entrenamiento   │ Duración │ Escenario KovaaK's   │ Objetivo Biomecánico                │
   ├───────────────────────────┼──────────┼──────────────────────┼─────────────────────────────────────┤
@@ -164,7 +164,7 @@ El despachador maestro `cli.js` provee acceso unificado a todas las capacidades 
 | Comando | Sintaxis | Descripción |
 | :--- | :--- | :--- |
 | **Diagnóstico 360°** | `node cli.js match [partida.json] <jugador>` | Describe los pilares con métricas observadas; las fugas atribuibles requieren fuente verificada. |
-| **Rutina de Puntería** | `node cli.js aim [partida.json] <jugador>` | Genera una playlist adaptativa de 15 minutos en KovaaK's / Aim Lab. |
+| **Rutina de Puntería** | `node cli.js aim [partida.json] <jugador>` | Propone, solo si existe evidencia observada, una playlist de aim orientativa (~15 min) en KovaaK's / Aim Lab. |
 | **Telemetría de Armas** | `node cli.js weapons [partida.json] <jugador>` | Mide zonas observadas (Head/Body/Leg) y ratio SE/TP; la distancia es n/d: no se infiere sin posiciones. |
 | **Economía & Buy Tiers**| `node cli.js economy [partida.json] <jugador>` | Desglosa winrate, K/D y ADR en rondas Pistol, Eco, Semi-Buy y Full-Buy. |
 | **Coaching Introspectivo**| `node cli.js coaching [partida.json] <jugador>` | Identifica duelos de máxima fricción y prescribe recursos tácticos de YouTube. |

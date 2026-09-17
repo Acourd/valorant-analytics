@@ -39,11 +39,11 @@
 
 ## ◈ The Problem with Conventional Trackers
 
-Most public web trackers only sum cumulative end-of-match stats: total kills, deaths, and a generic headshot percentage. **They describe the scoreboard, but they are blind to why the match was lost.**
+Most public web trackers only sum cumulative end-of-match stats: total kills, deaths, and a generic headshot percentage. This engine, with local data, works on the same aggregates: **without temporal-context events and a verified source, neither attributes tactical causes; both stay descriptive.**
 
 | Analytical Dimension | Public Trackers | Valorant Analytics Engine | What it actually provides (with limits) |
 | :--- | :---: | :---: | :--- |
-| **Real Impact Kills** | 🔴 Flat K/D without context | 🟢 **Effective ADR + $FK/FD$ Ratio** | Distinguishes observed opening kills (FK) and opening deaths (FD); without temporal context it attributes no cause. |
+| **Opening Kills/Deaths (FK/FD)** | 🔴 Flat K/D without context | 🟡 **Observed ADR + $FK/FD$ Ratio (aggregates)** | Counts observed FK (opening kills) and FD (opening deaths); with aggregates it separates no tactical causes or key kills. |
 | **Gunfight Mechanics** | 🔴 Global headshot % | 🟢 **$SE/TP$ Ratio (observed zones)** | Measures over-spray from observed zones; distance is n/d without positions (never inferred). |
 | **Duo Synergy** | 🔴 Non-existent | 🟢 **Duo Audit (aggregates)** | Describes kill/carry balance; it does NOT measure trade windows without temporal-context events. |
 | **Round Economy** | 🔴 Total money spent | 🟢 **Conversion across Buy Tiers (Eco/Semi/Full)** | Describes buy-tier conversion with observed thresholds; it attributes no causes and projects no improvement. |
@@ -80,7 +80,7 @@ It does not query Tracker.gg or OP.GG, does not read browser cache, cookies or s
 
 ## ◈ Three Ways to Start
 
-Engineered to fit any workflow with zero friction:
+Three manual-input paths; pick the one that adds the least friction to data you already have:
 
 ### 🔹 Option 1: Direct Mode without Terminal (Via Web AI or Gem)
 > **Ideal if you want an immediate conversational analysis from a JSON/export or pasted scoreboard text (screenshot OCR: not implemented).**
@@ -144,7 +144,7 @@ Illustrative example (local fixture; not real telemetry and not an empirically v
 📌 LIMITS OF THIS EXAMPLE: `normalized_input` provenance; no timestamps, position or trade marks,
    so no timing, trade or positioning rules are emitted.
 
-🎯 RUTINA BIOMECÁNICA PRESCRITA (15 MINUTOS EXACTOS):
+🎯 SUGGESTED ROUTINE (only if observed evidence crosses its threshold; ~15 min, indicative):
   ┌───────────────────────────┬──────────┬──────────────────────┬─────────────────────────────────────┐
   │ Bloque de Entrenamiento   │ Duración │ Escenario KovaaK's   │ Objetivo Biomecánico                │
   ├───────────────────────────┼──────────┼──────────────────────┼─────────────────────────────────────┤
@@ -164,7 +164,7 @@ The master dispatcher `cli.js` provides unified access to all platform engines:
 | Command | Syntax | Description |
 | :--- | :--- | :--- |
 | **360° Diagnostics** | `node cli.js match [match.json] <player>` | Describes pillars from observed metrics; attributable leaks require a verified source. |
-| **Aim Routine** | `node cli.js aim [match.json] <player>` | Synthesizes an adaptive 15-minute playlist in KovaaK's / Aim Lab. |
+| **Aim Routine** | `node cli.js aim [match.json] <player>` | Proposes, only with observed evidence, an indicative ~15-minute aim playlist in KovaaK's / Aim Lab. |
 | **Weapon Telemetry** | `node cli.js weapons [match.json] <player>` | Calculates observed hit zones (Head/Body/Leg) and SE/TP ratio; distance is n/d: never inferred without positions. |
 | **Economy & Buy Tiers**| `node cli.js economy [match.json] <player>` | Breaks down win rate, K/D, and ADR across Pistol, Eco, Semi-Buy, and Full-Buy rounds. |
 | **Introspective Coaching**| `node cli.js coaching [match.json] <player>` | Pinpoints high-friction duels and pairs errors with curated tactical YouTube drills. |
