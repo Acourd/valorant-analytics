@@ -90,9 +90,9 @@ function getProjectVersion() {
   return '4.5.0';
 }
 
-function resolveMatchData(source, playerHandle) {
+function resolveMatchData(source, playerHandle, options = {}) {
   const data = resolveMatchDataResilient(source, playerHandle, { allowSynthetic: DEMO_MODE });
-  printProvenance(source, data);
+  if (options.quietProvenance !== true) printProvenance(source, data);
   return data;
 }
 
@@ -586,7 +586,7 @@ try {
     if (!input) {
       throw cliFail('plan requiere entrada explícita (archivo/export, texto de marcador o match ID canónico): no se usa el fixture por defecto. Usa "plan list|show|compare" para el seguimiento.', 'INPUT_REQUIRED');
     }
-    const matchData = resolveMatchData(input, args[2]);
+    const matchData = resolveMatchData(input, args[2], { quietProvenance: profile === 'player' && flags.verbose !== true });
     const effectivePlayer = resolveEffectivePlayer(matchData, args[2]);
     const { plan, tracking } = planFlow.createPlanWithTracking(matchData, effectivePlayer, { originPath: input, track: flags.track === true });
     const metaPlan = (matchData && matchData.data && matchData.data.metadata) || {};
@@ -693,7 +693,9 @@ try {
       console.log(`========================================================================\n`);
     };
     emitProfile(jsonOut, profile, payload, flags.verbose === true ? humanPlan : humanPlayer, humanCoach);
-    if (plan.estado !== 'ACCION_DISPONIBLE') throw new CliExit(EXIT.INSUFFICIENT);
+    // Contrato de códigos: evidencia suficiente con o sin acción => 0 (resultado
+    // válido); datos insuficientes o demo => 2.
+    if (plan.estado === 'DATOS_INSUFICIENTES' || plan.estado === 'SIMULACION_DEMO') throw new CliExit(EXIT.INSUFFICIENT);
     return;
 
   } else if (command === 'match' || command === 'diagnostic') {

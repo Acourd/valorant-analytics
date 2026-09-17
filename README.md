@@ -7,7 +7,7 @@
 [![Versión](https://img.shields.io/badge/versión-4.13.0_Sovereign-FF4655.svg?style=for-the-badge&logo=valorant&logoColor=white)](https://playvalorant.com/)
 [![Runtime](https://img.shields.io/badge/runtime-Node.js_18%2B_Nativo-339933.svg?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Dependencias](https://img.shields.io/badge/dependencias-0_npm_(Core)-38BDF8.svg?style=for-the-badge&logo=codeforces&logoColor=white)](package.json)
-[![Pruebas](https://img.shields.io/badge/tests-220%2F220_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
+[![Pruebas](https://img.shields.io/badge/tests-222%2F222_PASS-10B981.svg?style=for-the-badge&logo=checkmarx&logoColor=white)](test_suite.js)
 [![Auditoría](https://img.shields.io/badge/auditoría-15%2F15_propiedades_PASS-8B5CF6.svg?style=for-the-badge&logo=codereview&logoColor=white)](opencode_tester.js)
 [![Licencia](https://img.shields.io/badge/licencia-MIT-6B7280.svg?style=for-the-badge)](LICENSE)
 
@@ -273,7 +273,7 @@ Si utilizas **Google Gemini (Gems)** o **OpenAI (Custom GPTs)**, el archivo [`st
 - **Sin red por defecto:** el análisis es local. No se cosecha la caché del navegador ni se consulta Tracker.gg. La entrada es un JSON/export, texto de marcador o un `.txt` guardado manualmente desde Tracker (origen manual de texto: sin sesión, sin scraping y sin integración automática); el OCR de capturas no está implementado.
 - **Zero Dependencias NPM:** Diseñado exclusivamente sobre las librerías estándar de Node.js (`fs`, `path`, `zlib`, `crypto`, `child_process`). Cero descargas externas.
 - **Compatibilidad Multiplataforma:** Probado en CI sobre Windows, macOS y Linux (Node 18/20/22/24); sin garantía de resultados.
-- **Garantía Determinista:** 220 pruebas automatizadas y suites modulares verificadas con Exit Code 0 (`node run_all_tests.js`) y auditoría semántica de propiedades fail-closed, sin puntuación promocional (`node opencode_tester.js`).
+- **Garantía Determinista:** 222 pruebas automatizadas y suites modulares verificadas con Exit Code 0 (`node run_all_tests.js`) y auditoría semántica de propiedades fail-closed, sin puntuación promocional (`node opencode_tester.js`).
 - **Contrato CLI:** salida humana y `--json`; códigos `0`/`1`/`2` documentados (resultado válido / entrada inválida / evidencia insuficiente); ningún comando selecciona un jugador en silencio.
 
 ---

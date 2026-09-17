@@ -3178,9 +3178,9 @@ check('plan: FK/FD agregado sin contexto temporal no habilita tradeo/aperturas (
     try {
       let code = 0;
       let out = '';
-      try { cliOk(['plan', tmp, 'F#1', '--json']); }
+      try { out = cliOk(['plan', tmp, 'F#1', '--json']); }
       catch (e) { code = e.status; out = String(e.stdout || ''); }
-      assert.strictEqual(code, 2, 'sin contexto temporal => recolección (2)');
+      assert.strictEqual(code, 0, 'evidencia suficiente sin acción => resultado válido (0)');
       const plan = JSON.parse(out);
       assert.strictEqual(plan.estado, 'SIN_ACCION_CORRECTIVA');
       assert.strictEqual(plan.accion, null, 'FK/FD agregado no habilita acción de aperturas');
@@ -4641,6 +4641,48 @@ check('plan UX: a lo sumo una acción, una rutina y un siguiente paso; sin claim
         assert.ok(!/has mejorado|vas a mejorar|demuestra que|MMR real|talento real es|rango merecido es|garantiza (la|el|que)/i.test(claimScope), 'sin claims prohibidos');
         assert.ok(/no demuestra mejora/.test(p.presentation.alcance), 'alcance explícito');
       }
+    });
+  });
+
+check('plan UX: contrato de códigos por estado — acción y sin acción 0; insuficiente y demo 2',
+  () => {
+    withPlansDir(() => {
+      const run = args => { try { return { code: 0, out: cliOk(args) }; } catch (e) { return { code: e.status, out: String(e.stdout || '') }; } };
+      const action = run(['plan', sampleFile, 'aspas#0001', '--json']);
+      assert.strictEqual(action.code, 0, 'ACCIÓN DISPONIBLE => 0');
+      assert.strictEqual(JSON.parse(action.out).estado, 'ACCION_DISPONIBLE');
+      const sinAccion = run(['plan', trackerFixture('tracker_text_victory.txt'), 'El Taco#5998', '--json']);
+      assert.strictEqual(sinAccion.code, 0, 'SIN ACCIÓN CORRECTIVA => 0 (evidencia suficiente y resultado válido)');
+      assert.strictEqual(JSON.parse(sinAccion.out).estado, 'SIN_ACCION_CORRECTIVA');
+      const tmp = path.join(os.tmpdir(), `ux-code-${process.pid}.txt`);
+      fs.writeFileSync(tmp, 'Focus#NA1\t10\t8\t2\t150\t120\n', 'utf8');
+      try {
+        const insuf = run(['plan', tmp, 'Focus#NA1', '--json']);
+        assert.strictEqual(insuf.code, 2, 'DATOS INSUFICIENTES => 2');
+        assert.strictEqual(JSON.parse(insuf.out).estado, 'DATOS_INSUFICIENTES');
+      } finally {
+        fs.unlinkSync(tmp);
+      }
+      const demo = run(['plan', 'https://tracker.gg/valorant/match/c886e66a-0927-43e6-8e2c-d3e9dc2e4d04', 'kirtmy#000', '--demo', '--json']);
+      assert.strictEqual(demo.code, 2, 'SIMULACIÓN DEMO => 2');
+      assert.strictEqual(JSON.parse(demo.out).estado, 'SIMULACION_DEMO');
+    });
+  });
+
+check('plan UX: el banner de fuente se oculta en player normal y se conserva en técnico/JSON',
+  () => {
+    withPlansDir(() => {
+      const player = (() => { try { return cliOk(['plan', trackerFixture('tracker_text_victory.txt'), 'El Taco#5998']); } catch (e) { return String(e.stdout || '') + String(e.stderr || ''); } })();
+      assert.ok(!/\[FUENTE:/.test(player), 'sin banner de fuente en player normal');
+      assert.ok(/SIN ACCIÓN CORRECTIVA/.test(player), 'la vista sigue completa');
+      const verbose = (() => { try { return cliOk(['plan', trackerFixture('tracker_text_victory.txt'), 'El Taco#5998', '--verbose']); } catch (e) { return String(e.stdout || '') + String(e.stderr || ''); } })();
+      assert.ok(/\[FUENTE:/.test(verbose), 'verbose conserva el banner');
+      const coach = (() => { try { return cliOk(['plan', trackerFixture('tracker_text_victory.txt'), 'El Taco#5998', '--profile', 'coach']); } catch (e) { return String(e.stdout || '') + String(e.stderr || ''); } })();
+      assert.ok(/\[FUENTE:/.test(coach), 'coach conserva el banner');
+      const analyst = (() => { try { return cliOk(['plan', trackerFixture('tracker_text_victory.txt'), 'El Taco#5998', '--profile', 'analyst']); } catch (e) { return String(e.stdout || ''); } })();
+      assert.strictEqual(JSON.parse(analyst).provenance, 'normalized_input', 'analyst JSON intacto');
+      const jsonPlayer = (() => { try { return cliOk(['plan', trackerFixture('tracker_text_victory.txt'), 'El Taco#5998', '--json']); } catch (e) { return String(e.stdout || ''); } })();
+      assert.strictEqual(JSON.parse(jsonPlayer).provenance, 'normalized_input', 'JSON player intacto');
     });
   });
 
